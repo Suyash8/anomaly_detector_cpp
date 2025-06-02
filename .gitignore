@@ -18,6 +18,11 @@ anomaly_detector
 .vscode/
 .idea/
 
+# Log files
+data/*.log
+data/*.log.*
+data/*.log*
+
 # Alert output files (if you don't want to track them)
 alerts_log.json
 alerts_output.json 

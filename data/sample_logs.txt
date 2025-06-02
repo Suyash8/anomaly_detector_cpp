@@ -1,0 +1,20 @@
+192.168.0.1|-|01/Jan/2023:12:00:01 +0000|0.120|0.100|GET /index.html HTTP/1.1|200|1024|https://example.com|Mozilla/5.0 (X11; Linux x86_64)|example.com|US|127.0.0.1:80|abc123|0.020
+192.168.0.1|-|01/Jan/2023:12:00:02 +0000|0.100|0.080|GET /styles.css HTTP/1.1|200|512|-|Mozilla/5.0 (X11; Linux x86_64)|example.com|US|127.0.0.1:80|abc124|0.010
+192.168.0.2|-|01/Jan/2023:12:01:00 +0000|0.050|0.030|GET /api/data HTTP/1.1|200|256|-|CustomClient/1.0|api.example.com|CA|10.0.0.5:8080|def456|0.005
+192.168.0.2|-|01/Jan/2023:12:01:00 +0000|0.050|0.030|GET /api/data HTTP/1.1|200|256|-|CustomClient/1.0|api.example.com|CA|10.0.0.5:8080|def457|0.005
+192.168.0.2|-|01/Jan/2023:12:01:00 +0000|0.051|0.030|GET /api/data HTTP/1.1|200|256|-|CustomClient/1.0|api.example.com|CA|10.0.0.5:8080|def458|0.005
+192.168.0.2|-|01/Jan/2023:12:01:00 +0000|0.049|0.031|GET /api/data HTTP/1.1|200|256|-|CustomClient/1.0|api.example.com|CA|10.0.0.5:8080|def459|0.005
+192.168.0.3|-|01/Jan/2023:12:02:00 +0000|0.200|0.150|POST /login HTTP/1.1|401|100|https://example.com/login|Mozilla/5.0|example.com|US|127.0.0.1:80|ghi789|0.030
+192.168.0.3|-|01/Jan/2023:12:02:01 +0000|0.210|0.160|POST /login HTTP/1.1|401|100|https://example.com/login|Mozilla/5.0|example.com|US|127.0.0.1:80|ghi790|0.032
+192.168.0.3|-|01/Jan/2023:12:02:02 +0000|0.190|0.140|POST /login HTTP/1.1|401|100|https://example.com/login|Mozilla/5.0|example.com|US|127.0.0.1:80|ghi791|0.029
+192.168.0.4|-|01/Jan/2023:12:03:00 +0000|0.010|0.005|GET /assets/image1.jpg HTTP/1.1|200|2048|-|ScraperBot/2.0|static.example.com|DE|10.0.0.6:80|jkl012|0.002
+192.168.0.4|-|01/Jan/2023:12:03:00 +0000|0.012|0.006|GET /assets/image2.jpg HTTP/1.1|200|4096|-|ScraperBot/2.0|static.example.com|DE|10.0.0.6:80|jkl013|0.002
+192.168.0.4|-|01/Jan/2023:12:03:01 +0000|0.009|0.004|GET /assets/image3.jpg HTTP/1.1|200|1024|-|ScraperBot/2.0|static.example.com|DE|10.0.0.6:80|jkl014|0.001
+192.168.0.5|-|01/Jan/2023:12:04:00 +0000|0.030|0.010|GET /hidden_api HTTP/1.1|200|64|-|-|example.com|FR|10.0.0.7:8000|mno345|0.003
+192.168.0.6|-|01/Jan/2023:12:05:00 +0000|0.050|0.040|GET /page1 HTTP/1.1|200|1000|-|GenericBrowser|example.com|US|127.0.0.1:80|pqr678|0.010
+192.168.0.6|-|01/Jan/2023:12:05:01 +0000|0.060|0.050|GET /page2 HTTP/1.1|200|1200|-|GenericBrowser|example.com|US|127.0.0.1:80|pqr679|0.012
+192.168.0.6|-|01/Jan/2023:12:05:02 +0000|0.055|0.045|GET /page3 HTTP/1.1|200|1100|-|GenericBrowser|example.com|US|127.0.0.1:80|pqr670|0.011
+192.168.0.6|-|01/Jan/2023:12:05:03 +0000|5.500|5.450|GET /very_large_file.zip HTTP/1.1|200|10485760|-|GenericBrowser|example.com|US|127.0.0.1:80|pqr680|0.020
+192.168.0.6|-|01/Jan/2023:12:05:04 +0000|0.052|0.042|GET /page4 HTTP/1.1|500|500|-|GenericBrowser|example.com|US|127.0.0.1:80|pqr681|0.010
+1.2.3.4|this is a malformed log line with not enough fields
+1.2.3.4|-|01/Jan/2023:12:06:00 +0000|0.100|0.080|GET /allowlisted HTTP/1.1|200|1000|-|GoodBot|example.com|US|127.0.0.1:80|stu901|0.010

@@ -1,0 +1,7 @@
+# Sample Allowlist (IPs)
+# Lines starting with # are comments and are ignored.
+# Empty lines are also ignored.
+1.2.3.4
+10.0.0.5
+# Add any other IPs that should always be considered safe.
+# User Agents are not currently processed by this simple allowlist loader.
