@@ -1,0 +1,24 @@
+# Compiled Object files
+obj/
+*.o
+*.slo
+*.lo
+
+# Compiled Executables
+bin/
+anomaly_detector
+# anomaly_detector.exe # If on Windows
+
+# Build files (if any specific to your IDE/environment)
+*.swp
+*~
+# .DS_Store # macOS specific
+
+# Personal editor/IDE configuration
+.vscode/
+.idea/
+
+# Alert output files (if you don't want to track them)
+alerts_log.json
+alerts_output.json 
+# Add any other generated output files you don't want in git
