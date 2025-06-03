@@ -2,6 +2,7 @@
 #define LOG_ENTRY_HPP
 
 #include <cstdint>
+#include <optional>
 #include <string>
 struct LogEntry {
   std::string raw_log_line;
@@ -10,18 +11,18 @@ struct LogEntry {
   // Most essential data
   std::string ip_address;
   std::string timestamp_str;
-  uint64_t parsed_timestamp_ms;
+  std::optional<uint64_t> parsed_timestamp_ms;
 
   std::string request_method;
   std::string request_path;
   std::string request_protocol;
 
-  int http_status_code;
+  std::optional<int> http_status_code;
 
-  double request_time;
-  double upstream_response_time;
+  std::optional<double> request_time_s;
+  std::optional<double> upstream_response_time_s;
 
-  uint64_t bytes_sent;
+  std::optional<uint64_t> bytes_sent;
 
   std::string remote_user;
   std::string referer;
@@ -33,15 +34,18 @@ struct LogEntry {
   std::string accept_encoding;
 
   // A simple flag to indicate if parsing was successful
-  bool successfully_parsed;
+  // bool successfully_parsed;
+
+  bool successfully_parsed_structure; // Indicates if field count was okay and
+                                      // basic string assignments happened
 
   // Default constructor
   LogEntry();
 
   // Static function to create LogEntry from raw string
-  static LogEntry parse_from_string(const std::string &log_line,
-                                    uint64_t line_num,
-                                    bool verbose_warnings = true);
+  static std::optional<LogEntry>
+  parse_from_string(const std::string &log_line, uint64_t line_num,
+                    bool verbose_warnings = true);
 
 private:
   // Helper function to parse "request" field (into request_method,
