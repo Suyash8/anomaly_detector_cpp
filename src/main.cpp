@@ -1,30 +1,72 @@
+#include "config.hpp"
 #include "log_entry.hpp"
 #include "utils.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <ios>
 #include <iostream>
+#include <istream>
 #include <optional>
 #include <string>
 
-int main() {
+int main(int argc, char *argv[]) {
   std::ios_base::sync_with_stdio(false); // Potentially faster I/O
   std::cin.tie(nullptr);                 // Untie cin from cout
 
   std::cout << "Starting Anomaly Detection Engine..." << std::endl;
 
-  // Trying to read the sample log file
-  std::string log_filepath = "data/sample_logs.txt";
-  std::ifstream log_file(log_filepath);
-
-  if (!log_file.is_open()) {
-    std::cerr << "Error: Could not open log file: " << log_filepath
-              << std::endl;
-    return 1;
+  std::string config_file_to_load = "config.ini";
+  if (argc > 1) {
+    config_file_to_load = argv[1];
+    std::cout << "Using command-line specified config file: "
+              << config_file_to_load << std::endl;
   }
 
-  std::cout << "Successfully opened log file: " << log_filepath << std::endl;
+  // Load configuration
+  if (!Config::load_configuration(config_file_to_load)) {
+    // load_configuration already prints a warning.
+    // The program continues with default values in GlobalAppConfig.
+  }
+
+  const Config::AppConfig &current_config = Config::get_app_config();
+
+  // Now use the configuration values
+  std::cout << "--- Current Configuration ---" << std::endl;
+  std::cout << "Log Input Path: " << current_config.log_input_path << std::endl;
+  std::cout << "Allowlist Path: " << current_config.allowlist_path << std::endl;
+  std::cout << "Tier 1 Enabled: "
+            << (current_config.tier1_enabled ? "Yes" : "No") << std::endl;
+  std::cout << "Tier 1 Max Requests/IP: "
+            << current_config.tier1_max_requests_per_ip_in_window << std::endl;
+  std::cout << "Tier 1 Window (s): "
+            << current_config.tier1_window_duration_seconds << std::endl;
+  std::cout << "-----------------------------" << std::endl;
+
+  std::istream *p_log_stream = nullptr;
+  std::ifstream log_file_stream;
+
+  if (current_config.log_input_path == "stdin") {
+    p_log_stream = &std::cin;
+    std::cout << "Reading logs from stdin. Type logs and press Enter. Ctrl+D "
+                 "(Linux/macOS) or Ctrl+Z then enter (Windows) to end."
+              << std::endl;
+  } else {
+    log_file_stream.open(current_config.log_input_path);
+
+    if (!log_file_stream.is_open()) {
+      std::cerr << "Error: Could not open log file: "
+                << current_config.log_input_path << std::endl;
+      return 1;
+    }
+
+    p_log_stream = &log_file_stream;
+    std::cout << "Successfully opened log file: "
+              << current_config.log_input_path << std::endl;
+  }
+
+  std::istream &log_input = *p_log_stream;
 
   std::string current_line;
   uint64_t line_counter = 0;
@@ -33,7 +75,7 @@ int main() {
 
   auto time_start = std::chrono::high_resolution_clock::now();
 
-  while (std::getline(log_file, current_line)) {
+  while (std::getline(log_input, current_line)) {
     line_counter++;
 
     std::optional<LogEntry> entry_opt =
@@ -75,9 +117,16 @@ int main() {
                   << (current_line.size() > 100 ? "..." : "") << std::endl;
       }
     }
+    // Progress update for file processing
+    if (current_config.log_input_path != "stdin" &&
+        line_counter % 200000 == 0) { // Print every 200k lines for files
+      std::cout << "Progress: Read " << line_counter << " lines..."
+                << std::endl;
+    }
   }
 
-  log_file.close();
+  if (log_file_stream.is_open())
+    log_file_stream.close();
 
   auto time_end = std::chrono::high_resolution_clock::now();
   auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
