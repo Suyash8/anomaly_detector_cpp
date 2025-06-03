@@ -1,5 +1,6 @@
 #include "config.hpp"
 #include "log_entry.hpp"
+#include "sliding_window.hpp"
 #include "utils.hpp"
 
 #include <chrono>
@@ -10,6 +11,67 @@
 #include <istream>
 #include <optional>
 #include <string>
+
+void test_sliding_window_functionality() {
+  std::cout << "\n---Testing Sliding Window---" << std::endl;
+
+  // Create a window that holds events for 3 seconds, type int for value
+  SlidingWindow<int> test_window(3000); // 3000 ms = 3 seconds
+
+  uint64_t base_time = Utils::get_current_time_ms();
+
+  test_window.add_event(base_time, 10);
+  test_window.add_event(base_time + 1000, 20);
+
+  std::cout << "Window count after 2 adds: " << test_window.get_event_count()
+            << std::endl; // Expected: 2
+
+  // Simulate time passing
+  uint64_t time_after_2_seconds = base_time + 2000;
+  test_window.prune_old_events(
+      time_after_2_seconds); // Prune based on this new "current" time
+  std::cout << "Window count at T0+2s (no prune expected): "
+            << test_window.get_event_count() << std::endl; // Expected: 2
+
+  uint64_t time_after_3_5_seconds = base_time + 3500;
+  test_window.add_event(time_after_3_5_seconds,
+                        30); // Add new event, triggers prune
+  // After this add, the event at 'base_time' (value 10) should be older than 3
+  // seconds relative to 'time_after_3_5_seconds' and should be pruned.
+  std::cout << "Window count at T0+3.5s (event 10 pruned): "
+            << test_window.get_event_count()
+            << std::endl; // Expected: 2 (20 and 30 remain)
+
+  auto values = test_window.get_all_values_in_window();
+  std::cout << "Values in window: ";
+  for (int val : values) {
+    std::cout << val << " "; // Expected: 20 30
+  }
+  std::cout << std::endl;
+
+  // Test size limit
+  SlidingWindow<std::string> size_limited_window(
+      10000, 2); // 10s duration, max 2 elements
+  size_limited_window.add_event(base_time, "A");
+  size_limited_window.add_event(base_time + 100, "B");
+  std::cout << "Size-limited count (2 adds, max 2): "
+            << size_limited_window.get_event_count()
+            << std::endl; // Expected: 2
+  size_limited_window.add_event(base_time + 200,
+                                "C"); // "A" should be pushed out
+  std::cout << "Size-limited count (3rd add, max 2): "
+            << size_limited_window.get_event_count()
+            << std::endl; // Expected: 2
+
+  auto string_values = size_limited_window.get_all_values_in_window();
+  std::cout << "Values in size-limited window: ";
+  for (const auto &s_val : string_values) {
+    std::cout << "'" << s_val << "' "; // Expected: 'B' 'C'
+  }
+  std::cout << std::endl;
+
+  std::cout << "--- SlidingWindow Test Complete ---" << std::endl;
+}
 
 int main(int argc, char *argv[]) {
   std::ios_base::sync_with_stdio(false); // Potentially faster I/O
@@ -43,6 +105,8 @@ int main(int argc, char *argv[]) {
   std::cout << "Tier 1 Window (s): "
             << current_config.tier1_window_duration_seconds << std::endl;
   std::cout << "-----------------------------" << std::endl;
+
+  test_sliding_window_functionality();
 
   std::istream *p_log_stream = nullptr;
   std::ifstream log_file_stream;
@@ -144,5 +208,4 @@ int main(int argc, char *argv[]) {
               << " lines/sec" << std::endl;
 
   std::cout << "Anomaly Detection Engine finished" << std::endl;
-  return 0;
 }

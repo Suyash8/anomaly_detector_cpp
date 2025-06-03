@@ -40,7 +40,7 @@ public:
       // time-based pruning happens yet, which is fine.
 
       while (!window_data.empty() &&
-             window_data.front().first() < cutoff_timestamp)
+             window_data.front().first < cutoff_timestamp)
         window_data.pop_front();
     }
 
