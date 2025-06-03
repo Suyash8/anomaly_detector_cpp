@@ -1,3 +1,4 @@
+#include "alert_manager.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
 #include "sliding_window.hpp"
@@ -73,6 +74,29 @@ void test_sliding_window_functionality() {
   std::cout << "--- SlidingWindow Test Complete ---" << std::endl;
 }
 
+void print_entry_details(const LogEntry &entry) {
+  std::cout << "Parsed (Line " << entry.original_line_number
+            << "): " << "IP=" << entry.ip_address;
+  if (entry.parsed_timestamp_ms)
+    std::cout << ", Timestamp=" << *entry.parsed_timestamp_ms;
+  else
+    std::cout << ", Timestamp=N/A";
+
+  if (entry.http_status_code)
+    std::cout << ", Status=" << *entry.http_status_code;
+  else
+    std::cout << ", Status=N/A";
+
+  std::cout << ", Path=" << entry.request_path;
+
+  if (entry.bytes_sent)
+    std::cout << ", Bytes=" << *entry.bytes_sent;
+  else
+    std::cout << ", Bytes=N/A";
+
+  std::cout << std::endl;
+}
+
 int main(int argc, char *argv[]) {
   std::ios_base::sync_with_stdio(false); // Potentially faster I/O
   std::cin.tie(nullptr);                 // Untie cin from cout
@@ -80,13 +104,8 @@ int main(int argc, char *argv[]) {
   std::cout << "Starting Anomaly Detection Engine..." << std::endl;
 
   std::string config_file_to_load = "config.ini";
-  if (argc > 1) {
+  if (argc > 1)
     config_file_to_load = argv[1];
-    std::cout << "Using command-line specified config file: "
-              << config_file_to_load << std::endl;
-  }
-
-  // Load configuration
   if (!Config::load_configuration(config_file_to_load)) {
     // load_configuration already prints a warning.
     // The program continues with default values in GlobalAppConfig.
@@ -107,6 +126,9 @@ int main(int argc, char *argv[]) {
   std::cout << "-----------------------------" << std::endl;
 
   test_sliding_window_functionality();
+
+  AlertManager alert_manager_instance;
+  alert_manager_instance.initialize(current_config);
 
   std::istream *p_log_stream = nullptr;
   std::ifstream log_file_stream;
@@ -150,28 +172,9 @@ int main(int argc, char *argv[]) {
       const LogEntry &entry = *entry_opt; // Dereference to get the LogEntry
 
       // Print some details for the first few successfully parsed entries
-      if (successfully_parsed_count <= 10) {
-        std::cout << "Parsed (Line " << entry.original_line_number
-                  << "): " << "IP=" << entry.ip_address;
-        if (entry.parsed_timestamp_ms)
-          std::cout << ", Timestamp=" << *entry.parsed_timestamp_ms;
-        else
-          std::cout << ", Timestamp=N/A";
+      // if (successfully_parsed_count <= 10)
+      //   print_entry_details(entry);
 
-        if (entry.http_status_code)
-          std::cout << ", Status=" << *entry.http_status_code;
-        else
-          std::cout << ", Status=N/A";
-
-        std::cout << ", Path=" << entry.request_path;
-
-        if (entry.bytes_sent)
-          std::cout << ", Bytes=" << *entry.bytes_sent;
-        else
-          std::cout << ", Bytes=N/A";
-
-        std::cout << std::endl;
-      }
     } else {
       skipped_line_count++;
       if (skipped_line_count <= 10 || skipped_line_count % 1000 == 0) {
@@ -191,6 +194,8 @@ int main(int argc, char *argv[]) {
 
   if (log_file_stream.is_open())
     log_file_stream.close();
+
+  alert_manager_instance.flush_all_alerts();
 
   auto time_end = std::chrono::high_resolution_clock::now();
   auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
