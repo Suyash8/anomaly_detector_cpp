@@ -4,7 +4,6 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <vector>
 
 int main() {
   std::cout << "Starting Anomaly Detection Engine..." << std::endl;
@@ -12,7 +11,7 @@ int main() {
   uint64_t start = Utils::get_current_time_ms();
 
   // Trying to read the sample log file
-  std::string log_filepath = "data/fake.log";
+  std::string log_filepath = "data/sample_logs.txt";
   std::ifstream log_file(log_filepath);
 
   if (!log_file.is_open()) {
