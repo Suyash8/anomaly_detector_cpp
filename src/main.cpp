@@ -1,6 +1,7 @@
 #include "alert_manager.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
+#include "rule_engine.hpp"
 #include "sliding_window.hpp"
 #include "utils.hpp"
 
@@ -125,11 +126,15 @@ int main(int argc, char *argv[]) {
             << current_config.tier1_window_duration_seconds << std::endl;
   std::cout << "-----------------------------" << std::endl;
 
-  test_sliding_window_functionality();
-
+  // --- Initialize Core Components ---
   AlertManager alert_manager_instance;
   alert_manager_instance.initialize(current_config);
 
+  RuleEngine rule_engine_instance(alert_manager_instance, current_config);
+
+  test_sliding_window_functionality();
+
+  // --- Log Processing ---
   std::istream *p_log_stream = nullptr;
   std::ifstream log_file_stream;
 
@@ -169,11 +174,14 @@ int main(int argc, char *argv[]) {
 
     if (entry_opt) {
       successfully_parsed_count++;
-      const LogEntry &entry = *entry_opt; // Dereference to get the LogEntry
+      const LogEntry &current_log_entry =
+          *entry_opt; // Dereference to get the LogEntry
 
       // Print some details for the first few successfully parsed entries
       // if (successfully_parsed_count <= 10)
-      //   print_entry_details(entry);
+      //   print_entry_details(current_log_entry);
+
+      rule_engine_instance.process_log_entry(current_log_entry);
 
     } else {
       skipped_line_count++;
