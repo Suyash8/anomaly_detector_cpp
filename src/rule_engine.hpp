@@ -6,31 +6,29 @@
 #include "log_entry.hpp"
 #include "sliding_window.hpp"
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 
 struct PerIpState {
-  // Sliding window to track request timestamps for this IP
-  // The ValueType of SlidingWindow will be uint64_t (the timestamp itself, or a
-  // dummy value)
   SlidingWindow<uint64_t> request_timestamps_window;
-
-  // Could add more state here later, e.g., failed login window, etc.
-  // SlidingWindow<uint64_t> failed_login_window;
+  SlidingWindow<uint64_t> failed_login_timestamps_window;
 
   uint64_t last_seen_timestamp_ms; // To help with pruning inactive IPs later
 
   // Constructor for PerIpState
-  PerIpState(uint64_t current_timestamp_ms, uint64_t window_duration_ms_config)
-      : request_timestamps_window(
-            window_duration_ms_config,
-            0), // Configure with duration, no max elements for now
+  PerIpState(uint64_t current_timestamp_ms, uint64_t window_duration_ms_config,
+             uint64_t login_window_duration_ms)
+      : request_timestamps_window(window_duration_ms_config, 0),
+        failed_login_timestamps_window(login_window_duration_ms, 0),
         last_seen_timestamp_ms(current_timestamp_ms) {}
 
   // Default constructor needed for unordered_map if not using emplace with all
   // args
-  PerIpState() : request_timestamps_window(0, 0), last_seen_timestamp_ms(0) {}
+  PerIpState()
+      : request_timestamps_window(0, 0), failed_login_timestamps_window(0, 0),
+        last_seen_timestamp_ms(0) {}
 };
 
 class RuleEngine {
@@ -66,7 +64,7 @@ private:
 
   // Tier 1 specific rule checks
   void check_requests_per_ip_rule(const LogEntry &entry, PerIpState &ip_state);
-  // void check_failed_logins_rule(const LogEntry& entry, PerIpState& ip_state);
+  void check_failed_logins_rule(const LogEntry &entry, PerIpState &ip_state);
 };
 
 #endif // RULE_ENGINE_HPP
