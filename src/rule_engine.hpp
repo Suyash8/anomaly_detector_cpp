@@ -12,7 +12,7 @@ class RuleEngine {
 public:
   RuleEngine(AlertManager &manager, const Config::AppConfig &cfg);
   ~RuleEngine();
-  void process_log_entry(const AnalyzedEvent &event);
+  void evaluate_rules(const AnalyzedEvent &event);
   bool load_ip_allowlist(const std::string &filepath);
 
 private:
