@@ -1,9 +1,10 @@
 #include "alert_manager.hpp"
+#include "analysis_engine.hpp"
+#include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
 #include "rule_engine.hpp"
-#include "sliding_window.hpp"
-#include "utils.hpp"
+// #include "sliding_window.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -13,67 +14,6 @@
 #include <istream>
 #include <optional>
 #include <string>
-
-void test_sliding_window_functionality() {
-  std::cout << "\n---Testing Sliding Window---" << std::endl;
-
-  // Create a window that holds events for 3 seconds, type int for value
-  SlidingWindow<int> test_window(3000); // 3000 ms = 3 seconds
-
-  uint64_t base_time = Utils::get_current_time_ms();
-
-  test_window.add_event(base_time, 10);
-  test_window.add_event(base_time + 1000, 20);
-
-  std::cout << "Window count after 2 adds: " << test_window.get_event_count()
-            << std::endl; // Expected: 2
-
-  // Simulate time passing
-  uint64_t time_after_2_seconds = base_time + 2000;
-  test_window.prune_old_events(
-      time_after_2_seconds); // Prune based on this new "current" time
-  std::cout << "Window count at T0+2s (no prune expected): "
-            << test_window.get_event_count() << std::endl; // Expected: 2
-
-  uint64_t time_after_3_5_seconds = base_time + 3500;
-  test_window.add_event(time_after_3_5_seconds,
-                        30); // Add new event, triggers prune
-  // After this add, the event at 'base_time' (value 10) should be older than 3
-  // seconds relative to 'time_after_3_5_seconds' and should be pruned.
-  std::cout << "Window count at T0+3.5s (event 10 pruned): "
-            << test_window.get_event_count()
-            << std::endl; // Expected: 2 (20 and 30 remain)
-
-  auto values = test_window.get_all_values_in_window();
-  std::cout << "Values in window: ";
-  for (int val : values) {
-    std::cout << val << " "; // Expected: 20 30
-  }
-  std::cout << std::endl;
-
-  // Test size limit
-  SlidingWindow<std::string> size_limited_window(
-      10000, 2); // 10s duration, max 2 elements
-  size_limited_window.add_event(base_time, "A");
-  size_limited_window.add_event(base_time + 100, "B");
-  std::cout << "Size-limited count (2 adds, max 2): "
-            << size_limited_window.get_event_count()
-            << std::endl; // Expected: 2
-  size_limited_window.add_event(base_time + 200,
-                                "C"); // "A" should be pushed out
-  std::cout << "Size-limited count (3rd add, max 2): "
-            << size_limited_window.get_event_count()
-            << std::endl; // Expected: 2
-
-  auto string_values = size_limited_window.get_all_values_in_window();
-  std::cout << "Values in size-limited window: ";
-  for (const auto &s_val : string_values) {
-    std::cout << "'" << s_val << "' "; // Expected: 'B' 'C'
-  }
-  std::cout << std::endl;
-
-  std::cout << "--- SlidingWindow Test Complete ---" << std::endl;
-}
 
 void print_entry_details(const LogEntry &entry) {
   std::cout << "Parsed (Line " << entry.original_line_number
@@ -107,32 +47,18 @@ int main(int argc, char *argv[]) {
   std::string config_file_to_load = "config.ini";
   if (argc > 1)
     config_file_to_load = argv[1];
-  if (!Config::load_configuration(config_file_to_load)) {
-    // load_configuration already prints a warning.
-    // The program continues with default values in GlobalAppConfig.
-  }
+  Config::load_configuration(config_file_to_load);
 
   const Config::AppConfig &current_config = Config::get_app_config();
-
-  // Now use the configuration values
-  std::cout << "--- Current Configuration ---" << std::endl;
-  std::cout << "Log Input Path: " << current_config.log_input_path << std::endl;
-  std::cout << "Allowlist Path: " << current_config.allowlist_path << std::endl;
-  std::cout << "Tier 1 Enabled: "
-            << (current_config.tier1_enabled ? "Yes" : "No") << std::endl;
-  std::cout << "Tier 1 Max Requests/IP: "
-            << current_config.tier1_max_requests_per_ip_in_window << std::endl;
-  std::cout << "Tier 1 Window (s): "
-            << current_config.tier1_window_duration_seconds << std::endl;
-  std::cout << "-----------------------------" << std::endl;
 
   // --- Initialize Core Components ---
   AlertManager alert_manager_instance;
   alert_manager_instance.initialize(current_config);
 
+  AnalysisEngine analysis_engine_instance(current_config);
   RuleEngine rule_engine_instance(alert_manager_instance, current_config);
 
-  test_sliding_window_functionality();
+  // test_sliding_window_functionality();
 
   // --- Log Processing ---
   std::istream *p_log_stream = nullptr;
@@ -177,11 +103,12 @@ int main(int argc, char *argv[]) {
       const LogEntry &current_log_entry =
           *entry_opt; // Dereference to get the LogEntry
 
-      // Print some details for the first few successfully parsed entries
-      // if (successfully_parsed_count <= 10)
-      //   print_entry_details(current_log_entry);
+      // Analyze Log entry
+      AnalyzedEvent analyzed_event =
+          analysis_engine_instance.process_and_analyze(current_log_entry);
 
-      rule_engine_instance.process_log_entry(current_log_entry);
+      // Evaluate rules based on the analyzed event
+      rule_engine_instance.evaluate_rules(analyzed_event);
 
     } else {
       skipped_line_count++;
@@ -195,8 +122,18 @@ int main(int argc, char *argv[]) {
     // Progress update for file processing
     if (current_config.log_input_path != "stdin" &&
         line_counter % 200000 == 0) { // Print every 200k lines for files
-      std::cout << "Progress: Read " << line_counter << " lines..."
-                << std::endl;
+      auto now = std::chrono::high_resolution_clock::now();
+      auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now - time_start)
+                            .count();
+
+      if (elapsed_ms > 0)
+        std::cout << "Progress: Read " << line_counter << " lines ("
+                  << (line_counter * 1000 / elapsed_ms) << " lines/sec)."
+                  << std::endl;
+      else
+        std::cout << "Progress: Read " << line_counter << " lines."
+                  << std::endl;
     }
   }
 
