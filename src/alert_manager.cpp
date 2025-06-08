@@ -30,7 +30,7 @@ std::string alert_tier_to_string_representation(AlertTier tier) {
 }
 
 AlertManager::AlertManager()
-    : output_alerts_to_file(false), output_alerts_to_stdout(true) {
+    : output_alerts_to_stdout(true), output_alerts_to_file(false) {
   std::cout << "AlertManager created" << std::endl;
 }
 

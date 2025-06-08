@@ -11,7 +11,7 @@ struct AppConfig {
 
   // Tier 1 related settings
   bool tier1_enabled = true;
-  int tier1_max_requests_per_ip_in_window = 100;
+  int tier1_max_requests_per_ip_in_window = 500;
   uint64_t tier1_window_duration_seconds = 60;
   int tier1_max_failed_logins_per_ip = 5;
 
