@@ -17,7 +17,7 @@ AnalysisEngine::get_or_create_ip_state(const std::string &ip,
   auto it = ip_activity_trackers.find(ip);
   if (it == ip_activity_trackers.end()) {
     uint64_t window_duration_ms =
-        app_config.tier1_window_duration_seconds * 1000;
+        app_config.tier1.sliding_window_duration_seconds * 1000;
 
     // Assuming failed login window uses the same duration for now
     auto [inserted_it, success] = ip_activity_trackers.emplace(
