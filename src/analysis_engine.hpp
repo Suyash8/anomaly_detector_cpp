@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 struct PerIpState {
   // Tier 1 Windows
@@ -17,6 +18,9 @@ struct PerIpState {
   // std::unordered_map<std::string, SlidingWindow<uint64_t>>
   // asset_path_access_window; //Will re add later
   uint64_t last_seen_timestamp_ms; // To help with pruning inactive IPs later
+
+  std::string last_known_user_agent;
+  std::unordered_set<std::string> historical_user_agents;
 
   // Tier 2 Historical Trackers
   StatsTracker request_time_tracker;
