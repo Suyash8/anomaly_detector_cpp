@@ -34,19 +34,14 @@ AnalysisEngine::get_or_create_ip_state(const std::string &ip,
 AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   AnalyzedEvent event(raw_log);
 
-  if (!raw_log.parsed_timestamp_ms) {
-    // std::cerr
-    //     << "AnalysisEngine: Cannot process log without parsed timestamp.
-    //     Line: "
-    //     << raw_log.original_line_number << std::endl;
-    return event; // Return event with only raw_log
-  }
-
+  if (!raw_log.parsed_timestamp_ms)
+    return event;
   uint64_t current_event_ts = *raw_log.parsed_timestamp_ms;
 
   PerIpState &current_ip_state =
       get_or_create_ip_state(raw_log.ip_address, current_event_ts);
 
+  // --- Tier 1 window updates ---
   // Update IP's request timestamp window
   current_ip_state.request_timestamps_window.add_event(current_event_ts,
                                                        current_event_ts);
@@ -64,8 +59,47 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.current_ip_failed_login_count_in_window =
       current_ip_state.failed_login_timestamps_window.get_event_count();
 
-  // Future: Add more analysis here (UA, GeoIP, historical stats, path stats,
-  // etc.) and populate more fields in 'event'.
+  // --- Tier 2 historical stats updates ---
+  if (raw_log.request_time_s)
+    current_ip_state.request_time_tracker.update(*raw_log.request_time_s);
+  if (raw_log.bytes_sent)
+    current_ip_state.bytes_sent_tracker.update(*raw_log.bytes_sent);
+
+  bool is_error =
+      (raw_log.http_status_code && *raw_log.http_status_code > 400 &&
+       *raw_log.http_status_code < 600);
+  current_ip_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
+
+  double current_requests_in_gen_window = static_cast<double>(
+      current_ip_state.request_timestamps_window.get_event_count());
+  current_ip_state.requests_in_window_count_tracker.update(
+      current_requests_in_gen_window);
+
+  // --- Populate AnalyzedEvent with raw historical stats ---
+  event.ip_hist_req_time_mean =
+      current_ip_state.request_time_tracker.get_mean();
+  event.ip_hist_req_time_stddev =
+      current_ip_state.request_time_tracker.get_stddev();
+  event.ip_hist_req_time_samples =
+      current_ip_state.request_time_tracker.get_count();
+
+  event.ip_hist_bytes_mean = current_ip_state.bytes_sent_tracker.get_mean();
+  event.ip_hist_bytes_stddev = current_ip_state.bytes_sent_tracker.get_stddev();
+  event.ip_hist_bytes_samples = current_ip_state.bytes_sent_tracker.get_count();
+
+  event.ip_hist_error_rate_mean =
+      current_ip_state.error_rate_tracker.get_mean();
+  event.ip_hist_error_rate_stddev =
+      current_ip_state.error_rate_tracker.get_stddev();
+  event.ip_hist_error_rate_samples =
+      current_ip_state.error_rate_tracker.get_count();
+
+  event.ip_hist_req_vol_mean =
+      current_ip_state.requests_in_window_count_tracker.get_mean();
+  event.ip_hist_req_vol_stddev =
+      current_ip_state.requests_in_window_count_tracker.get_stddev();
+  event.ip_hist_req_vol_samples =
+      current_ip_state.requests_in_window_count_tracker.get_count();
 
   return event;
 }
