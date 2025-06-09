@@ -101,5 +101,59 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.ip_hist_req_vol_samples =
       current_ip_state.requests_in_window_count_tracker.get_count();
 
+  // --- Z-Score calculation logic
+  const auto &tier2_cfg = app_config.tier2;
+  long min_samples = tier2_cfg.min_samples_for_z_score;
+
+  // Req Time Z-score
+  if (raw_log.request_time_s &&
+      current_ip_state.request_time_tracker.get_count() >= min_samples) {
+    double stddev = current_ip_state.request_time_tracker.get_stddev();
+    if (stddev > 1e-6) // Avoid division by zero
+      event.ip_req_time_zscore =
+          (*raw_log.request_time_s -
+           current_ip_state.request_time_tracker.get_mean()) /
+          stddev;
+  }
+
+  // Bytes Sent Z-score
+  if (raw_log.bytes_sent &&
+      current_ip_state.bytes_sent_tracker.get_count() >= min_samples) {
+    double stddev = current_ip_state.bytes_sent_tracker.get_stddev();
+    if (stddev > 1.0) // Require at least 1 byte of stddev to be meaningful
+      event.ip_bytes_sent_zscore =
+          (static_cast<double>(*raw_log.bytes_sent) -
+           current_ip_state.bytes_sent_tracker.get_mean()) /
+          stddev;
+  }
+
+  // Error Event Z-score
+  if (current_ip_state.error_rate_tracker.get_count() >= min_samples) {
+    double current_error_val =
+        (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
+                                                                       : 0.0;
+    double stddev = current_ip_state.error_rate_tracker.get_stddev();
+
+    if (stddev > 0.01) // Require some variability
+      event.ip_error_event_zscore =
+          (current_error_val - current_ip_state.error_rate_tracker.get_mean()) /
+          stddev;
+  }
+
+  // Request Volume Z-score
+  if (current_ip_state.requests_in_window_count_tracker.get_count() >=
+      min_samples) {
+    double current_req_vol = static_cast<double>(
+        current_ip_state.request_timestamps_window.get_event_count());
+    double stddev =
+        current_ip_state.requests_in_window_count_tracker.get_stddev();
+
+    if (stddev > 0.5) // Require some variabilitu
+      event.ip_req_vol_zscore =
+          (current_req_vol -
+           current_ip_state.requests_in_window_count_tracker.get_mean()) /
+          stddev;
+  }
+
   return event;
 }

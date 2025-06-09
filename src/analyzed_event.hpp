@@ -33,6 +33,11 @@ struct AnalyzedEvent {
   std::optional<double> ip_hist_req_vol_stddev;
   std::optional<uint64_t> ip_hist_req_vol_samples;
 
+  std::optional<double> ip_req_time_zscore;
+  std::optional<double> ip_bytes_sent_zscore;
+  std::optional<double> ip_error_event_zscore;
+  std::optional<double> ip_req_vol_zscore;
+
   // Default constructor
   AnalyzedEvent(const LogEntry &log) : raw_log(log) {}
 };
