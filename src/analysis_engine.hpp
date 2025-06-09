@@ -5,16 +5,24 @@
 #include "config.hpp"
 #include "log_entry.hpp"
 #include "sliding_window.hpp"
+#include "stats_tracker.hpp"
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 
 struct PerIpState {
+  // Tier 1 Windows
   SlidingWindow<uint64_t> request_timestamps_window;
   SlidingWindow<uint64_t> failed_login_timestamps_window;
   // std::unordered_map<std::string, SlidingWindow<uint64_t>>
   // asset_path_access_window; //Will re add later
   uint64_t last_seen_timestamp_ms; // To help with pruning inactive IPs later
+
+  // Tier 2 Historical Trackers
+  StatsTracker request_time_tracker;
+  StatsTracker bytes_sent_tracker;
+  StatsTracker error_rate_tracker;
+  StatsTracker requests_in_window_count_tracker;
 
   PerIpState(uint64_t current_timestamp_ms, uint64_t general_window_duration_ms,
              uint64_t login_window_duration_ms)

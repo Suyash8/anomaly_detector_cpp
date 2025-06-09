@@ -46,7 +46,7 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
   if (ip_allowlist_cache.count(raw_log.ip_address))
     return;
 
-  if (app_config.tier1_enabled) {
+  if (app_config.tier1.enabled) {
     check_requests_per_ip_rule(event);
     check_failed_logins_rule(event);
     // Placeholders for other Tier 1 rules that will use AnalyzedEvent
@@ -61,12 +61,12 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
 void RuleEngine::check_requests_per_ip_rule(const AnalyzedEvent &event) {
   if (event.current_ip_request_count_in_window &&
       *event.current_ip_request_count_in_window >
-          static_cast<size_t>(app_config.tier1_max_requests_per_ip_in_window)) {
+          static_cast<size_t>(app_config.tier1.max_requests_per_ip_in_window)) {
     std::string reason =
         "High request rate from IP. Count: " +
         std::to_string(*event.current_ip_request_count_in_window) +
         " in last " +
-        std::to_string(app_config.tier1_max_requests_per_ip_in_window) + "s.";
+        std::to_string(app_config.tier1.max_requests_per_ip_in_window) + "s.";
 
     Alert high_rate_alert(
         event.raw_log.parsed_timestamp_ms.value_or(
@@ -82,12 +82,12 @@ void RuleEngine::check_requests_per_ip_rule(const AnalyzedEvent &event) {
 void RuleEngine::check_failed_logins_rule(const AnalyzedEvent &event) {
   if (event.current_ip_failed_login_count_in_window &&
       *event.current_ip_failed_login_count_in_window >
-          static_cast<size_t>(app_config.tier1_max_failed_logins_per_ip)) {
+          static_cast<size_t>(app_config.tier1.max_failed_logins_per_ip)) {
     std::string reason =
         "Multiple failed login attempts from IP. Count: " +
         std::to_string(*event.current_ip_failed_login_count_in_window) +
         " (401/403s) in last " +
-        std::to_string(app_config.tier1_window_duration_seconds) + "s.";
+        std::to_string(app_config.tier1.sliding_window_duration_seconds) + "s.";
 
     // Include target path in reason/key if available and relevant for login
     // attempts

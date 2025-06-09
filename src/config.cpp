@@ -16,11 +16,8 @@ AppConfig GlobalAppConfig;
 bool string_to_bool(std::string &val_str_raw) {
   std::string val_str = Utils::trim_copy(val_str_raw);
   std::transform(val_str.begin(), val_str.end(), val_str.begin(), ::tolower);
-
-  if (val_str == "true" || val_str == "1" || val_str == "yes" ||
-      val_str == "on")
-    return true;
-  return false;
+  return (val_str == "true" || val_str == "1" || val_str == "yes" ||
+          val_str == "on");
 }
 
 bool load_configuration(std::string &config_filepath) {
@@ -31,12 +28,12 @@ bool load_configuration(std::string &config_filepath) {
   if (!config_file.is_open()) {
     std::cerr << "Warning: Could not open config file '" << config_filepath
               << "'. Using default configuration values." << std::endl;
-    // GlobalAppConfig is already initialized with defaults, so we can just
-    // return false.
     return false;
   }
 
   std::string line;
+  std::string current_section;
+
   int line_num = 0;
   while (std::getline(config_file, line)) {
     line_num++;
@@ -46,6 +43,13 @@ bool load_configuration(std::string &config_filepath) {
     if (trimmed_line.empty() || trimmed_line[0] == '#' ||
         trimmed_line[0] == ';')
       continue;
+
+    // Lines declaring a section [Tier1]
+    if (trimmed_line[0] == '[' && trimmed_line.back() == ']') {
+      current_section =
+          Utils::trim_copy(trimmed_line.substr(1, trimmed_line.length() - 2));
+      continue;
+    }
 
     // Find the position of the '=' delimiter
     size_t delimiter_pos = trimmed_line.find('=');
@@ -66,35 +70,46 @@ bool load_configuration(std::string &config_filepath) {
       continue;
     }
 
-    // std::cout << "Config: Key='" << key << "', Value='" << value << "'" <<
-    // std::endl;
-
     // Assign values to GlobalAppConfig based on the key
     // This part will grow as more config options are added.
     // Using if-else if. A map could be used for more complex scenarios.
 
     try {
-      if (key == "log_input_path")
-        GlobalAppConfig.log_input_path = value;
-      else if (key == "allowlist_path")
-        GlobalAppConfig.allowlist_path = value;
-      else if (key == "alerts_to_stdout")
-        GlobalAppConfig.alerts_to_stdout = string_to_bool(value);
-      else if (key == "tier1_enabled")
-        GlobalAppConfig.tier1_enabled = string_to_bool(value);
-      else if (key == "tier1_max_requests_per_ip_in_window")
-        GlobalAppConfig.tier1_max_requests_per_ip_in_window =
-            *Utils::string_to_number<int>(value);
-      else if (key == "tier1_window_duration_seconds")
-        GlobalAppConfig.tier1_window_duration_seconds =
-            *Utils::string_to_number<uint64_t>(value);
-      else if (key == "tier1_max_failed_logins_per_ip")
-        GlobalAppConfig.tier1_max_failed_logins_per_ip =
-            *Utils::string_to_number<int>(value);
-      // Add more else if blocks for other settings
-      else {
-        // std::cout << "Info (Config): Unknown configuration key '" << key <<
-        //     "'" << std::endl;
+      if (current_section.empty()) {
+
+        if (key == "log_input_path")
+          GlobalAppConfig.log_input_path = value;
+        else if (key == "allowlist_path")
+          GlobalAppConfig.allowlist_path = value;
+        else if (key == "alerts_to_stdout")
+          GlobalAppConfig.alerts_to_stdout = string_to_bool(value);
+        else if (key == "alerts_to_file")
+          GlobalAppConfig.alerts_to_file = string_to_bool(value);
+        else if (key == "alert_output_path")
+          GlobalAppConfig.alert_output_path = value;
+        else
+          GlobalAppConfig.custom_settings[key] = value;
+      } else if (current_section == "Tier1") {
+        if (key == "enabled")
+          GlobalAppConfig.tier1.enabled = string_to_bool(value);
+        else if (key == "sliding_window_duration_seconds")
+          GlobalAppConfig.tier1.sliding_window_duration_seconds =
+              *Utils::string_to_number<uint64_t>(value);
+        else if (key == "max_requests_per_ip_in_window")
+          GlobalAppConfig.tier1.max_requests_per_ip_in_window =
+              *Utils::string_to_number<int>(value);
+        else if (key == "max_failed_logins_per_ip")
+          GlobalAppConfig.tier1.max_failed_logins_per_ip =
+              *Utils::string_to_number<int>(value);
+      } else if (current_section == "Tier2") {
+        if (key == "enabled")
+          GlobalAppConfig.tier2.enabled = string_to_bool(value);
+        else if (key == "z_score_threshold")
+          GlobalAppConfig.tier2.z_score_threshold =
+              *Utils::string_to_number<double>(value);
+        else if (key == "min_samples_for_z_score")
+          GlobalAppConfig.tier2.min_samples_for_z_score =
+              *Utils::string_to_number<int>(value);
       }
     } catch (const std::invalid_argument &e) {
       std::cerr << "Warning (Config Line " << line_num

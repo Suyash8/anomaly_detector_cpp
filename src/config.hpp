@@ -3,19 +3,34 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
+
 namespace Config {
+
+struct Tier1Config {
+  bool enabled = true;
+  uint64_t sliding_window_duration_seconds = 60;
+  int max_requests_per_ip_in_window = 100;
+  int max_failed_logins_per_ip = 5;
+};
+
+struct Tier2Config {
+  bool enabled = true;
+  double z_score_threshold = 3.5;
+  int min_samples_for_z_score = 30;
+};
+
 struct AppConfig {
   std::string log_input_path = "data/sample_log.txt";
   std::string allowlist_path = "data/allowlist.txt";
   bool alerts_to_stdout = true;
+  bool alerts_to_file = false;
+  std::string alert_output_path = "alerts.json";
 
-  // Tier 1 related settings
-  bool tier1_enabled = true;
-  int tier1_max_requests_per_ip_in_window = 500;
-  uint64_t tier1_window_duration_seconds = 60;
-  int tier1_max_failed_logins_per_ip = 5;
+  Tier1Config tier1;
+  Tier2Config tier2;
 
-  // More settings to be added as needed
+  std::unordered_map<std::string, std::string> custom_settings;
 
   AppConfig() = default;
 };
