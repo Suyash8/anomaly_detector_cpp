@@ -21,9 +21,10 @@ private:
   std::unordered_set<std::string> ip_allowlist_cache;
 
 private:
-  // Tier 1 specific rule checks
   void check_requests_per_ip_rule(const AnalyzedEvent &event);
   void check_failed_logins_rule(const AnalyzedEvent &event);
+
+  void check_ip_zscore_rules(const AnalyzedEvent &event);
 
   // To be later refactored to AnalysisWngine
 

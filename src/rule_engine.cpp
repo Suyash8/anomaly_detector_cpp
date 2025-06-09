@@ -6,8 +6,10 @@
 #include "utils.hpp"
 
 #include <cstddef>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <sys/types.h>
 
@@ -55,7 +57,33 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
   }
 
   // Future: Apply Tier 2 rules using richer data in AnalyzedEvent
-  // if (app_config.tier2_enabled) { /* ... */ }
+  if (app_config.tier2.enabled) {
+    check_ip_zscore_rules(event);
+  }
+}
+
+void RuleEngine::check_ip_zscore_rules(const AnalyzedEvent &event) {
+  const double threshold = app_config.tier2.z_score_threshold;
+  auto check = [&](const std::optional<double> &zscore_opt,
+                   const std::string &metric_name) {
+    if (zscore_opt && std::abs(*zscore_opt) > threshold) {
+      std::string reason = "Anomalous IP " + metric_name +
+                           " (Z-score: " + std::to_string(*zscore_opt) + ")";
+
+      Alert z_score_alert(
+          event.raw_log.parsed_timestamp_ms.value_or(0),
+          event.raw_log.ip_address, reason, AlertTier::TIER2_STATISTICAL,
+          "Investigate IP for anomalous statistical behavior",
+          event.raw_log.ip_address, std::abs(*zscore_opt),
+          event.raw_log.original_line_number, event.raw_log.raw_log_line);
+      alert_mgr.record_alert(z_score_alert);
+    }
+  };
+
+  check(event.ip_req_time_zscore, "request time");
+  check(event.ip_bytes_sent_zscore, "bytes sent");
+  check(event.ip_error_event_zscore, "error rate");
+  check(event.ip_req_vol_zscore, "request volume");
 }
 
 void RuleEngine::check_requests_per_ip_rule(const AnalyzedEvent &event) {
