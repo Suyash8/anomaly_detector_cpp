@@ -12,6 +12,11 @@ struct Tier1Config {
   uint64_t sliding_window_duration_seconds = 60;
   int max_requests_per_ip_in_window = 100;
   int max_failed_logins_per_ip = 5;
+
+  bool check_user_agent_anomalies = true;
+  int min_chrome_version = 90;
+  int min_firefox_version = 85;
+  int max_unique_uas_per_ip_in_window = 3;
 };
 
 struct Tier2Config {

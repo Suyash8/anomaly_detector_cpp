@@ -38,6 +38,16 @@ struct AnalyzedEvent {
   std::optional<double> ip_error_event_zscore;
   std::optional<double> ip_req_vol_zscore;
 
+  // UA analysis flags
+  bool is_ua_missing = false;
+  bool is_ua_changed_for_ip = false;
+  bool is_ua_known_bad = false;
+  bool is_ua_outdated = false;
+  bool is_ua_headless = false;
+  bool is_ua_inconsistent = false;
+  bool is_ua_cycling = false;
+  std::string detected_browser_version;
+
   // Default constructor
   AnalyzedEvent(const LogEntry &log) : raw_log(log) {}
 };

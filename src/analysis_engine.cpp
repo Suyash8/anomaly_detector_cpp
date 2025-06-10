@@ -2,6 +2,8 @@
 #include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
+#include "ua_parser.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 
@@ -29,6 +31,77 @@ AnalysisEngine::get_or_create_ip_state(const std::string &ip,
     it->second.last_seen_timestamp_ms = current_timestamp_ms;
     return it->second;
   }
+}
+
+void perform_advanced_ua_analysis(const std::string &ua,
+                                  const Config::Tier1Config &cfg,
+                                  PerIpState &ip_state, AnalyzedEvent &event,
+                                  uint64_t ts) {
+  if (!cfg.check_user_agent_anomalies)
+    return;
+
+  // 1. Missing UA
+  if (ua.empty() || ua == "-") {
+    event.is_ua_missing = true;
+    return;
+  }
+
+  // 2. Headless/Known Bad Bot detection
+  if (ua.find("HeadlessChrome") != std::string::npos ||
+      ua.find("Puppeteer") != std::string::npos) {
+    event.is_ua_headless = true;
+  }
+  if (ua.find("sqlmap") != std::string::npos ||
+      ua.find("Nmap") != std::string::npos) {
+    event.is_ua_known_bad = true;
+  }
+
+  // 3. Version Check
+  if (auto ver = UAParser::get_major_version(ua, "Chrome/");
+      ver && *ver < cfg.min_chrome_version) {
+    event.is_ua_outdated = true;
+    event.detected_browser_version = "Chrome/" + std::to_string(*ver);
+  } else if (auto ver = UAParser::get_major_version(ua, "Firefox/");
+             ver && *ver < cfg.min_firefox_version) {
+    event.is_ua_outdated = true;
+    event.detected_browser_version = "Firefox/" + std::to_string(*ver);
+  }
+
+  // 4. Platform Inconsistency
+  bool has_desktop = ua.find("Windows") != std::string::npos ||
+                     ua.find("Macintosh") != std::string::npos ||
+                     ua.find("Linux") != std::string::npos;
+  bool has_mobile = ua.find("iPhone") != std::string::npos ||
+                    ua.find("Android") != std::string::npos;
+  if (has_desktop && has_mobile) {
+    event.is_ua_inconsistent = true;
+  }
+
+  // 5. UA changed and cycling check
+  // Prune the cycling window first
+  ip_state.recent_unique_ua_window.prune_old_events(ts);
+
+  // Check if UA changed since last request
+  if (!ip_state.last_known_user_agent.empty() &&
+      ip_state.last_known_user_agent != ua)
+    event.is_ua_changed_for_ip = true;
+  ip_state.last_known_user_agent = ua;
+
+  // Add to cycling window only if it is a new UA for the window
+  bool found_in_window = false;
+  for (const auto &pair :
+       ip_state.recent_unique_ua_window.get_raw_window_data()) {
+    if (pair.second == ua) {
+      found_in_window = true;
+      break;
+    }
+  }
+
+  if (!found_in_window)
+    ip_state.recent_unique_ua_window.add_event(ts, ua);
+  if (ip_state.recent_unique_ua_window.get_event_count() >
+      static_cast<size_t>(cfg.max_unique_uas_per_ip_in_window))
+    event.is_ua_cycling = true;
 }
 
 AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
@@ -101,7 +174,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.ip_hist_req_vol_samples =
       current_ip_state.requests_in_window_count_tracker.get_count();
 
-  // --- Z-Score calculation logic
+  // --- Z-Score calculation logic ---
   const auto &tier2_cfg = app_config.tier2;
   long min_samples = tier2_cfg.min_samples_for_z_score;
 
@@ -154,6 +227,10 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
            current_ip_state.requests_in_window_count_tracker.get_mean()) /
           stddev;
   }
+
+  // --- User-Agent analysis logic ---
+  perform_advanced_ua_analysis(raw_log.user_agent, app_config.tier1,
+                               current_ip_state, event, current_event_ts);
 
   return event;
 }
