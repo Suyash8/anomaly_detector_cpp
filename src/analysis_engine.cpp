@@ -101,7 +101,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.ip_hist_req_vol_samples =
       current_ip_state.requests_in_window_count_tracker.get_count();
 
-  // --- Z-Score calculation logic
+  // --- Z-Score calculation logic ---
   const auto &tier2_cfg = app_config.tier2;
   long min_samples = tier2_cfg.min_samples_for_z_score;
 
@@ -153,6 +153,34 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
           (current_req_vol -
            current_ip_state.requests_in_window_count_tracker.get_mean()) /
           stddev;
+  }
+
+  // --- User-Agent analysis logic ---
+  const std::string &current_ua = raw_log.user_agent;
+
+  // 1. Check if UA is missing
+  if (current_ua.empty() || current_ua == "-")
+    event.is_ua_missing = true;
+
+  // 2. Check if UA has changed for this IP
+  if (!event.is_ua_missing) {
+    if (current_ip_state.historical_user_agents.empty())
+      current_ip_state.last_known_user_agent = current_ua;
+    else if (current_ip_state.last_known_user_agent != current_ua) {
+      event.is_ua_changed_for_ip = true;
+      current_ip_state.last_known_user_agent = current_ua;
+    }
+
+    // Add to historical set
+    // TODO: Maybe try making it a queue or something?
+    if (current_ip_state.historical_user_agents.size() < 20)
+      current_ip_state.historical_user_agents.insert(current_ua);
+
+    // 3. Basic check for known bad UA (example)
+    // TODO: Bring this list from config
+    if (current_ua.find("sqlmap") != std::string::npos ||
+        current_ua.find("Nmap") != std::string::npos)
+      event.is_ua_known_bad = true;
   }
 
   return event;
