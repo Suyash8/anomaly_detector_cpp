@@ -52,6 +52,7 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
     check_requests_per_ip_rule(event);
     check_failed_logins_rule(event);
     check_user_agent_rules(event);
+    check_suspicious_string_rules(event);
     // Placeholders for other Tier 1 rules that will use AnalyzedEvent
     // check_asset_scraping_rule_placeholder(event);
     // check_header_anomalies_rule_placeholder(event);
@@ -61,6 +62,28 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
   if (app_config.tier2.enabled) {
     check_ip_zscore_rules(event);
   }
+}
+
+void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event) {
+  auto create_suspicious_string_alert = [&](const std::string &reason,
+                                            const std::string action,
+                                            double score) {
+    Alert suspicious_string_alert(
+        event.raw_log.parsed_timestamp_ms.value_or(0), event.raw_log.ip_address,
+        reason, AlertTier::TIER1_HEURISTIC, action, event.raw_log.ip_address,
+        score, event.raw_log.original_line_number, event.raw_log.raw_log_line);
+    alert_mgr.record_alert(suspicious_string_alert);
+  };
+
+  if (event.found_suspicious_path_str)
+    create_suspicious_string_alert(
+        "Request path contains a suspicious pattern",
+        "High Priority: Block IP and investigate for exploit attempts", 15.0);
+
+  if (event.found_suspicious_ua_str)
+    create_suspicious_string_alert("User-Agent contains a suspicious pattern",
+                                   "Block IP; known scanner/bot UA pattern",
+                                   10.0);
 }
 
 void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
