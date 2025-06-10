@@ -232,5 +232,20 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   perform_advanced_ua_analysis(raw_log.user_agent, app_config.tier1,
                                current_ip_state, event, current_event_ts);
 
+  // --- Suspicious string scaning ---
+  for (const auto &substr : app_config.tier1.suspicious_path_substrings) {
+    if (raw_log.request_path.find(substr) != std::string::npos) {
+      event.found_suspicious_path_str = true;
+      break;
+    }
+  }
+
+  for (const auto &substr : app_config.tier1.suspicious_ua_substrings) {
+    if (raw_log.user_agent.find(substr) != std::string::npos) {
+      event.found_suspicious_ua_str = true;
+      break;
+    }
+  }
+
   return event;
 }

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -113,6 +114,25 @@ bool load_configuration(std::string &config_filepath) {
         else if (key == "max_unique_uas_per_ip_in_window")
           GlobalAppConfig.tier1.max_unique_uas_per_ip_in_window =
               *Utils::string_to_number<int>(value);
+        else if (key == "suspicious_path_substrings") {
+          std::string current_substr;
+          std::istringstream substr_stream(value);
+          while (std::getline(substr_stream, current_substr, ',')) {
+            std::string trimmed_substr = Utils::trim_copy(current_substr);
+            if (!trimmed_substr.empty())
+              GlobalAppConfig.tier1.suspicious_path_substrings.push_back(
+                  trimmed_substr);
+          }
+        } else if (key == "suspicious_ua_substrings") {
+          std::string current_substr;
+          std::istringstream substr_stream(value);
+          while (std::getline(substr_stream, current_substr, ',')) {
+            std::string trimmed_substr = Utils::trim_copy(current_substr);
+            if (!trimmed_substr.empty())
+              GlobalAppConfig.tier1.suspicious_ua_substrings.push_back(
+                  trimmed_substr);
+          }
+        }
       } else if (current_section == "Tier2") {
         if (key == "enabled")
           GlobalAppConfig.tier2.enabled = string_to_bool(value);

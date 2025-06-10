@@ -48,6 +48,10 @@ struct AnalyzedEvent {
   bool is_ua_cycling = false;
   std::string detected_browser_version;
 
+  // Suspicious string flags
+  bool found_suspicious_path_str = false;
+  bool found_suspicious_ua_str = false;
+
   // Default constructor
   AnalyzedEvent(const LogEntry &log) : raw_log(log) {}
 };
