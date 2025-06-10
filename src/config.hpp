@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace Config {
 
@@ -17,6 +18,9 @@ struct Tier1Config {
   int min_chrome_version = 90;
   int min_firefox_version = 85;
   int max_unique_uas_per_ip_in_window = 3;
+
+  std::vector<std::string> suspicious_path_substrings;
+  std::vector<std::string> suspicious_ua_substrings;
 };
 
 struct Tier2Config {
