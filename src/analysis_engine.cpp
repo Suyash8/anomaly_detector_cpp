@@ -229,32 +229,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   // --- User-Agent analysis logic ---
-  const std::string &current_ua = raw_log.user_agent;
-
-  // 1. Check if UA is missing
-  if (current_ua.empty() || current_ua == "-")
-    event.is_ua_missing = true;
-
-  // 2. Check if UA has changed for this IP
-  if (!event.is_ua_missing) {
-    if (current_ip_state.historical_user_agents.empty())
-      current_ip_state.last_known_user_agent = current_ua;
-    else if (current_ip_state.last_known_user_agent != current_ua) {
-      event.is_ua_changed_for_ip = true;
-      current_ip_state.last_known_user_agent = current_ua;
-    }
-
-    // Add to historical set
-    // TODO: Maybe try making it a queue or something?
-    if (current_ip_state.historical_user_agents.size() < 20)
-      current_ip_state.historical_user_agents.insert(current_ua);
-
-    // 3. Basic check for known bad UA (example)
-    // TODO: Bring this list from config
-    if (current_ua.find("sqlmap") != std::string::npos ||
-        current_ua.find("Nmap") != std::string::npos)
-      event.is_ua_known_bad = true;
-  }
+  perform_advanced_ua_analysis(raw_log.user_agent, app_config.tier1,
+                               current_ip_state, event, current_event_ts);
 
   return event;
 }

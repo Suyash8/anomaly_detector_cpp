@@ -57,47 +57,55 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
     // check_header_anomalies_rule_placeholder(event);
   }
 
-  // Future: Apply Tier 2 rules using richer data in AnalyzedEvent
+  // TODO: Apply Tier 2 rules using richer data in AnalyzedEvent
   if (app_config.tier2.enabled) {
     check_ip_zscore_rules(event);
   }
 }
 
 void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
-  Alert user_agent_alert(
-      event.raw_log.parsed_timestamp_ms.value_or(0), event.raw_log.ip_address,
-      "", AlertTier::TIER1_HEURISTIC, "", event.raw_log.ip_address, 1.0,
-      event.raw_log.original_line_number, event.raw_log.raw_log_line);
+  if (!app_config.tier1.check_user_agent_anomalies)
+    return;
 
-  if (event.is_ua_missing) {
-    user_agent_alert.alert_reason = "Request with missing User-Agent";
-    user_agent_alert.suggested_action = "Investigate IP for scripted activity";
-
+  auto create_ua_alert = [&](const std::string &reason,
+                             const std::string action, double score) {
+    Alert user_agent_alert(
+        event.raw_log.parsed_timestamp_ms.value_or(0), event.raw_log.ip_address,
+        reason, AlertTier::TIER1_HEURISTIC, action, event.raw_log.ip_address,
+        score, event.raw_log.original_line_number, event.raw_log.raw_log_line);
     alert_mgr.record_alert(user_agent_alert);
-  }
+  };
 
-  if (event.is_ua_known_bad) {
-    user_agent_alert.alert_reason =
-        "Request from a known malicious User-Agent signature";
-    user_agent_alert.suggested_action = "Block IP; known scanner/bot";
-    user_agent_alert.anomaly_score = 10.0;
+  if (event.is_ua_missing)
+    create_ua_alert("Request with missing User-Agent",
+                    "Investigate IP for scripted activity", 1.0);
 
-    alert_mgr.record_alert(user_agent_alert);
-  }
+  if (event.is_ua_known_bad)
+    create_ua_alert("Request from a known malicious User-Agent signature",
+                    "Block IP; known scanner/bot", 10.0);
+
+  if (event.is_ua_headless)
+    create_ua_alert(
+        "Request from a known headless browser signature",
+        "High likelihood of automated activity; monitor or challenge", 5.0);
+
+  if (event.is_ua_outdated)
+    create_ua_alert(
+        "Request from outdated browser: " + event.detected_browser_version,
+        "Investigate IP for vulnerable client or bot activity", 2.0);
+
+  if (event.is_ua_cycling)
+    create_ua_alert("IP rapidly cycling through different User-Agents",
+                    "Very high likelihood of bot; consider blocking", 20.0);
 
   // TODO: Maybe add more such composite rules
   // Example:
   if (event.is_ua_changed_for_ip && event.ip_error_event_zscore &&
-      *event.ip_error_event_zscore > 1.0) {
-    user_agent_alert.alert_reason =
-        "User-Agent changed for IP, followed by anomalous error rate";
-    user_agent_alert.detection_tier = AlertTier::TIER2_STATISTICAL;
-    user_agent_alert.suggested_action =
-        "Investigate for potential account takeover or compromised client";
-    user_agent_alert.anomaly_score = *event.ip_error_event_zscore;
-
-    alert_mgr.record_alert(user_agent_alert);
-  }
+      *event.ip_error_event_zscore > 1.0)
+    create_ua_alert(
+        "User-Agent changed for IP, followed by anomalous error rate",
+        "Investigate for potential account takeover or compromised client",
+        *event.ip_error_event_zscore);
 }
 
 void RuleEngine::check_ip_zscore_rules(const AnalyzedEvent &event) {
