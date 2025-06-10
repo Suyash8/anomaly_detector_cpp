@@ -25,6 +25,7 @@ private:
   void check_failed_logins_rule(const AnalyzedEvent &event);
 
   void check_ip_zscore_rules(const AnalyzedEvent &event);
+  void check_user_agent_rules(const AnalyzedEvent &event);
 
   // To be later refactored to AnalysisWngine
 
