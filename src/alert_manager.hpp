@@ -1,9 +1,13 @@
 #ifndef ALERT_MANAGER_HPP
 #define ALERT_MANAGER_HPP
 
+#include "analyzed_event.hpp"
 #include "config.hpp"
+#include "log_entry.hpp"
+
 #include <cstdint>
 #include <fstream>
+#include <string>
 
 // Forward declare AppConfig if AlertManager needs it for initialization
 namespace Config {
@@ -29,11 +33,13 @@ struct Alert {
   uint64_t associated_log_line;
   std::string raw_log_trigger_sample;
 
+  LogEntry log_context;
+  AnalyzedEvent analysis_context;
+
   // Constructor for convenience
-  Alert(uint64_t ts, const std::string &ip, const std::string &reason,
-        AlertTier tier, const std::string &action = "Investigate",
-        const std::string &key_id = "", double score = 3.0,
-        uint64_t log_line_num = 0, const std::string &log_sample = "");
+  Alert(const AnalyzedEvent &event, const std::string &reason, AlertTier tier,
+        const std::string &action, double score,
+        const std::string &key_id = "");
 };
 
 class AlertManager {
@@ -47,6 +53,7 @@ public:
 private:
   std::string format_alert_to_human_readable(const Alert &alert_data) const;
   std::string format_alert_to_json(const Alert &alert_data) const;
+  std::string escape_json_value(const std::string &input) const;
 
   bool output_alerts_to_stdout;
   bool output_alerts_to_file;
