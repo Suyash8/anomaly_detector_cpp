@@ -65,15 +65,12 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
 }
 
 void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event) {
-  auto create_suspicious_string_alert = [&](const std::string &reason,
-                                            const std::string action,
-                                            double score) {
-    Alert suspicious_string_alert(
-        event.raw_log.parsed_timestamp_ms.value_or(0), event.raw_log.ip_address,
-        reason, AlertTier::TIER1_HEURISTIC, action, event.raw_log.ip_address,
-        score, event.raw_log.original_line_number, event.raw_log.raw_log_line);
-    alert_mgr.record_alert(suspicious_string_alert);
-  };
+  auto create_suspicious_string_alert =
+      [&](const std::string &reason, const std::string action, double score) {
+        Alert suspicious_string_alert(event, reason, AlertTier::TIER1_HEURISTIC,
+                                      action, score, event.raw_log.ip_address);
+        alert_mgr.record_alert(suspicious_string_alert);
+      };
 
   if (event.found_suspicious_path_str)
     create_suspicious_string_alert(
@@ -92,10 +89,8 @@ void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
 
   auto create_ua_alert = [&](const std::string &reason,
                              const std::string action, double score) {
-    Alert user_agent_alert(
-        event.raw_log.parsed_timestamp_ms.value_or(0), event.raw_log.ip_address,
-        reason, AlertTier::TIER1_HEURISTIC, action, event.raw_log.ip_address,
-        score, event.raw_log.original_line_number, event.raw_log.raw_log_line);
+    Alert user_agent_alert(event, reason, AlertTier::TIER1_HEURISTIC, action,
+                           score, event.raw_log.ip_address);
     alert_mgr.record_alert(user_agent_alert);
   };
 
@@ -139,12 +134,9 @@ void RuleEngine::check_ip_zscore_rules(const AnalyzedEvent &event) {
       std::string reason = "Anomalous IP " + metric_name +
                            " (Z-score: " + std::to_string(*zscore_opt) + ")";
 
-      Alert z_score_alert(
-          event.raw_log.parsed_timestamp_ms.value_or(0),
-          event.raw_log.ip_address, reason, AlertTier::TIER2_STATISTICAL,
-          "Investigate IP for anomalous statistical behavior",
-          event.raw_log.ip_address, std::abs(*zscore_opt),
-          event.raw_log.original_line_number, event.raw_log.raw_log_line);
+      Alert z_score_alert(event, reason, AlertTier::TIER2_STATISTICAL,
+                          "Investigate IP for anomalous statistical behavior",
+                          std::abs(*zscore_opt), event.raw_log.ip_address);
       alert_mgr.record_alert(z_score_alert);
     }
   };
@@ -166,12 +158,9 @@ void RuleEngine::check_requests_per_ip_rule(const AnalyzedEvent &event) {
         std::to_string(app_config.tier1.max_requests_per_ip_in_window) + "s.";
 
     Alert high_rate_alert(
-        event.raw_log.parsed_timestamp_ms.value_or(
-            Utils::get_current_time_ms()),
-        event.raw_log.ip_address, reason, AlertTier::TIER1_HEURISTIC,
-        "Monitor/Block IP", event.raw_log.ip_address,
+        event, reason, AlertTier::TIER1_HEURISTIC, "Monitor/Block IP",
         static_cast<double>(*event.current_ip_request_count_in_window),
-        event.raw_log.original_line_number, event.raw_log.raw_log_line);
+        event.raw_log.ip_address);
     alert_mgr.record_alert(high_rate_alert);
   }
 }
@@ -197,13 +186,10 @@ void RuleEngine::check_failed_logins_rule(const AnalyzedEvent &event) {
     }
 
     Alert failed_login_alert(
-        event.raw_log.parsed_timestamp_ms.value_or(
-            Utils::get_current_time_ms()),
-        event.raw_log.ip_address, reason, AlertTier::TIER1_HEURISTIC,
+        event, reason, AlertTier::TIER1_HEURISTIC,
         "Investigate IP for brute-force/credential stuffing",
-        key_identifier, // More specific key
         static_cast<double>(*event.current_ip_failed_login_count_in_window),
-        event.raw_log.original_line_number, event.raw_log.raw_log_line);
+        key_identifier);
     alert_mgr.record_alert(failed_login_alert);
   }
 }
