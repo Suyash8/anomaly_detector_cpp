@@ -51,12 +51,15 @@ public:
 private:
   const Config::AppConfig &app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
+  uint64_t events_processed_since_last_prune_ = 0;
+  const uint64_t PRUNE_CHECK_INTERNVAL = 10000; // Check every 10k events
 
   //   std::unordered_map<std::string, PerPathState>
   //       path_activity_trackers; // For later
 
   PerIpState &get_or_create_ip_state(const std::string &ip,
                                      uint64_t current_timestamp_ms);
+  void prune_inactive_ips(uint64_t current_timestamp_ms);
 
   // Helper to check if a path is an asset path - might be needed here if asset
   // analysis moves

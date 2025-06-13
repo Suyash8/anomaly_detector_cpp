@@ -114,6 +114,9 @@ bool load_configuration(std::string &config_filepath) {
         else if (key == "max_unique_uas_per_ip_in_window")
           GlobalAppConfig.tier1.max_unique_uas_per_ip_in_window =
               *Utils::string_to_number<int>(value);
+        else if (key == "inactive_ip_state_ttl_seconds")
+          GlobalAppConfig.tier1.inactive_ip_state_ttl_seconds =
+              *Utils::string_to_number<uint64_t>(value);
         else if (key == "suspicious_path_substrings") {
           std::string current_substr;
           std::istringstream substr_stream(value);
