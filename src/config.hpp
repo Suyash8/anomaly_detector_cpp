@@ -23,6 +23,13 @@ struct Tier1Config {
   std::vector<std::string> suspicious_ua_substrings;
 
   uint64_t inactive_ip_state_ttl_seconds = 86400;
+
+  std::vector<std::string> html_path_suffixes;
+  std::vector<std::string> html_exact_paths;
+  std::vector<std::string> asset_path_prefixes;
+  std::vector<std::string> asset_path_suffixes;
+  int min_html_requests_for_ratio_check = 5;
+  double min_assets_per_html_ratio = 10.0;
 };
 
 struct Tier2Config {
