@@ -53,6 +53,7 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
     check_failed_logins_rule(event);
     check_user_agent_rules(event);
     check_suspicious_string_rules(event);
+    check_asset_ratio_rule(event);
     // Placeholders for other Tier 1 rules that will use AnalyzedEvent
     // check_asset_scraping_rule_placeholder(event);
     // check_header_anomalies_rule_placeholder(event);
@@ -61,6 +62,41 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
   // TODO: Apply Tier 2 rules using richer data in AnalyzedEvent
   if (app_config.tier2.enabled) {
     check_ip_zscore_rules(event);
+  }
+}
+
+void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
+  const auto &cfg = app_config.tier1;
+
+  // Only check if we have seen a minimum number of HTML requests to have a
+  // meaningful sample.
+  if (event.ip_html_requests_in_window < cfg.min_html_requests_for_ratio_check)
+    return;
+
+  // Check if the ratio exists AND if it is BELOW the minimum expected
+  // threshold.
+  if (event.ip_assets_per_html_ratio &&
+      *event.ip_assets_per_html_ratio < cfg.min_assets_per_html_ratio) {
+    std::string reason =
+        "Low Asset-to-HTML request ratio detected. Ratio: " +
+        std::to_string(*event.ip_assets_per_html_ratio) +
+        " (Expected minimum: >" +
+        std::to_string(cfg.min_assets_per_html_ratio) + "). " +
+        "HTML: " + std::to_string(event.ip_html_requests_in_window) +
+        ", Assets: " + std::to_string(event.ip_asset_requests_in_window) +
+        " in window.";
+
+    // The score is higher the further the ratio is from the expected minimum.
+    double score =
+        cfg.min_assets_per_html_ratio - *event.ip_assets_per_html_ratio;
+
+    Alert ratio_alert(
+        event, reason, AlertTier::TIER1_HEURISTIC,
+        "High confidence of bot activity (content scraping). Investigate IP.",
+        score, // Score reflects severity of the deviation
+        event.raw_log.ip_address);
+
+    alert_mgr.record_alert(ratio_alert);
   }
 }
 
