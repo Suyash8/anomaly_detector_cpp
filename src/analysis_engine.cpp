@@ -6,6 +6,39 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <string>
+
+enum class RequestType { HTML, ASSET, OTHER };
+
+RequestType get_request_type(const std::string &path,
+                             const Config::Tier1Config &cfg) {
+  for (const auto &exact : cfg.html_exact_paths) {
+    if (path == exact)
+      return RequestType::HTML;
+  }
+
+  for (const auto &prefix : cfg.asset_path_prefixes) {
+    if (path.rfind(prefix, 0) == 0)
+      return RequestType::ASSET;
+  }
+
+  size_t last_dot = path.rfind('.');
+  if (last_dot != std::string::npos) {
+    std::string suffix = path.substr(last_dot);
+
+    for (const auto &s : cfg.html_path_suffixes) {
+      if (suffix == s)
+        return RequestType::HTML;
+    }
+
+    for (const auto &s : cfg.asset_path_suffixes) {
+      if (suffix == s)
+        return RequestType::ASSET;
+    }
+  }
+
+  return RequestType::OTHER;
+}
 
 AnalysisEngine::AnalysisEngine(const Config::AppConfig &cfg) : app_config(cfg) {
   std::cout << "AnalysisEngine created." << std::endl;
@@ -152,6 +185,23 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   event.current_ip_failed_login_count_in_window =
       current_ip_state.failed_login_timestamps_window.get_event_count();
+
+  // HTML/Asset request tracking
+  RequestType type = get_request_type(raw_log.request_path, app_config.tier1);
+  if (type == RequestType::HTML)
+    current_ip_state.html_request_timestamps.add_event(current_event_ts, 1);
+  else if (type == RequestType::ASSET)
+    current_ip_state.asset_request_timestamps.add_event(current_event_ts, 1);
+
+  event.ip_html_requests_in_window =
+      current_ip_state.html_request_timestamps.get_event_count();
+  event.ip_asset_requests_in_window =
+      current_ip_state.asset_request_timestamps.get_event_count();
+
+  if (event.ip_html_requests_in_window > 0)
+    event.ip_assets_per_html_ratio =
+        static_cast<double>(event.ip_asset_requests_in_window) /
+        static_cast<double>(event.ip_html_requests_in_window);
 
   // --- Tier 2 historical stats updates ---
   if (raw_log.request_time_s)
