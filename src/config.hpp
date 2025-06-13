@@ -21,6 +21,8 @@ struct Tier1Config {
 
   std::vector<std::string> suspicious_path_substrings;
   std::vector<std::string> suspicious_ua_substrings;
+
+  uint64_t inactive_ip_state_ttl_seconds = 86400;
 };
 
 struct Tier2Config {

@@ -104,12 +104,33 @@ void perform_advanced_ua_analysis(const std::string &ua,
     event.is_ua_cycling = true;
 }
 
+void AnalysisEngine::prune_inactive_ips(uint64_t current_timestamp_ms) {
+  uint64_t ttl_ms = app_config.tier1.inactive_ip_state_ttl_seconds * 1000;
+  if (ttl_ms == 0)
+    return;
+
+  auto it = ip_activity_trackers.begin();
+  while (it != ip_activity_trackers.end()) {
+    if ((current_timestamp_ms - it->second.last_seen_timestamp_ms) > ttl_ms)
+      it = ip_activity_trackers.erase(it);
+    else
+      ++it;
+  }
+}
+
 AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   AnalyzedEvent event(raw_log);
 
   if (!raw_log.parsed_timestamp_ms)
     return event;
   uint64_t current_event_ts = *raw_log.parsed_timestamp_ms;
+
+  // --- Periodic Pruning ---
+  events_processed_since_last_prune_++;
+  if (events_processed_since_last_prune_ >= PRUNE_CHECK_INTERNVAL) {
+    prune_inactive_ips(current_event_ts);
+    events_processed_since_last_prune_ = 0;
+  }
 
   PerIpState &current_ip_state =
       get_or_create_ip_state(raw_log.ip_address, current_event_ts);
