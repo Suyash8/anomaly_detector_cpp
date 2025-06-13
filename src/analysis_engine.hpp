@@ -15,6 +15,9 @@ struct PerIpState {
   // Tier 1 Windows
   SlidingWindow<uint64_t> request_timestamps_window;
   SlidingWindow<uint64_t> failed_login_timestamps_window;
+  SlidingWindow<uint64_t> html_request_timestamps;
+  SlidingWindow<uint64_t> asset_request_timestamps;
+
   // std::unordered_map<std::string, SlidingWindow<uint64_t>>
   // asset_path_access_window; //Will re add later
   uint64_t last_seen_timestamp_ms; // To help with pruning inactive IPs later
@@ -33,11 +36,14 @@ struct PerIpState {
              uint64_t login_window_duration_ms)
       : request_timestamps_window(general_window_duration_ms, 0),
         failed_login_timestamps_window(login_window_duration_ms, 0),
+        html_request_timestamps(general_window_duration_ms, 0),
+        asset_request_timestamps(general_window_duration_ms, 0),
         recent_unique_ua_window(general_window_duration_ms, 0),
         last_seen_timestamp_ms(current_timestamp_ms) {}
 
   PerIpState()
       : request_timestamps_window(0, 0), failed_login_timestamps_window(0, 0),
+        html_request_timestamps(0, 0), asset_request_timestamps(0, 0),
         recent_unique_ua_window(0, 0), last_seen_timestamp_ms(0) {}
 };
 

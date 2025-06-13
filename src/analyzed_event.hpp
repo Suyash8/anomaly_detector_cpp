@@ -52,6 +52,10 @@ struct AnalyzedEvent {
   bool found_suspicious_path_str = false;
   bool found_suspicious_ua_str = false;
 
+  int ip_html_requests_in_window = 0;
+  int ip_asset_requests_in_window = 0;
+  std::optional<double> ip_assets_per_html_ratio;
+
   // Default constructor
   AnalyzedEvent(const LogEntry &log) : raw_log(log) {}
 };

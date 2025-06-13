@@ -117,6 +117,25 @@ bool load_configuration(std::string &config_filepath) {
         else if (key == "inactive_ip_state_ttl_seconds")
           GlobalAppConfig.tier1.inactive_ip_state_ttl_seconds =
               *Utils::string_to_number<uint64_t>(value);
+        else if (key == "html_path_suffixes")
+          GlobalAppConfig.tier1.html_path_suffixes =
+              Utils::split_string(value, ',');
+        else if (key == "html_exact_paths")
+          GlobalAppConfig.tier1.html_exact_paths =
+              Utils::split_string(value, ',');
+        else if (key == "asset_path_prefixes")
+          GlobalAppConfig.tier1.asset_path_prefixes =
+              Utils::split_string(value, ',');
+        else if (key == "asset_path_suffixes")
+          GlobalAppConfig.tier1.asset_path_suffixes =
+              Utils::split_string(value, ',');
+        else if (key == "min_html_requests_for_ratio_check")
+          GlobalAppConfig.tier1.min_html_requests_for_ratio_check =
+              *Utils::string_to_number<int>(value);
+        else if (key == "min_assets_per_html_ratio")
+          GlobalAppConfig.tier1.min_assets_per_html_ratio =
+              *Utils::string_to_number<double>(value);
+
         else if (key == "suspicious_path_substrings") {
           std::string current_substr;
           std::istringstream substr_stream(value);
