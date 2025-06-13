@@ -82,7 +82,7 @@ std::optional<LogEntry> LogEntry::parse_from_string(const std::string &log_line,
   }
 
   entry.request_time_s = Utils::string_to_number<double>(fields[3]);
-  entry.upstream_response_time_s = Utils::string_to_number<double>(fields[3]);
+  entry.upstream_response_time_s = Utils::string_to_number<double>(fields[4]);
 
   parse_request_details(fields[5], entry.request_method, entry.request_path,
                         entry.request_protocol);
