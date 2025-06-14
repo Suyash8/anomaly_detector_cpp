@@ -38,6 +38,18 @@ struct AnalyzedEvent {
   std::optional<double> ip_error_event_zscore;
   std::optional<double> ip_req_vol_zscore;
 
+  std::optional<double> path_hist_req_time_mean;
+  std::optional<double> path_hist_req_time_stddev;
+  std::optional<double> path_req_time_zscore;
+
+  std::optional<double> path_hist_bytes_mean;
+  std::optional<double> path_hist_bytes_stddev;
+  std::optional<double> path_bytes_sent_zscore;
+
+  std::optional<double> path_hist_error_rate_mean;
+  std::optional<double> path_hist_error_rate_stddev;
+  std::optional<double> path_error_event_zscore;
+
   // UA analysis flags
   bool is_ua_missing = false;
   bool is_ua_changed_for_ip = false;

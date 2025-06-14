@@ -66,6 +66,20 @@ AnalysisEngine::get_or_create_ip_state(const std::string &ip,
   }
 }
 
+PerPathState &
+AnalysisEngine::get_or_create_path_state(const std::string &path,
+                                         uint64_t current_timestamp_ms) {
+  auto it = path_activity_trackers.find(path);
+  if (it == path_activity_trackers.end()) {
+    auto [inserted_it, success] = path_activity_trackers.emplace(
+        path, PerPathState(current_timestamp_ms));
+    return inserted_it->second;
+  } else {
+    it->second.last_seen_timestamp_ms = current_timestamp_ms;
+    return it->second;
+  }
+}
+
 void perform_advanced_ua_analysis(const std::string &ua,
                                   const Config::Tier1Config &cfg,
                                   PerIpState &ip_state, AnalyzedEvent &event,
@@ -167,6 +181,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   PerIpState &current_ip_state =
       get_or_create_ip_state(raw_log.ip_address, current_event_ts);
+  PerPathState &current_path_state =
+      get_or_create_path_state(raw_log.request_path, current_event_ts);
 
   // --- Tier 1 window updates ---
   // Update IP's request timestamp window
@@ -204,15 +220,23 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
         static_cast<double>(event.ip_html_requests_in_window);
 
   // --- Tier 2 historical stats updates ---
-  if (raw_log.request_time_s)
+  if (raw_log.request_time_s) {
     current_ip_state.request_time_tracker.update(*raw_log.request_time_s);
-  if (raw_log.bytes_sent)
-    current_ip_state.bytes_sent_tracker.update(*raw_log.bytes_sent);
-
+    current_path_state.request_time_tracker.update(*raw_log.request_time_s);
+  }
+  if (raw_log.bytes_sent) {
+    current_ip_state.bytes_sent_tracker.update(
+        static_cast<double>(*raw_log.bytes_sent));
+    current_path_state.bytes_sent_tracker.update(
+        static_cast<double>(*raw_log.bytes_sent));
+  }
   bool is_error =
       (raw_log.http_status_code && *raw_log.http_status_code > 400 &&
        *raw_log.http_status_code < 600);
   current_ip_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
+  current_path_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
+
+  current_path_state.request_volume_tracker.update(1.0);
 
   double current_requests_in_gen_window = static_cast<double>(
       current_ip_state.request_timestamps_window.get_event_count());
@@ -245,9 +269,53 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.ip_hist_req_vol_samples =
       current_ip_state.requests_in_window_count_tracker.get_count();
 
+  event.path_hist_req_time_mean =
+      current_path_state.request_time_tracker.get_mean();
+  event.path_hist_req_time_stddev =
+      current_path_state.request_time_tracker.get_stddev();
+
+  event.path_hist_bytes_mean = current_path_state.bytes_sent_tracker.get_mean();
+  event.path_hist_bytes_stddev =
+      current_path_state.bytes_sent_tracker.get_stddev();
+
+  event.path_hist_error_rate_mean =
+      current_path_state.error_rate_tracker.get_mean();
+  event.path_hist_error_rate_stddev =
+      current_path_state.error_rate_tracker.get_stddev();
+
   // --- Z-Score calculation logic ---
   const auto &tier2_cfg = app_config.tier2;
   long min_samples = tier2_cfg.min_samples_for_z_score;
+
+  // Path Req Time Z-score
+  if (raw_log.request_time_s &&
+      current_path_state.request_time_tracker.get_count() >= min_samples) {
+    double stddev = *event.path_hist_req_time_stddev;
+    if (stddev > 1e-6)
+      event.path_req_time_zscore =
+          (*raw_log.request_time_s - *event.path_hist_req_time_mean) / stddev;
+  }
+
+  // Path Bytes Sent Z-score
+  if (raw_log.bytes_sent &&
+      current_path_state.bytes_sent_tracker.get_count() >= min_samples) {
+    double stddev = *event.path_hist_bytes_stddev;
+    if (stddev > 1.0)
+      event.path_bytes_sent_zscore = (static_cast<double>(*raw_log.bytes_sent) -
+                                      *event.path_hist_bytes_mean) /
+                                     stddev;
+  }
+
+  // Path Error Event Z-score
+  if (current_path_state.error_rate_tracker.get_count() >= min_samples) {
+    double current_error_val =
+        (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
+                                                                       : 0.0;
+    double stddev = *event.path_hist_error_rate_stddev;
+    if (stddev > 0.01)
+      event.path_error_event_zscore =
+          (current_error_val - *event.path_hist_error_rate_mean) / stddev;
+  }
 
   // Req Time Z-score
   if (raw_log.request_time_s &&
