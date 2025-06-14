@@ -269,9 +269,53 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.ip_hist_req_vol_samples =
       current_ip_state.requests_in_window_count_tracker.get_count();
 
+  event.path_hist_req_time_mean =
+      current_path_state.request_time_tracker.get_mean();
+  event.path_hist_req_time_stddev =
+      current_path_state.request_time_tracker.get_stddev();
+
+  event.path_hist_bytes_mean = current_path_state.bytes_sent_tracker.get_mean();
+  event.path_hist_bytes_stddev =
+      current_path_state.bytes_sent_tracker.get_stddev();
+
+  event.path_hist_error_rate_mean =
+      current_path_state.error_rate_tracker.get_mean();
+  event.path_hist_error_rate_stddev =
+      current_path_state.error_rate_tracker.get_stddev();
+
   // --- Z-Score calculation logic ---
   const auto &tier2_cfg = app_config.tier2;
   long min_samples = tier2_cfg.min_samples_for_z_score;
+
+  // Path Req Time Z-score
+  if (raw_log.request_time_s &&
+      current_path_state.request_time_tracker.get_count() >= min_samples) {
+    double stddev = *event.path_hist_req_time_stddev;
+    if (stddev > 1e-6)
+      event.path_req_time_zscore =
+          (*raw_log.request_time_s - *event.path_hist_req_time_mean) / stddev;
+  }
+
+  // Path Bytes Sent Z-score
+  if (raw_log.bytes_sent &&
+      current_path_state.bytes_sent_tracker.get_count() >= min_samples) {
+    double stddev = *event.path_hist_bytes_stddev;
+    if (stddev > 1.0)
+      event.path_bytes_sent_zscore = (static_cast<double>(*raw_log.bytes_sent) -
+                                      *event.path_hist_bytes_mean) /
+                                     stddev;
+  }
+
+  // Path Error Event Z-score
+  if (current_path_state.error_rate_tracker.get_count() >= min_samples) {
+    double current_error_val =
+        (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
+                                                                       : 0.0;
+    double stddev = *event.path_hist_error_rate_stddev;
+    if (stddev > 0.01)
+      event.path_error_event_zscore =
+          (current_error_val - *event.path_hist_error_rate_mean) / stddev;
+  }
 
   // Req Time Z-score
   if (raw_log.request_time_s &&
