@@ -181,6 +181,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   PerIpState &current_ip_state =
       get_or_create_ip_state(raw_log.ip_address, current_event_ts);
+  PerPathState &current_path_state =
+      get_or_create_path_state(raw_log.request_path, current_event_ts);
 
   // --- Tier 1 window updates ---
   // Update IP's request timestamp window
@@ -218,15 +220,23 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
         static_cast<double>(event.ip_html_requests_in_window);
 
   // --- Tier 2 historical stats updates ---
-  if (raw_log.request_time_s)
+  if (raw_log.request_time_s) {
     current_ip_state.request_time_tracker.update(*raw_log.request_time_s);
-  if (raw_log.bytes_sent)
-    current_ip_state.bytes_sent_tracker.update(*raw_log.bytes_sent);
-
+    current_path_state.request_time_tracker.update(*raw_log.request_time_s);
+  }
+  if (raw_log.bytes_sent) {
+    current_ip_state.bytes_sent_tracker.update(
+        static_cast<double>(*raw_log.bytes_sent));
+    current_path_state.bytes_sent_tracker.update(
+        static_cast<double>(*raw_log.bytes_sent));
+  }
   bool is_error =
       (raw_log.http_status_code && *raw_log.http_status_code > 400 &&
        *raw_log.http_status_code < 600);
   current_ip_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
+  current_path_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
+
+  current_path_state.request_volume_tracker.update(1.0);
 
   double current_requests_in_gen_window = static_cast<double>(
       current_ip_state.request_timestamps_window.get_event_count());
