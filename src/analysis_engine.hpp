@@ -11,6 +11,20 @@
 #include <unordered_map>
 #include <unordered_set>
 
+struct PerPathState {
+  StatsTracker request_time_tracker;
+  StatsTracker bytes_sent_tracker;
+  StatsTracker error_rate_tracker;
+  StatsTracker request_volume_tracker;
+
+  uint64_t last_seen_timestamp_ms;
+
+  PerPathState(uint64_t current_timestamp_ms)
+      : last_seen_timestamp_ms(current_timestamp_ms) {}
+
+  PerPathState() : last_seen_timestamp_ms(0) {}
+};
+
 struct PerIpState {
   // Tier 1 Windows
   SlidingWindow<uint64_t> request_timestamps_window;
@@ -57,6 +71,8 @@ public:
 private:
   const Config::AppConfig &app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
+  std::unordered_map<std::string, PerPathState> path_activity_trackers;
+
   uint64_t events_processed_since_last_prune_ = 0;
   const uint64_t PRUNE_CHECK_INTERNVAL = 10000; // Check every 10k events
 
@@ -65,6 +81,9 @@ private:
 
   PerIpState &get_or_create_ip_state(const std::string &ip,
                                      uint64_t current_timestamp_ms);
+  PerPathState &get_or_create_path_state(const std::string &path,
+                                         uint64_t current_timestamp_ms);
+
   void prune_inactive_ips(uint64_t current_timestamp_ms);
 
   // Helper to check if a path is an asset path - might be needed here if asset

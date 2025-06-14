@@ -66,6 +66,20 @@ AnalysisEngine::get_or_create_ip_state(const std::string &ip,
   }
 }
 
+PerPathState &
+AnalysisEngine::get_or_create_path_state(const std::string &path,
+                                         uint64_t current_timestamp_ms) {
+  auto it = path_activity_trackers.find(path);
+  if (it == path_activity_trackers.end()) {
+    auto [inserted_it, success] = path_activity_trackers.emplace(
+        path, PerPathState(current_timestamp_ms));
+    return inserted_it->second;
+  } else {
+    it->second.last_seen_timestamp_ms = current_timestamp_ms;
+    return it->second;
+  }
+}
+
 void perform_advanced_ua_analysis(const std::string &ua,
                                   const Config::Tier1Config &cfg,
                                   PerIpState &ip_state, AnalyzedEvent &event,
