@@ -59,9 +59,9 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
     // check_header_anomalies_rule_placeholder(event);
   }
 
-  // TODO: Apply Tier 2 rules using richer data in AnalyzedEvent
   if (app_config.tier2.enabled) {
     check_ip_zscore_rules(event);
+    check_path_zscore_rules(event);
   }
 }
 
@@ -181,6 +181,29 @@ void RuleEngine::check_ip_zscore_rules(const AnalyzedEvent &event) {
   check(event.ip_bytes_sent_zscore, "bytes sent");
   check(event.ip_error_event_zscore, "error rate");
   check(event.ip_req_vol_zscore, "request volume");
+}
+
+void RuleEngine::check_path_zscore_rules(const AnalyzedEvent &event) {
+  const double threshold = app_config.tier2.z_score_threshold;
+
+  auto check = [&](const std::optional<double> &zscore_opt,
+                   const std::string &metric_name) {
+    if (zscore_opt && std::abs(*zscore_opt) > threshold) {
+      std::string reason = "Anomalous " + metric_name + " for path '" +
+                           event.raw_log.request_path +
+                           "' (Z-score: " + std::to_string(*zscore_opt) + ")";
+
+      Alert z_score_alert(event, reason, AlertTier::TIER2_STATISTICAL,
+                          "Investigate path for anomalous statistical "
+                          "behaviour(e.g., performance issue, data exfil)",
+                          std::abs(*zscore_opt), event.raw_log.request_path);
+      alert_mgr.record_alert(z_score_alert);
+    }
+  };
+
+  check(event.path_req_time_zscore, "request time");
+  check(event.path_bytes_sent_zscore, "bytes sent");
+  check(event.path_error_event_zscore, "error rate");
 }
 
 void RuleEngine::check_requests_per_ip_rule(const AnalyzedEvent &event) {
