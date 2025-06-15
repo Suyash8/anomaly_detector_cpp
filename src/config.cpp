@@ -164,6 +164,9 @@ bool load_configuration(std::string &config_filepath) {
         else if (key == "min_samples_for_z_score")
           GlobalAppConfig.tier2.min_samples_for_z_score =
               *Utils::string_to_number<int>(value);
+        else if (key == "historical_deviation_factor")
+          GlobalAppConfig.tier2.historical_deviation_factor =
+              *Utils::string_to_number<double>(value);
       }
     } catch (const std::invalid_argument &e) {
       std::cerr << "Warning (Config Line " << line_num

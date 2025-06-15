@@ -36,6 +36,7 @@ struct Tier2Config {
   bool enabled = true;
   double z_score_threshold = 3.5;
   int min_samples_for_z_score = 30;
+  double historical_deviation_factor = 3.0;
 };
 
 struct AppConfig {

@@ -62,6 +62,35 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
   if (app_config.tier2.enabled) {
     check_ip_zscore_rules(event);
     check_path_zscore_rules(event);
+    check_historical_comparison_rules(event);
+  }
+}
+
+void RuleEngine::check_historical_comparison_rules(const AnalyzedEvent &event) {
+  const auto &cfg = app_config.tier2;
+  const long min_samples = cfg.min_samples_for_z_score;
+
+  // Check for sudden IP request time degradation
+  if (event.raw_log.request_time_s && event.ip_hist_req_time_mean &&
+      event.ip_hist_req_time_samples &&
+      *event.ip_hist_req_time_samples >= min_samples &&
+      *event.ip_hist_req_time_mean > 0) {
+    if (*event.raw_log.request_time_s >
+        (*event.ip_hist_req_time_mean * cfg.historical_deviation_factor)) {
+      std::string reason =
+          "Sudden performance degradation for IP. Request time " +
+          std::to_string(*event.raw_log.request_time_s) + "s is >" +
+          std::to_string(cfg.historical_deviation_factor) +
+          "x the historical average of " +
+          std::to_string(*event.ip_hist_req_time_mean) + "s";
+
+      Alert historical_comparison_alert(
+          event, reason, AlertTier::TIER2_STATISTICAL,
+          "Investigate IP for unusual load or targeted DoS",
+          *event.raw_log.request_time_s / *event.ip_hist_req_time_mean);
+
+      alert_mgr.record_alert(historical_comparison_alert);
+    }
   }
 }
 
