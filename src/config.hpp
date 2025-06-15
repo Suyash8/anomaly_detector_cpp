@@ -21,8 +21,9 @@ struct Tier1Config {
 
   std::vector<std::string> suspicious_path_substrings;
   std::vector<std::string> suspicious_ua_substrings;
+  std::vector<std::string> sensitive_path_substrings;
 
-  uint64_t inactive_ip_state_ttl_seconds = 86400;
+  uint64_t inactive_state_ttl_seconds = 86400;
 
   std::vector<std::string> html_path_suffixes;
   std::vector<std::string> html_exact_paths;
@@ -36,6 +37,7 @@ struct Tier2Config {
   bool enabled = true;
   double z_score_threshold = 3.5;
   int min_samples_for_z_score = 30;
+  double historical_deviation_factor = 3.0;
 };
 
 struct AppConfig {

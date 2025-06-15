@@ -54,14 +54,73 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
     check_user_agent_rules(event);
     check_suspicious_string_rules(event);
     check_asset_ratio_rule(event);
-    // Placeholders for other Tier 1 rules that will use AnalyzedEvent
-    // check_asset_scraping_rule_placeholder(event);
-    // check_header_anomalies_rule_placeholder(event);
+    check_new_seen_rules(event);
   }
 
   if (app_config.tier2.enabled) {
     check_ip_zscore_rules(event);
     check_path_zscore_rules(event);
+    check_historical_comparison_rules(event);
+  }
+}
+
+void RuleEngine::check_new_seen_rules(const AnalyzedEvent &event) {
+  // A brand new IP immediately tries to access a sensitive path
+  if (event.is_first_request_from_ip) {
+    for (const auto &sensitive : app_config.tier1.sensitive_path_substrings) {
+      if (event.raw_log.request_path.find(sensitive) != std::string::npos) {
+        std::string reason =
+            "Newly seen IP immediately accessed a sensitive path containing '" +
+            sensitive + "'.";
+        Alert new_seen_sensitive_alert(
+            event, reason, AlertTier::TIER1_HEURISTIC,
+            "High Priority: Investigate IP for targeted probing", 15.0);
+        alert_mgr.record_alert(new_seen_sensitive_alert);
+        break;
+      }
+    }
+  }
+
+  // An existing IP suddenly accesses a new path and generates a high rate of
+  // errors
+  if (event.is_path_new_for_ip && event.ip_error_event_zscore &&
+      *event.ip_error_event_zscore > 2.5) {
+    std::string reason = "IP began generating a high error rate (Z-score: " +
+                         std::to_string(*event.ip_error_event_zscore) +
+                         ") while accessing a new path for the first time";
+    Alert new_path_error_alert(
+        event, reason, AlertTier::TIER2_STATISTICAL,
+        "Investigate for vulnerability scanning or forced browsing",
+        *event.ip_error_event_zscore);
+    alert_mgr.record_alert(new_path_error_alert);
+  }
+}
+
+void RuleEngine::check_historical_comparison_rules(const AnalyzedEvent &event) {
+  const auto &cfg = app_config.tier2;
+  const long min_samples = cfg.min_samples_for_z_score;
+
+  // Check for sudden IP request time degradation
+  if (event.raw_log.request_time_s && event.ip_hist_req_time_mean &&
+      event.ip_hist_req_time_samples &&
+      *event.ip_hist_req_time_samples >= min_samples &&
+      *event.ip_hist_req_time_mean > 0) {
+    if (*event.raw_log.request_time_s >
+        (*event.ip_hist_req_time_mean * cfg.historical_deviation_factor)) {
+      std::string reason =
+          "Sudden performance degradation for IP. Request time " +
+          std::to_string(*event.raw_log.request_time_s) + "s is >" +
+          std::to_string(cfg.historical_deviation_factor) +
+          "x the historical average of " +
+          std::to_string(*event.ip_hist_req_time_mean) + "s";
+
+      Alert historical_comparison_alert(
+          event, reason, AlertTier::TIER2_STATISTICAL,
+          "Investigate IP for unusual load or targeted DoS",
+          *event.raw_log.request_time_s / *event.ip_hist_req_time_mean);
+
+      alert_mgr.record_alert(historical_comparison_alert);
+    }
   }
 }
 

@@ -26,8 +26,10 @@ private:
   void check_asset_ratio_rule(const AnalyzedEvent &event);
   void check_ip_zscore_rules(const AnalyzedEvent &event);
   void check_path_zscore_rules(const AnalyzedEvent &event);
+  void check_historical_comparison_rules(const AnalyzedEvent &event);
   void check_user_agent_rules(const AnalyzedEvent &event);
   void check_suspicious_string_rules(const AnalyzedEvent &event);
+  void check_new_seen_rules(const AnalyzedEvent &event);
 
   // To be later refactored to AnalysisWngine
 

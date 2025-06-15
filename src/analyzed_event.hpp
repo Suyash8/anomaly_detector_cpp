@@ -50,6 +50,9 @@ struct AnalyzedEvent {
   std::optional<double> path_hist_error_rate_stddev;
   std::optional<double> path_error_event_zscore;
 
+  bool is_first_request_from_ip = false;
+  bool is_path_new_for_ip = false;
+
   // UA analysis flags
   bool is_ua_missing = false;
   bool is_ua_changed_for_ip = false;

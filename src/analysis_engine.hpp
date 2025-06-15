@@ -35,6 +35,8 @@ struct PerIpState {
   // std::unordered_map<std::string, SlidingWindow<uint64_t>>
   // asset_path_access_window; //Will re add later
   uint64_t last_seen_timestamp_ms; // To help with pruning inactive IPs later
+  uint64_t ip_first_seen_timestamp_ms = 0;
+  std::unordered_set<std::string> paths_seen_by_ip;
 
   std::string last_known_user_agent;
   std::unordered_set<std::string> historical_user_agents;
@@ -84,7 +86,7 @@ private:
   PerPathState &get_or_create_path_state(const std::string &path,
                                          uint64_t current_timestamp_ms);
 
-  void prune_inactive_ips(uint64_t current_timestamp_ms);
+  void prune_inactive_states(uint64_t current_timestamp_ms);
 
   // Helper to check if a path is an asset path - might be needed here if asset
   // analysis moves

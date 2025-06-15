@@ -151,15 +151,23 @@ void perform_advanced_ua_analysis(const std::string &ua,
     event.is_ua_cycling = true;
 }
 
-void AnalysisEngine::prune_inactive_ips(uint64_t current_timestamp_ms) {
-  uint64_t ttl_ms = app_config.tier1.inactive_ip_state_ttl_seconds * 1000;
+void ::AnalysisEngine::prune_inactive_states(uint64_t current_timestamp_ms) {
+  const uint64_t ttl_ms = app_config.tier1.inactive_state_ttl_seconds * 1000;
   if (ttl_ms == 0)
     return;
 
-  auto it = ip_activity_trackers.begin();
-  while (it != ip_activity_trackers.end()) {
+  for (auto it = ip_activity_trackers.begin();
+       it != ip_activity_trackers.end();) {
     if ((current_timestamp_ms - it->second.last_seen_timestamp_ms) > ttl_ms)
       it = ip_activity_trackers.erase(it);
+    else
+      ++it;
+  }
+
+  for (auto it = path_activity_trackers.begin();
+       it != path_activity_trackers.end();) {
+    if ((current_timestamp_ms - it->second.last_seen_timestamp_ms) > ttl_ms)
+      it = path_activity_trackers.erase(it);
     else
       ++it;
   }
@@ -175,7 +183,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   // --- Periodic Pruning ---
   events_processed_since_last_prune_++;
   if (events_processed_since_last_prune_ >= PRUNE_CHECK_INTERNVAL) {
-    prune_inactive_ips(current_event_ts);
+    prune_inactive_states(current_event_ts);
     events_processed_since_last_prune_ = 0;
   }
 
@@ -183,6 +191,18 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       get_or_create_ip_state(raw_log.ip_address, current_event_ts);
   PerPathState &current_path_state =
       get_or_create_path_state(raw_log.request_path, current_event_ts);
+
+  // --- "New Seen" Tracking Logic ---
+  if (current_ip_state.ip_first_seen_timestamp_ms == 0) {
+    current_ip_state.ip_first_seen_timestamp_ms = current_event_ts;
+    event.is_first_request_from_ip = true;
+  }
+
+  if (current_ip_state.paths_seen_by_ip.find(raw_log.request_path) ==
+      current_ip_state.paths_seen_by_ip.end()) {
+    event.is_path_new_for_ip = true;
+    current_ip_state.paths_seen_by_ip.insert(raw_log.request_path);
+  }
 
   // --- Tier 1 window updates ---
   // Update IP's request timestamp window
