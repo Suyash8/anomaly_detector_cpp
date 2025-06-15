@@ -35,6 +35,8 @@ struct PerIpState {
   // std::unordered_map<std::string, SlidingWindow<uint64_t>>
   // asset_path_access_window; //Will re add later
   uint64_t last_seen_timestamp_ms; // To help with pruning inactive IPs later
+  uint64_t ip_first_seen_timestamp_ms = 0;
+  std::unordered_set<std::string> paths_seen_by_ip;
 
   std::string last_known_user_agent;
   std::unordered_set<std::string> historical_user_agents;

@@ -192,6 +192,18 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   PerPathState &current_path_state =
       get_or_create_path_state(raw_log.request_path, current_event_ts);
 
+  // --- "New Seen" Tracking Logic ---
+  if (current_ip_state.ip_first_seen_timestamp_ms == 0) {
+    current_ip_state.ip_first_seen_timestamp_ms = current_event_ts;
+    event.is_first_request_from_ip = true;
+  }
+
+  if (current_ip_state.paths_seen_by_ip.find(raw_log.request_path) ==
+      current_ip_state.paths_seen_by_ip.end()) {
+    event.is_path_new_for_ip = true;
+    current_ip_state.paths_seen_by_ip.insert(raw_log.request_path);
+  }
+
   // --- Tier 1 window updates ---
   // Update IP's request timestamp window
   current_ip_state.request_timestamps_window.add_event(current_event_ts,
