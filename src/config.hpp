@@ -21,6 +21,7 @@ struct Tier1Config {
 
   std::vector<std::string> suspicious_path_substrings;
   std::vector<std::string> suspicious_ua_substrings;
+  std::vector<std::string> sensitive_path_substrings;
 
   uint64_t inactive_state_ttl_seconds = 86400;
 
