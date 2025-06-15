@@ -22,7 +22,7 @@ struct Tier1Config {
   std::vector<std::string> suspicious_path_substrings;
   std::vector<std::string> suspicious_ua_substrings;
 
-  uint64_t inactive_ip_state_ttl_seconds = 86400;
+  uint64_t inactive_state_ttl_seconds = 86400;
 
   std::vector<std::string> html_path_suffixes;
   std::vector<std::string> html_exact_paths;

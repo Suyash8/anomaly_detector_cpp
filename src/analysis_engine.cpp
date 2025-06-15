@@ -152,7 +152,7 @@ void perform_advanced_ua_analysis(const std::string &ua,
 }
 
 void ::AnalysisEngine::prune_inactive_states(uint64_t current_timestamp_ms) {
-  const uint64_t ttl_ms = app_config.tier1.inactive_ip_state_ttl_seconds * 1000;
+  const uint64_t ttl_ms = app_config.tier1.inactive_state_ttl_seconds * 1000;
   if (ttl_ms == 0)
     return;
 
