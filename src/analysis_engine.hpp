@@ -84,7 +84,7 @@ private:
   PerPathState &get_or_create_path_state(const std::string &path,
                                          uint64_t current_timestamp_ms);
 
-  void prune_inactive_ips(uint64_t current_timestamp_ms);
+  void prune_inactive_states(uint64_t current_timestamp_ms);
 
   // Helper to check if a path is an asset path - might be needed here if asset
   // analysis moves
