@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 struct AnalyzedEvent {
   LogEntry raw_log; // Keep the original log entry
@@ -52,6 +53,8 @@ struct AnalyzedEvent {
 
   bool is_first_request_from_ip = false;
   bool is_path_new_for_ip = false;
+
+  std::vector<double> feature_vector;
 
   // UA analysis flags
   bool is_ua_missing = false;

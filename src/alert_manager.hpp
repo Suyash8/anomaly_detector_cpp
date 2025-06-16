@@ -32,6 +32,7 @@ struct Alert {
   double anomaly_score;
   uint64_t associated_log_line;
   std::string raw_log_trigger_sample;
+  std::string ml_feature_contribution;
 
   LogEntry log_context;
   AnalyzedEvent analysis_context;

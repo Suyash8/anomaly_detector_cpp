@@ -4,6 +4,7 @@
 #include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
+#include "ml_models/feature_manager.hpp"
 #include "sliding_window.hpp"
 #include "stats_tracker.hpp"
 #include <cstdint>
@@ -74,6 +75,8 @@ private:
   const Config::AppConfig &app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
   std::unordered_map<std::string, PerPathState> path_activity_trackers;
+
+  FeatureManager feature_manager_;
 
   uint64_t events_processed_since_last_prune_ = 0;
   const uint64_t PRUNE_CHECK_INTERNVAL = 10000; // Check every 10k events

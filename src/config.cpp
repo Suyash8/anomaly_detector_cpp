@@ -176,6 +176,14 @@ bool load_configuration(std::string &config_filepath) {
         else if (key == "historical_deviation_factor")
           GlobalAppConfig.tier2.historical_deviation_factor =
               *Utils::string_to_number<double>(value);
+      } else if (current_section == "Tier3") {
+        if (key == "enabled")
+          GlobalAppConfig.tier3.enabled = string_to_bool(value);
+        else if (key == "model_path")
+          GlobalAppConfig.tier3.model_path = value;
+        else if (key == "anomaly_score_threshold")
+          GlobalAppConfig.tier3.anomaly_score_threshold =
+              *Utils::string_to_number<double>(value);
       }
     } catch (const std::invalid_argument &e) {
       std::cerr << "Warning (Config Line " << line_num

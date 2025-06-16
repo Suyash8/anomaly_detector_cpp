@@ -3,6 +3,7 @@
 #include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
+#include "ml_models/stub_model.hpp"
 #include "utils.hpp"
 
 #include <cstddef>
@@ -24,6 +25,12 @@ RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg)
     else
       std::cerr << "Warning: Failed to load IP allowlist from: "
                 << app_config.allowlist_path << std::endl;
+  }
+
+  if (app_config.tier3.enabled) {
+    std::cout << "Tier 3 ML detection is enabled (using StubModel)."
+              << std::endl;
+    anomaly_model_ = std::make_unique<StubModel>();
   }
 }
 
@@ -61,6 +68,40 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event) {
     check_ip_zscore_rules(event);
     check_path_zscore_rules(event);
     check_historical_comparison_rules(event);
+  }
+
+  if (app_config.tier3.enabled) {
+    check_ml_rules(event);
+  }
+}
+
+void RuleEngine::check_ml_rules(const AnalyzedEvent &event) {
+  if (!anomaly_model_ || event.feature_vector.empty())
+    return;
+
+  auto [score, explanation] =
+      anomaly_model_->score_with_explanation(event.feature_vector);
+
+  if (score > app_config.tier3.anomaly_score_threshold) {
+    std::string reason =
+        "High ML Anomaly Score detected: " + std::to_string(score);
+
+    // Create the alert but don't set the explanation yet.
+    // The explanation is part of the Alert struct, not the constructor.
+    Alert ml_alert(event, reason, AlertTier::TIER3_ML,
+                   "Review event; flagged as anomalous by ML model.", score);
+
+    std::string contrib_str;
+    for (const auto &factor : explanation) {
+      if (!contrib_str.empty())
+        contrib_str += ", ";
+
+      contrib_str += factor;
+    }
+
+    ml_alert.ml_feature_contribution = contrib_str;
+
+    alert_mgr.record_alert(ml_alert);
   }
 }
 

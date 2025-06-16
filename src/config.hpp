@@ -40,6 +40,12 @@ struct Tier2Config {
   double historical_deviation_factor = 3.0;
 };
 
+struct Tier3Config {
+  bool enabled = true;
+  std::string model_path = "models/isolation_forest.onnx";
+  double anomaly_score_threshold = 0.6;
+};
+
 struct AppConfig {
   std::string log_input_path = "data/sample_log.txt";
   std::string allowlist_path = "data/allowlist.txt";
@@ -49,6 +55,7 @@ struct AppConfig {
 
   Tier1Config tier1;
   Tier2Config tier2;
+  Tier3Config tier3;
 
   std::unordered_map<std::string, std::string> custom_settings;
 
