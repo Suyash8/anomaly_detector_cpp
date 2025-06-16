@@ -21,7 +21,8 @@ Alert::Alert(const AnalyzedEvent &event, const std::string &reason,
       anomaly_score(score),
       associated_log_line(event.raw_log.original_line_number),
       raw_log_trigger_sample(event.raw_log.raw_log_line),
-      log_context(event.raw_log), analysis_context(event) {}
+      ml_feature_contribution(""), log_context(event.raw_log),
+      analysis_context(event) {}
 
 std::string alert_tier_to_string_representation(AlertTier tier) {
   switch (tier) {
@@ -150,6 +151,10 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
 
   formatted_alert += "  Action:    " + alert_data.suggested_action + "\n";
 
+  if (!alert_data.ml_feature_contribution.empty())
+    formatted_alert +=
+        "  Factors:   " + alert_data.ml_feature_contribution + "\n";
+
   if (alert_data.associated_log_line > 0)
     formatted_alert +=
         "  Log Line:  " + std::to_string(alert_data.associated_log_line) + "\n";
@@ -164,8 +169,8 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
 }
 
 std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
-  // Placeholder for JSON formatting - this is a more involved task for later.
-  // For now, could just return a simplified string or the human-readable one.
+  // Placeholder for JSON formatting - this is a more involved task for later
+  // For now, could just return a simplified string or the human-readable one
   std::ostringstream ss;
   ss << "{ ";
   ss << "\"timestamp_ms\": " << alert_data.event_timestamp_ms << ", ";
@@ -194,6 +199,8 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
   ss << "\"anomaly_score\":" << alert_data.anomaly_score << ",";
   ss << "\"offending_key\":\""
      << escape_json_value(alert_data.offending_key_identifier) << "\",";
+  ss << "\"ml_contributing_factors\":\""
+     << escape_json_value(alert_data.ml_feature_contribution) << "\",";
 
   // Log Context (all the important fields from the log that triggered the
   // alert)
