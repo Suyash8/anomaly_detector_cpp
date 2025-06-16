@@ -2,6 +2,7 @@
 #include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
+#include "ml_models/feature_manager.hpp"
 #include "ua_parser.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -40,7 +41,8 @@ RequestType get_request_type(const std::string &path,
   return RequestType::OTHER;
 }
 
-AnalysisEngine::AnalysisEngine(const Config::AppConfig &cfg) : app_config(cfg) {
+AnalysisEngine::AnalysisEngine(const Config::AppConfig &cfg)
+    : app_config(cfg), feature_manager_() {
   std::cout << "AnalysisEngine created." << std::endl;
 }
 
@@ -405,6 +407,10 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       break;
     }
   }
+
+  // --- Feature extraction for ML ---
+  if (app_config.tier3.enabled)
+    event.feature_vector = feature_manager_.extract_and_normalize(event);
 
   return event;
 }
