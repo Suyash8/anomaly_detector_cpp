@@ -4,7 +4,9 @@
 #include "alert_manager.hpp"
 #include "analyzed_event.hpp"
 #include "config.hpp"
+#include "ml_models/base_model.hpp"
 
+#include <memory>
 #include <string>
 #include <unordered_set>
 
@@ -19,6 +21,7 @@ private:
   AlertManager &alert_mgr;
   const Config::AppConfig &app_config;
   std::unordered_set<std::string> ip_allowlist_cache;
+  std::unique_ptr<IAnomalyModel> anomaly_model_;
 
 private:
   void check_requests_per_ip_rule(const AnalyzedEvent &event);
@@ -31,10 +34,10 @@ private:
   void check_suspicious_string_rules(const AnalyzedEvent &event);
   void check_new_seen_rules(const AnalyzedEvent &event);
 
-  // To be later refactored to AnalysisWngine
-
   void check_asset_scraping_rule_placeholder(const AnalyzedEvent &event);
   void check_header_anomalies_rule_placeholder(const AnalyzedEvent &event);
+
+  void check_ml_rules(const AnalyzedEvent &event);
 
   bool is_path_an_asset(
       const std::string &request_path) const; // Stays for asset scraping
