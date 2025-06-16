@@ -3,7 +3,7 @@
 #include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
-#include "ml_models/stub_model.hpp"
+#include "ml_models/heuristic_model.hpp"
 #include "utils.hpp"
 
 #include <cstddef>
@@ -30,7 +30,7 @@ RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg)
   if (app_config.tier3.enabled) {
     std::cout << "Tier 3 ML detection is enabled (using StubModel)."
               << std::endl;
-    anomaly_model_ = std::make_unique<StubModel>();
+    anomaly_model_ = std::make_unique<HeuristicModel>();
   }
 }
 
