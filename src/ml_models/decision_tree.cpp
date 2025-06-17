@@ -1,8 +1,6 @@
 #include "decision_tree.hpp"
 #include "features.hpp"
 #include <memory>
-#include <string>
-#include <utility>
 #include <vector>
 
 double DecisionTree::predict(const std::vector<double> &features) const {
@@ -66,17 +64,4 @@ void DecisionTree::build_test_tree() {
   left_node_level_1->right_child = std::make_unique<Node>();
   left_node_level_1->right_child->is_leaf = true;
   left_node_level_1->right_child->prediction_value = 0.9;
-}
-
-DecisionTreeModel::DecisionTreeModel() { tree_.build_test_tree(); }
-
-std::pair<double, std::vector<std::string>>
-DecisionTreeModel::score_with_explanation(const std::vector<double> &features) {
-  double score = tree_.predict(features);
-
-  std::vector<std::string> explanation;
-  if (score > 0.5)
-    explanation.push_back("High score from single decision tree");
-
-  return {score, explanation};
 }
