@@ -15,7 +15,7 @@ DecisionTree::predict_recursive(const Node *node,
   if (node->is_leaf)
     return node->prediction_value;
 
-  // Bounds check to prevent crashes if the feature vector is malformed.
+  // Bounds check to prevent crashes if the feature vector is malformed
   if (node->feature_index < 0 ||
       static_cast<size_t>(node->feature_index) >= features.size())
     return 0.0;

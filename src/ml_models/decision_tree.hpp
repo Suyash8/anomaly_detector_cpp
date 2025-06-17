@@ -1,6 +1,7 @@
 #ifndef DECISION_TREE_HPP
 #define DECISION_TREE_HPP
 
+#include "base_model.hpp"
 #include <memory>
 #include <vector>
 
@@ -28,6 +29,16 @@ private:
 
   double predict_recursive(const Node *node,
                            const std::vector<double> &features) const;
+};
+
+class DecisionTreeModel : public IAnomalyModel {
+public:
+  DecisionTreeModel();
+  std::pair<double, std::vector<std::string>>
+  score_with_explanation(const std::vector<double> &features) override;
+
+private:
+  DecisionTree tree_;
 };
 
 #endif // DECISION_TREE_HPP
