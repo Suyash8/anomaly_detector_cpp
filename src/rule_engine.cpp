@@ -3,7 +3,7 @@
 #include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
-#include "ml_models/decision_tree.hpp"
+#include "ml_models/random_forest_model.hpp"
 #include "utils.hpp"
 
 #include <cstddef>
@@ -28,9 +28,9 @@ RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg)
   }
 
   if (app_config.tier3.enabled) {
-    std::cout << "Tier 3 ML detection is enabled (using StubModel)."
+    std::cout << "Tier 3 ML detection is enabled (using RandomForestModel)."
               << std::endl;
-    anomaly_model_ = std::make_unique<DecisionTreeModel>();
+    anomaly_model_ = std::make_unique<RandomForestModel>(10);
   }
 }
 
