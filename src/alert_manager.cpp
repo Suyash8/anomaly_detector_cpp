@@ -154,8 +154,16 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
       static_cast<std::time_t>(alert_data.event_timestamp_ms / 1000);
   char time_buffer[100];
 
-  // std::gmtime is better for consistent UTC time format
+  std::tm tm_buf;
+#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+  std::tm *tm_info = gmtime_r(&time_in_seconds, &tm_buf);
+#elif defined(_MSC_VER)
+  errno_t err = gmtime_s(&tm_buf, &time_in_seconds);
+  std::tm *tm_info = (err == 0) ? &tm_buf : nullptr;
+#else
   std::tm *tm_info = std::gmtime(&time_in_seconds);
+#endif
+
   if (tm_info) {
     std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%dT%H:%M:%S",
                   tm_info);
