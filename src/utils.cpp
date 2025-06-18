@@ -3,12 +3,14 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <exception>
-#include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 namespace Utils {
 std::string url_decode(const std::string &encoded_string) {
@@ -49,28 +51,75 @@ convert_log_time_to_ms(const std::string &log_time_str) {
     return std::nullopt;
   }
 
+  // Expected format: 23/May/2025:00:00:35 +0530
   std::tm t{};
-  std::istringstream ss(log_time_str);
+  const char *p = log_time_str.c_str();
 
-  // The format string for std::get_time
-  // %d: day of the month
-  // %b: abbreviated month name (locale-dependent, "May" for English)
-  // %Y: year with century
-  // %H:%M:%S: hour, minute, second
-  ss >> std::get_time(&t, "%d/%b/%Y:%H:%M:%S");
+  // Day
+  char *end;
+  t.tm_mday = strtol(p, &end, 10);
+  if (end == p || *end != '/')
+    return std::nullopt;
+  p = end + 1;
 
-  if (ss.fail()) {
-    // std::cerr << "Time parsing failed (std::get_time) for: " << log_time_str
-    //           << std::endl;
+  // Month
+  static const std::unordered_map<std::string, int> month_map = {
+      {"Jan", 0}, {"Feb", 1}, {"Mar", 2}, {"Apr", 3}, {"May", 4},  {"Jun", 5},
+      {"Jul", 6}, {"Aug", 7}, {"Sep", 8}, {"Oct", 9}, {"Nov", 10}, {"Dec", 11}};
+  char month_str[4] = {0};
+  if (sscanf(p, "%3s", month_str) != 1)
+    return std::nullopt;
+
+  auto it = month_map.find(month_str);
+  if (it == month_map.end())
+    return std::nullopt;
+
+  t.tm_mon = it->second;
+  p += 3;
+  if (*p != '/')
+    return std::nullopt;
+  p++;
+
+  // Year, hour, minute, second
+  if (sscanf(p, "%d:%d:%d:%d", &t.tm_year, &t.tm_hour, &t.tm_min, &t.tm_sec) !=
+      4)
+    return std::nullopt;
+  t.tm_year -= 1900;
+
+  // Advance p to the space before the timezone
+  while (*p && *p != ' ')
+    p++;
+  if (*p != ' ')
+    return std::nullopt;
+  p++;
+
+  // Timezone
+  int tz_hour = 0, tz_min = 0;
+  char tz_sign;
+  if (sscanf(p, "%c%02d%02d", &tz_sign, &tz_hour, &tz_min) != 3) {
     return std::nullopt;
   }
 
-  std::time_t epoch_seconds = mktime(&t);
+  // Use timegm/mkgmtime for a direct UTC conversion from struct tm
+  // This avoids locale/timezone issues with mktime
+#if defined(_WIN32)
+  std::time_t epoch_seconds = _mkgmtime(&t);
+#else
+  std::time_t epoch_seconds = timegm(&t);
+#endif
 
   if (epoch_seconds == -1) {
-    // std::cerr << "Time parsing failed (mktime) for: " << log_time_str
-    //           << std::endl;
     return std::nullopt;
+  }
+
+  // The timegm function treats the tm struct as if it were in UTC
+  // The original timestamp was at a specific offset, so we must adjust
+  // our UTC time to match what the original time represented
+  int tz_offset_seconds = (tz_hour * 3600) + (tz_min * 60);
+  if (tz_sign == '-') {
+    epoch_seconds += tz_offset_seconds;
+  } else { // '+'
+    epoch_seconds -= tz_offset_seconds;
   }
 
   return static_cast<uint64_t>(epoch_seconds) * 1000;
