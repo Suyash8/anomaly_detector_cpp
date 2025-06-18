@@ -170,7 +170,8 @@ void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
 
   // Only check if we have seen a minimum number of HTML requests to have a
   // meaningful sample.
-  if (event.ip_html_requests_in_window < cfg.min_html_requests_for_ratio_check)
+  if (static_cast<size_t>(event.ip_html_requests_in_window) <
+      cfg.min_html_requests_for_ratio_check)
     return;
 
   // Check if the ratio exists AND if it is BELOW the minimum expected

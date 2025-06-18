@@ -14,6 +14,7 @@ namespace Utils {
 std::vector<std::string> split_string(const std::string &text, char delimiter);
 std::optional<uint64_t> convert_log_time_to_ms(const std::string &log_time_str);
 uint64_t get_current_time_ms();
+std::string url_decode(const std::string &encoded_string);
 
 template <typename T> std::optional<T> string_to_number(const std::string &s) {
   if (s.empty() || s == "-") { // Ngnix often uses "-" for empty numeric fields
@@ -56,7 +57,6 @@ inline void trim_inplace(std::string &s) {
   rtrim_inplace(s);
 }
 
-// Non-modifying trim
 inline std::string trim_copy(std::string s) {
   trim_inplace(s);
   return s;

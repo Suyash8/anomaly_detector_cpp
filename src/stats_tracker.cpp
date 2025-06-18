@@ -23,7 +23,7 @@ double StatsTracker::get_variance() const {
   }
   // Population variance is M2 / n
   // Sample variance would be M2 / (n - 1)
-  return m2_ / count_;
+  return m2_ / (count_ - 1);
 }
 
 double StatsTracker::get_stddev() const { return std::sqrt(get_variance()); }

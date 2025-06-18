@@ -85,7 +85,7 @@ AnalysisEngine::get_or_create_path_state(const std::string &path,
 void perform_advanced_ua_analysis(const std::string &ua,
                                   const Config::Tier1Config &cfg,
                                   PerIpState &ip_state, AnalyzedEvent &event,
-                                  uint64_t ts) {
+                                  uint64_t ts, uint64_t max_ts) {
   if (!cfg.check_user_agent_anomalies)
     return;
 
@@ -128,7 +128,7 @@ void perform_advanced_ua_analysis(const std::string &ua,
 
   // 5. UA changed and cycling check
   // Prune the cycling window first
-  ip_state.recent_unique_ua_window.prune_old_events(ts);
+  ip_state.recent_unique_ua_window.prune_old_events(max_ts);
 
   // Check if UA changed since last request
   if (!ip_state.last_known_user_agent.empty() &&
@@ -182,16 +182,20 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     return event;
   uint64_t current_event_ts = *raw_log.parsed_timestamp_ms;
 
+  if (current_event_ts > max_timestamp_seen_) {
+    max_timestamp_seen_ = current_event_ts;
+  }
+
   // --- Periodic Pruning ---
   events_processed_since_last_prune_++;
   if (events_processed_since_last_prune_ >= PRUNE_CHECK_INTERNVAL) {
-    prune_inactive_states(current_event_ts);
+    prune_inactive_states(max_timestamp_seen_); // Use max timestamp
     events_processed_since_last_prune_ = 0;
   }
 
-  PerIpState &current_ip_state =
+  PerIpState current_ip_state =
       get_or_create_ip_state(raw_log.ip_address, current_event_ts);
-  PerPathState &current_path_state =
+  PerPathState current_path_state =
       get_or_create_path_state(raw_log.request_path, current_event_ts);
 
   // --- "New Seen" Tracking Logic ---
@@ -210,15 +214,20 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   // Update IP's request timestamp window
   current_ip_state.request_timestamps_window.add_event(current_event_ts,
                                                        current_event_ts);
+  current_ip_state.request_timestamps_window.prune_old_events(
+      max_timestamp_seen_);
   event.current_ip_request_count_in_window =
       current_ip_state.request_timestamps_window.get_event_count();
 
   // Update IP's failed login window if applicable
   if (raw_log.http_status_code) {
     int status = *raw_log.http_status_code;
-    if (status == 401 || status == 403)
+    if (status == 401 || status == 403) {
       current_ip_state.failed_login_timestamps_window.add_event(
           current_event_ts, static_cast<uint64_t>(status));
+      current_ip_state.failed_login_timestamps_window.prune_old_events(
+          max_timestamp_seen_);
+    }
   }
 
   event.current_ip_failed_login_count_in_window =
@@ -226,10 +235,15 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // HTML/Asset request tracking
   RequestType type = get_request_type(raw_log.request_path, app_config.tier1);
-  if (type == RequestType::HTML)
+  if (type == RequestType::HTML) {
     current_ip_state.html_request_timestamps.add_event(current_event_ts, 1);
-  else if (type == RequestType::ASSET)
+    current_ip_state.html_request_timestamps.prune_old_events(
+        max_timestamp_seen_);
+  } else if (type == RequestType::ASSET) {
     current_ip_state.asset_request_timestamps.add_event(current_event_ts, 1);
+    current_ip_state.asset_request_timestamps.prune_old_events(
+        max_timestamp_seen_);
+  }
 
   event.ip_html_requests_in_window =
       current_ip_state.html_request_timestamps.get_event_count();
@@ -253,7 +267,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
         static_cast<double>(*raw_log.bytes_sent));
   }
   bool is_error =
-      (raw_log.http_status_code && *raw_log.http_status_code > 400 &&
+      (raw_log.http_status_code && *raw_log.http_status_code >= 400 &&
        *raw_log.http_status_code < 600);
   current_ip_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
   current_path_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
@@ -307,7 +321,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // --- Z-Score calculation logic ---
   const auto &tier2_cfg = app_config.tier2;
-  long min_samples = tier2_cfg.min_samples_for_z_score;
+  size_t min_samples = tier2_cfg.min_samples_for_z_score;
 
   // Path Req Time Z-score
   if (raw_log.request_time_s &&
@@ -391,7 +405,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // --- User-Agent analysis logic ---
   perform_advanced_ua_analysis(raw_log.user_agent, app_config.tier1,
-                               current_ip_state, event, current_event_ts);
+                               current_ip_state, event, current_event_ts,
+                               max_timestamp_seen_);
 
   // --- Suspicious string scaning ---
   for (const auto &substr : app_config.tier1.suspicious_path_substrings) {

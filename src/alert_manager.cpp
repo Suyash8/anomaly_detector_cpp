@@ -2,6 +2,7 @@
 #include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
+
 #include <cstdio>
 #include <ctime>
 #include <iomanip>
@@ -53,9 +54,9 @@ void AlertManager::initialize(const Config::AppConfig &app_config) {
   output_alerts_to_stdout = app_config.alerts_to_stdout;
   output_alerts_to_file = app_config.alerts_to_file;
   alert_file_output_path = app_config.alert_output_path;
-  // For now, keep file output simple or disable it until JSON formatting is
-  // more robust output_alerts_to_file = app_config.alerts_to_file;
-  // alert_file_output_path = app_config.alert_output_path;
+
+  if (alert_file_stream.is_open())
+    alert_file_stream.close();
 
   // A very simple approach for file output if enabled:
   if (output_alerts_to_file && !alert_file_output_path.empty()) {
@@ -65,71 +66,54 @@ void AlertManager::initialize(const Config::AppConfig &app_config) {
       std::cerr << "Error: AlertManager could not open alert output file: "
                 << alert_file_output_path << std::endl;
       output_alerts_to_file = false; // Disable file output if open failed
-    } else {
+    } else
       std::cout << "Alerts will be logged to: " << alert_file_output_path
                 << std::endl;
-    }
   }
   std::cout << "AlertManager initialized. Stdout alerts: "
             << (output_alerts_to_stdout ? "Enabled" : "Disabled") << std::endl;
 }
 
-std::string AlertManager::escape_json_value(const std::string &input) const {
-  std::ostringstream o;
-  for (char c : input)
-    switch (c) {
-    case '"':
-      o << "\\\"";
-      break;
-    case '\\':
-      o << "\\\\";
-      break;
-    case '\b':
-      o << "\\b";
-      break;
-    case '\f':
-      o << "\\f";
-      break;
-    case '\n':
-      o << "\\n";
-      break;
-    case '\r':
-      o << "\\r";
-      break;
-    case '\t':
-      o << "\\t";
-      break;
-    default:
-      if ('\x00' >= c && c < '\x1f')
-        o << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-          << static_cast<int>(static_cast<unsigned char>(c));
-      else
-        o << c;
-    }
-  return o.str();
+void AlertManager::record_alert(const Alert &new_alert) {
+  if (output_alerts_to_stdout)
+    std::cout << format_alert_to_human_readable(new_alert) << std::endl;
+
+  if (output_alerts_to_file && alert_file_stream.is_open())
+    alert_file_stream << format_alert_to_json(new_alert)
+                      << std::endl; // Use JSON for file
+}
+
+void AlertManager::flush_all_alerts() {
+  if (output_alerts_to_file && alert_file_stream.is_open())
+    alert_file_stream.flush();
+
+  // std::cout << "AlertManager: flush_all_alerts() called." << std::endl;
 }
 
 std::string
 AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
-  // Naive string concatenation for now. std::ostringstream is better for
-  // complex formatting.
+
   std::string formatted_alert = "ALERT DETECTED:\n";
 
   auto time_in_seconds =
       static_cast<std::time_t>(alert_data.event_timestamp_ms / 1000);
   char time_buffer[100];
 
-  // Use std::strftime for POSIX-compliant systems. For Windows, localtime_s is
-  // preferred. For simplicity, let's use std::localtime (note: not thread-safe
-  // without care).
+  std::tm tm_buf;
+#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+  std::tm *tm_info = localtime_r(&time_in_seconds, &tm_buf);
+#elif defined(_MSC_VER)
+  errno_t err = localtime_s(&tm_buf, &time_in_seconds);
+  std::tm *tm_info = (err == 0) ? &tm_buf : nullptr;
+#else
   std::tm *tm_info = std::localtime(&time_in_seconds);
-  if (tm_info) {
+#endif
+  if (tm_info)
     std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S",
                   tm_info);
-  } else {
+  else
     std::snprintf(time_buffer, sizeof(time_buffer), "%llu",
                   (unsigned long long)alert_data.event_timestamp_ms);
-  }
 
   formatted_alert += "  Timestamp: " + std::string(time_buffer) + "." +
                      std::to_string(alert_data.event_timestamp_ms % 1000) +
@@ -169,8 +153,6 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
 }
 
 std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
-  // Placeholder for JSON formatting - this is a more involved task for later
-  // For now, could just return a simplified string or the human-readable one
   std::ostringstream ss;
   ss << "{ ";
   ss << "\"timestamp_ms\": " << alert_data.event_timestamp_ms << ", ";
@@ -180,8 +162,16 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
       static_cast<std::time_t>(alert_data.event_timestamp_ms / 1000);
   char time_buffer[100];
 
-  // std::gmtime is better for consistent UTC time format
+  std::tm tm_buf;
+#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+  std::tm *tm_info = gmtime_r(&time_in_seconds, &tm_buf);
+#elif defined(_MSC_VER)
+  errno_t err = gmtime_s(&tm_buf, &time_in_seconds);
+  std::tm *tm_info = (err == 0) ? &tm_buf : nullptr;
+#else
   std::tm *tm_info = std::gmtime(&time_in_seconds);
+#endif
+
   if (tm_info) {
     std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%dT%H:%M:%S",
                   tm_info);
@@ -225,10 +215,10 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
      << "\",";
   ss << "\"country_code\":\""
      << escape_json_value(alert_data.log_context.country_code) << "\"";
-  ss << "},";
+  ss << "}";
 
   // Analysis Context (all the rich data from AnalyzedEvent)
-  ss << "\"analysis_context\":{";
+  ss << ",\"analysis_context\":{";
   // Tier 1 flags
   ss << "\"is_ua_missing\":"
      << (alert_data.analysis_context.is_ua_missing ? "true" : "false") << ",";
@@ -255,31 +245,46 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
   ss << "\"ip_req_vol_zscore\":"
      << alert_data.analysis_context.ip_req_vol_zscore.value_or(0.0);
   // Add more analysis fields here as they are created
-  ss << "},";
+  ss << "}";
 
-  ss << "\"raw_log\":\"" << escape_json_value(alert_data.raw_log_trigger_sample)
-     << "\"";
+  ss << ",\"raw_log\":\""
+     << escape_json_value(alert_data.raw_log_trigger_sample) << "\"";
 
   ss << "}";
   return ss.str();
 }
 
-void AlertManager::record_alert(const Alert &new_alert) {
-  if (output_alerts_to_stdout) {
-    std::cout << format_alert_to_human_readable(new_alert) << std::endl;
-  }
-
-  if (output_alerts_to_file && alert_file_stream.is_open()) {
-    alert_file_stream << format_alert_to_json(new_alert)
-                      << std::endl; // Use JSON for file
-  }
-  // If buffering: buffered_alerts.push_back(new_alert);
-}
-
-void AlertManager::flush_all_alerts() {
-  // If buffering was implemented, this is where you'd write them out.
-  if (output_alerts_to_file && alert_file_stream.is_open()) {
-    alert_file_stream.flush();
-  }
-  // std::cout << "AlertManager: flush_all_alerts() called." << std::endl;
+std::string AlertManager::escape_json_value(const std::string &input) const {
+  std::ostringstream o;
+  for (char c : input)
+    switch (c) {
+    case '"':
+      o << "\\\"";
+      break;
+    case '\\':
+      o << "\\\\";
+      break;
+    case '\b':
+      o << "\\b";
+      break;
+    case '\f':
+      o << "\\f";
+      break;
+    case '\n':
+      o << "\\n";
+      break;
+    case '\r':
+      o << "\\r";
+      break;
+    case '\t':
+      o << "\\t";
+      break;
+    default:
+      if ('\x00' <= c && c <= '\x1f')
+        o << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+          << static_cast<int>(static_cast<unsigned char>(c));
+      else
+        o << c;
+    }
+  return o.str();
 }
