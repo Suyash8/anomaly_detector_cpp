@@ -13,7 +13,6 @@ public:
         configured_max_elements(max_elements_limit) {};
 
   void add_event(uint64_t event_timestamp_ms, const ValueType &value) {
-    // Always add, then prune. This ensures the current event is considered.
     window_data.emplace_back(event_timestamp_ms, value);
     prune_old_events(event_timestamp_ms);
   }
@@ -23,21 +22,12 @@ public:
     prune_old_events(event_timestamp_ms);
   }
 
-  // Remove events that are older than the window duration relative to
-  // 'current_time_ms'
-  // Also enforces max_elements if set
   void prune_old_events(uint64_t current_time_ms) {
     // 1. Time based pruning
     if (configured_duration_ms > 0) {
-      // Calculate the cutoff: events strictly older than this are removed
-      // T_event must be >= (current_time_ms - configured_duration_ms)
-      // So, remove if T_event < (current_time_ms - configured_duration_ms)
       uint64_t cutoff_timestamp = 0;
       if (current_time_ms >= configured_duration_ms) // Avoid underflow
         cutoff_timestamp = current_time_ms - configured_duration_ms;
-
-      // Else, cutoff_timestamp is 0, meaning if current_time_ms is small, no
-      // time-based pruning happens yet, which is fine.
 
       while (!window_data.empty() &&
              window_data.front().first < cutoff_timestamp)
@@ -52,7 +42,7 @@ public:
 
   size_t get_event_count() const { return window_data.size(); }
 
-  bool is_empty() const { return window_data.size(); }
+  bool is_empty() const { return window_data.empty(); }
 
   std::vector<ValueType> get_all_values_in_window() const {
     std::vector<ValueType> values;
