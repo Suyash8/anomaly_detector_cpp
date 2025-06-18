@@ -272,7 +272,7 @@ std::string AlertManager::escape_json_value(const std::string &input) const {
       o << "\\t";
       break;
     default:
-      if ('\x00' >= c && c < '\x1f')
+      if ('\x00' <= c && c <= '\x1f')
         o << "\\u" << std::hex << std::setw(4) << std::setfill('0')
           << static_cast<int>(static_cast<unsigned char>(c));
       else
