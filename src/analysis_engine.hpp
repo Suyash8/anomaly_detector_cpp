@@ -81,6 +81,9 @@ private:
   uint64_t events_processed_since_last_prune_ = 0;
   const uint64_t PRUNE_CHECK_INTERNVAL = 10000; // Check every 10k events
 
+  // Track the highest seen timestamp to correctly handle out-of-order logs
+  uint64_t max_timestamp_seen_ = 0;
+
   //   std::unordered_map<std::string, PerPathState>
   //       path_activity_trackers; // For later
 

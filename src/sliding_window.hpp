@@ -14,12 +14,10 @@ public:
 
   void add_event(uint64_t event_timestamp_ms, const ValueType &value) {
     window_data.emplace_back(event_timestamp_ms, value);
-    prune_old_events(event_timestamp_ms);
   }
 
   void add_event(uint64_t event_timestamp_ms, ValueType &&value) {
     window_data.emplace_back(event_timestamp_ms, std::move(value));
-    prune_old_events(event_timestamp_ms);
   }
 
   void prune_old_events(uint64_t current_time_ms) {
