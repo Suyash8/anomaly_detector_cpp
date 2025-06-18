@@ -55,9 +55,8 @@ void AlertManager::initialize(const Config::AppConfig &app_config) {
   output_alerts_to_file = app_config.alerts_to_file;
   alert_file_output_path = app_config.alert_output_path;
 
-  if (alert_file_stream.is_open()) {
+  if (alert_file_stream.is_open())
     alert_file_stream.close();
-  }
 
   // A very simple approach for file output if enabled:
   if (output_alerts_to_file && !alert_file_output_path.empty()) {
@@ -67,30 +66,27 @@ void AlertManager::initialize(const Config::AppConfig &app_config) {
       std::cerr << "Error: AlertManager could not open alert output file: "
                 << alert_file_output_path << std::endl;
       output_alerts_to_file = false; // Disable file output if open failed
-    } else {
+    } else
       std::cout << "Alerts will be logged to: " << alert_file_output_path
                 << std::endl;
-    }
   }
   std::cout << "AlertManager initialized. Stdout alerts: "
             << (output_alerts_to_stdout ? "Enabled" : "Disabled") << std::endl;
 }
 
 void AlertManager::record_alert(const Alert &new_alert) {
-  if (output_alerts_to_stdout) {
+  if (output_alerts_to_stdout)
     std::cout << format_alert_to_human_readable(new_alert) << std::endl;
-  }
 
-  if (output_alerts_to_file && alert_file_stream.is_open()) {
+  if (output_alerts_to_file && alert_file_stream.is_open())
     alert_file_stream << format_alert_to_json(new_alert)
                       << std::endl; // Use JSON for file
-  }
 }
 
 void AlertManager::flush_all_alerts() {
-  if (output_alerts_to_file && alert_file_stream.is_open()) {
+  if (output_alerts_to_file && alert_file_stream.is_open())
     alert_file_stream.flush();
-  }
+
   // std::cout << "AlertManager: flush_all_alerts() called." << std::endl;
 }
 
@@ -104,13 +100,12 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
   char time_buffer[100];
 
   std::tm *tm_info = std::localtime(&time_in_seconds);
-  if (tm_info) {
+  if (tm_info)
     std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S",
                   tm_info);
-  } else {
+  else
     std::snprintf(time_buffer, sizeof(time_buffer), "%llu",
                   (unsigned long long)alert_data.event_timestamp_ms);
-  }
 
   formatted_alert += "  Timestamp: " + std::string(time_buffer) + "." +
                      std::to_string(alert_data.event_timestamp_ms % 1000) +
@@ -148,9 +143,8 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
   formatted_alert += "----------------------------------------";
   return formatted_alert;
 }
+
 std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
-  // Placeholder for JSON formatting - this is a more involved task for later
-  // For now, could just return a simplified string or the human-readable one
   std::ostringstream ss;
   ss << "{ ";
   ss << "\"timestamp_ms\": " << alert_data.event_timestamp_ms << ", ";
@@ -205,10 +199,10 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
      << "\",";
   ss << "\"country_code\":\""
      << escape_json_value(alert_data.log_context.country_code) << "\"";
-  ss << "},";
+  ss << "}";
 
   // Analysis Context (all the rich data from AnalyzedEvent)
-  ss << "\"analysis_context\":{";
+  ss << ",\"analysis_context\":{";
   // Tier 1 flags
   ss << "\"is_ua_missing\":"
      << (alert_data.analysis_context.is_ua_missing ? "true" : "false") << ",";
@@ -235,10 +229,10 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
   ss << "\"ip_req_vol_zscore\":"
      << alert_data.analysis_context.ip_req_vol_zscore.value_or(0.0);
   // Add more analysis fields here as they are created
-  ss << "},";
+  ss << "}";
 
-  ss << "\"raw_log\":\"" << escape_json_value(alert_data.raw_log_trigger_sample)
-     << "\"";
+  ss << ",\"raw_log\":\""
+     << escape_json_value(alert_data.raw_log_trigger_sample) << "\"";
 
   ss << "}";
   return ss.str();
