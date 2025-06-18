@@ -1,12 +1,37 @@
 #include "utils.hpp"
+
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
+#include <exception>
 #include <iomanip>
 #include <optional>
 #include <sstream>
+#include <string>
 
 namespace Utils {
+std::string url_decode(const std::string &encoded_string) {
+  std::ostringstream decoded_stream;
+
+  for (size_t i = 0; i < encoded_string.length(); i++) {
+    if (encoded_string[i] == '%' && i + 2 < encoded_string.length()) {
+      std::string hex = encoded_string.substr(i + 1, 2);
+      try {
+        char decoded_char = static_cast<char>(std::stoi(hex, nullptr, 16));
+        decoded_stream << decoded_char;
+        i += 2;
+      } catch (const std::exception &) {
+        decoded_stream << '%';
+      }
+    } else if (encoded_string[i] == '+')
+      decoded_stream << ' ';
+    else
+      decoded_stream << encoded_string[i];
+  }
+  return decoded_stream.str();
+}
+
 std::vector<std::string> split_string(const std::string &text, char delimiter) {
   std::vector<std::string> tokens;
   std::string current_token;

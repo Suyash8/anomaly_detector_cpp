@@ -90,6 +90,8 @@ std::optional<LogEntry> LogEntry::parse_from_string(const std::string &log_line,
   Utils::trim_inplace(entry.request_path);
   Utils::trim_inplace(entry.request_protocol);
 
+  entry.request_path = Utils::url_decode(entry.request_path);
+
   entry.http_status_code = Utils::string_to_number<int>(fields[6]);
   if (!entry.http_status_code &&
       fields[6] != "-") { // If parsing failed AND it wasn't just a "-"
