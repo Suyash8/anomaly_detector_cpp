@@ -100,11 +100,11 @@ bool load_configuration(std::string &config_filepath) {
                   GlobalAppConfig.tier1.sliding_window_duration_seconds);
         else if (key == "max_requests_per_ip_in_window")
           GlobalAppConfig.tier1.max_requests_per_ip_in_window =
-              Utils::string_to_number<int>(value).value_or(
+              Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.max_requests_per_ip_in_window);
         else if (key == "max_failed_logins_per_ip")
           GlobalAppConfig.tier1.max_failed_logins_per_ip =
-              Utils::string_to_number<int>(value).value_or(
+              Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.max_failed_logins_per_ip);
         else if (key == "check_user_agent_anomalies")
           GlobalAppConfig.tier1.check_user_agent_anomalies =
@@ -119,7 +119,7 @@ bool load_configuration(std::string &config_filepath) {
                   GlobalAppConfig.tier1.min_firefox_version);
         else if (key == "max_unique_uas_per_ip_in_window")
           GlobalAppConfig.tier1.max_unique_uas_per_ip_in_window =
-              Utils::string_to_number<int>(value).value_or(
+              Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.max_unique_uas_per_ip_in_window);
         else if (key == "inactive_state_ttl_seconds")
           GlobalAppConfig.tier1.inactive_state_ttl_seconds =
@@ -139,7 +139,7 @@ bool load_configuration(std::string &config_filepath) {
               Utils::split_string(value, ',');
         else if (key == "min_html_requests_for_ratio_check")
           GlobalAppConfig.tier1.min_html_requests_for_ratio_check =
-              Utils::string_to_number<int>(value).value_or(
+              Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.min_html_requests_for_ratio_check);
         else if (key == "min_assets_per_html_ratio")
           GlobalAppConfig.tier1.min_assets_per_html_ratio =
@@ -186,7 +186,7 @@ bool load_configuration(std::string &config_filepath) {
                   GlobalAppConfig.tier2.z_score_threshold);
         else if (key == "min_samples_for_z_score")
           GlobalAppConfig.tier2.min_samples_for_z_score =
-              Utils::string_to_number<int>(value).value_or(
+              Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier2.min_samples_for_z_score);
         else if (key == "historical_deviation_factor")
           GlobalAppConfig.tier2.historical_deviation_factor =

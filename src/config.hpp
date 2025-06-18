@@ -1,6 +1,7 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -11,13 +12,13 @@ namespace Config {
 struct Tier1Config {
   bool enabled = true;
   uint64_t sliding_window_duration_seconds = 60;
-  int max_requests_per_ip_in_window = 100;
-  int max_failed_logins_per_ip = 5;
+  size_t max_requests_per_ip_in_window = 100;
+  size_t max_failed_logins_per_ip = 5;
 
   bool check_user_agent_anomalies = true;
   int min_chrome_version = 90;
   int min_firefox_version = 85;
-  int max_unique_uas_per_ip_in_window = 3;
+  size_t max_unique_uas_per_ip_in_window = 3;
 
   std::vector<std::string> suspicious_path_substrings;
   std::vector<std::string> suspicious_ua_substrings;
@@ -29,14 +30,14 @@ struct Tier1Config {
   std::vector<std::string> html_exact_paths;
   std::vector<std::string> asset_path_prefixes;
   std::vector<std::string> asset_path_suffixes;
-  int min_html_requests_for_ratio_check = 5;
+  size_t min_html_requests_for_ratio_check = 5;
   double min_assets_per_html_ratio = 10.0;
 };
 
 struct Tier2Config {
   bool enabled = true;
   double z_score_threshold = 3.5;
-  int min_samples_for_z_score = 30;
+  size_t min_samples_for_z_score = 30;
   double historical_deviation_factor = 3.0;
 };
 

@@ -307,7 +307,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // --- Z-Score calculation logic ---
   const auto &tier2_cfg = app_config.tier2;
-  long min_samples = tier2_cfg.min_samples_for_z_score;
+  size_t min_samples = tier2_cfg.min_samples_for_z_score;
 
   // Path Req Time Z-score
   if (raw_log.request_time_s &&
