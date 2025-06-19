@@ -18,6 +18,9 @@ constexpr const char *ALLOWLIST_PATH = "allowlist_path";
 constexpr const char *ALERTS_TO_STDOUT = "alerts_to_stdout";
 constexpr const char *ALERTS_TO_FILE = "alerts_to_file";
 constexpr const char *ALERT_OUTPUT_PATH = "alert_output_path";
+constexpr const char *ALERT_THROTTLE_DURATION_SECONDS =
+    "alert_throttle_duration_seconds";
+constexpr const char *ALERT_THROTTLE_MAX_ALERTS = "alert_throttle_max_alerts";
 
 // Tier1 Settings
 constexpr const char *T1_ENABLED = "enabled";
@@ -106,6 +109,8 @@ struct AppConfig {
   bool alerts_to_stdout = true;
   bool alerts_to_file = false;
   std::string alert_output_path = "alerts.json";
+  uint64_t alert_throttle_duration_seconds = 300; // 5 minutes default
+  uint64_t alert_throttle_max_alerts = 10;
 
   Tier1Config tier1;
   Tier2Config tier2;

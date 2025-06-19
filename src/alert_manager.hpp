@@ -8,6 +8,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 // Forward declare AppConfig if AlertManager needs it for initialization
 namespace Config {
@@ -59,6 +60,11 @@ private:
   bool output_alerts_to_file;
   std::string alert_file_output_path;
   std::ofstream alert_file_stream; // For writing alerts to a file
+
+  uint64_t throttle_duration_ms_ = 0;
+  uint64_t throttled_alerts_ = 0;
+  uint64_t max_throttled_alerts_ = 0;
+  std::unordered_map<std::string, uint64_t> recent_alert_timestamps_;
 
   // For simplicity, we will write directly. Buffering could be added
   // std::vector<Alert> buffered_alerts;
