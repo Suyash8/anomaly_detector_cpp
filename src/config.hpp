@@ -9,6 +9,56 @@
 
 namespace Config {
 
+// Define all config keys as constants to prevent typos and improve
+// maintainability.
+namespace Keys {
+// General Settings
+constexpr const char *LOG_INPUT_PATH = "log_input_path";
+constexpr const char *ALLOWLIST_PATH = "allowlist_path";
+constexpr const char *ALERTS_TO_STDOUT = "alerts_to_stdout";
+constexpr const char *ALERTS_TO_FILE = "alerts_to_file";
+constexpr const char *ALERT_OUTPUT_PATH = "alert_output_path";
+
+// Tier1 Settings
+constexpr const char *T1_ENABLED = "enabled";
+constexpr const char *T1_SLIDING_WINDOW_SECONDS =
+    "sliding_window_duration_seconds";
+constexpr const char *T1_MAX_REQUESTS_PER_IP = "max_requests_per_ip_in_window";
+constexpr const char *T1_MAX_FAILED_LOGINS_PER_IP = "max_failed_logins_per_ip";
+constexpr const char *T1_CHECK_UA_ANOMALIES = "check_user_agent_anomalies";
+constexpr const char *T1_MIN_CHROME_VERSION = "min_chrome_version";
+constexpr const char *T1_MIN_FIREFOX_VERSION = "min_firefox_version";
+constexpr const char *T1_MAX_UNIQUE_UAS_PER_IP =
+    "max_unique_uas_per_ip_in_window";
+constexpr const char *T1_INACTIVE_STATE_TTL_SECONDS =
+    "inactive_state_ttl_seconds";
+constexpr const char *T1_HTML_PATH_SUFFIXES = "html_path_suffixes";
+constexpr const char *T1_HTML_EXACT_PATHS = "html_exact_paths";
+constexpr const char *T1_ASSET_PATH_PREFIXES = "asset_path_prefixes";
+constexpr const char *T1_ASSET_PATH_SUFFIXES = "asset_path_suffixes";
+constexpr const char *T1_MIN_HTML_REQUESTS_FOR_RATIO =
+    "min_html_requests_for_ratio_check";
+constexpr const char *T1_MIN_ASSETS_PER_HTML_RATIO =
+    "min_assets_per_html_ratio";
+constexpr const char *T1_SUSPICIOUS_PATH_SUBSTRINGS =
+    "suspicious_path_substrings";
+constexpr const char *T1_SUSPICIOUS_UA_SUBSTRINGS = "suspicious_ua_substrings";
+constexpr const char *T1_SENSITIVE_PATH_SUBSTRINGS =
+    "sensitive_path_substrings";
+
+// Tier2 Settings
+constexpr const char *T2_ENABLED = "enabled";
+constexpr const char *T2_Z_SCORE_THRESHOLD = "z_score_threshold";
+constexpr const char *T2_MIN_SAMPLES_FOR_Z_SCORE = "min_samples_for_z_score";
+constexpr const char *T2_HISTORICAL_DEVIATION_FACTOR =
+    "historical_deviation_factor";
+
+// Tier3 Settings
+constexpr const char *T3_ENABLED = "enabled";
+constexpr const char *T3_MODEL_PATH = "model_path";
+constexpr const char *T3_ANOMALY_SCORE_THRESHOLD = "anomaly_score_threshold";
+} // namespace Keys
+
 struct Tier1Config {
   bool enabled = true;
   uint64_t sliding_window_duration_seconds = 60;
