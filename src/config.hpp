@@ -25,6 +25,8 @@ constexpr const char *T1_SLIDING_WINDOW_SECONDS =
     "sliding_window_duration_seconds";
 constexpr const char *T1_MAX_REQUESTS_PER_IP = "max_requests_per_ip_in_window";
 constexpr const char *T1_MAX_FAILED_LOGINS_PER_IP = "max_failed_logins_per_ip";
+constexpr const char *T1_FAILED_LOGIN_STATUS_CODES =
+    "failed_login_status_codes";
 constexpr const char *T1_CHECK_UA_ANOMALIES = "check_user_agent_anomalies";
 constexpr const char *T1_MIN_CHROME_VERSION = "min_chrome_version";
 constexpr const char *T1_MIN_FIREFOX_VERSION = "min_firefox_version";
@@ -64,6 +66,7 @@ struct Tier1Config {
   uint64_t sliding_window_duration_seconds = 60;
   size_t max_requests_per_ip_in_window = 100;
   size_t max_failed_logins_per_ip = 5;
+  std::vector<short> failed_login_status_codes = {401, 403};
 
   bool check_user_agent_anomalies = true;
   int min_chrome_version = 90;

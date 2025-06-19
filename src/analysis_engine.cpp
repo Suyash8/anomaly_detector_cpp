@@ -4,6 +4,7 @@
 #include "log_entry.hpp"
 #include "ml_models/feature_manager.hpp"
 #include "ua_parser.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -232,7 +233,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   // Update IP's failed login window if applicable
   if (raw_log.http_status_code) {
     int status = *raw_log.http_status_code;
-    if (status == 401 || status == 403) {
+    const auto &codes = app_config.tier1.failed_login_status_codes;
+    if (std::find(codes.begin(), codes.end(), status) != codes.end()) {
       current_ip_state.failed_login_timestamps_window.add_event(
           current_event_ts, static_cast<uint64_t>(status));
       current_ip_state.failed_login_timestamps_window.prune_old_events(
