@@ -8,22 +8,23 @@
 #include <iomanip>
 #include <ios>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 
-Alert::Alert(const AnalyzedEvent &event, const std::string &reason,
-             AlertTier tier, const std::string &action, double score,
-             const std::string &key_id)
-    : event_timestamp_ms(event.raw_log.parsed_timestamp_ms.value_or(0)),
-      source_ip(event.raw_log.ip_address), alert_reason(reason),
+Alert::Alert(std::shared_ptr<const AnalyzedEvent> event,
+             const std::string &reason, AlertTier tier,
+             const std::string &action, double score, const std::string &key_id)
+    : event_context(event),
+      event_timestamp_ms(event->raw_log.parsed_timestamp_ms.value_or(0)),
+      source_ip(event->raw_log.ip_address), alert_reason(reason),
       detection_tier(tier), suggested_action(action),
-      offending_key_identifier(key_id.empty() ? event.raw_log.ip_address
+      offending_key_identifier(key_id.empty() ? event->raw_log.ip_address
                                               : key_id),
       anomaly_score(score),
-      associated_log_line(event.raw_log.original_line_number),
-      raw_log_trigger_sample(event.raw_log.raw_log_line),
-      ml_feature_contribution(""), log_context(event.raw_log),
-      analysis_context(event) {}
+      associated_log_line(event->raw_log.original_line_number),
+      raw_log_trigger_sample(event->raw_log.raw_log_line),
+      ml_feature_contribution("") {}
 
 std::string alert_tier_to_string_representation(AlertTier tier) {
   switch (tier) {
@@ -92,7 +93,6 @@ void AlertManager::flush_all_alerts() {
 
 std::string
 AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
-
   std::string formatted_alert = "ALERT DETECTED:\n";
 
   auto time_in_seconds =
@@ -108,6 +108,7 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
 #else
   std::tm *tm_info = std::localtime(&time_in_seconds);
 #endif
+
   if (tm_info)
     std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S",
                   tm_info);
@@ -153,6 +154,9 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
 }
 
 std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
+  const auto &log_context = alert_data.event_context->raw_log;
+  const auto &analysis_context = *alert_data.event_context;
+
   std::ostringstream ss;
   ss << "{ ";
   ss << "\"timestamp_ms\": " << alert_data.event_timestamp_ms << ", ";
@@ -197,53 +201,46 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
   ss << "\"log_context\":{";
   ss << "\"source_ip\":\"" << escape_json_value(alert_data.source_ip) << "\",";
   ss << "\"log_line_number\":" << alert_data.associated_log_line << ",";
-  ss << "\"host\":\"" << escape_json_value(alert_data.log_context.host)
+  ss << "\"host\":\"" << escape_json_value(log_context.host) << "\",";
+  ss << "\"request_method\":\"" << escape_json_value(log_context.request_method)
      << "\",";
-  ss << "\"request_method\":\""
-     << escape_json_value(alert_data.log_context.request_method) << "\",";
-  ss << "\"request_path\":\""
-     << escape_json_value(alert_data.log_context.request_path) << "\",";
-  ss << "\"status_code\":"
-     << alert_data.log_context.http_status_code.value_or(0) << ",";
-  ss << "\"bytes_sent\":" << alert_data.log_context.bytes_sent.value_or(0)
+  ss << "\"request_path\":\"" << escape_json_value(log_context.request_path)
+     << "\",";
+  ss << "\"status_code\":" << log_context.http_status_code.value_or(0) << ",";
+  ss << "\"bytes_sent\":" << log_context.bytes_sent.value_or(0) << ",";
+  ss << "\"request_time_s\":" << log_context.request_time_s.value_or(0.0)
      << ",";
-  ss << "\"request_time_s\":"
-     << alert_data.log_context.request_time_s.value_or(0.0) << ",";
-  ss << "\"user_agent\":\""
-     << escape_json_value(alert_data.log_context.user_agent) << "\",";
-  ss << "\"referer\":\"" << escape_json_value(alert_data.log_context.referer)
+  ss << "\"user_agent\":\"" << escape_json_value(log_context.user_agent)
      << "\",";
-  ss << "\"country_code\":\""
-     << escape_json_value(alert_data.log_context.country_code) << "\"";
+  ss << "\"referer\":\"" << escape_json_value(log_context.referer) << "\",";
+  ss << "\"country_code\":\"" << escape_json_value(log_context.country_code)
+     << "\"";
   ss << "}";
 
   // Analysis Context (all the rich data from AnalyzedEvent)
   ss << ",\"analysis_context\":{";
   // Tier 1 flags
   ss << "\"is_ua_missing\":"
-     << (alert_data.analysis_context.is_ua_missing ? "true" : "false") << ",";
+     << (analysis_context.is_ua_missing ? "true" : "false") << ",";
   ss << "\"is_ua_outdated\":"
-     << (alert_data.analysis_context.is_ua_outdated ? "true" : "false") << ",";
+     << (analysis_context.is_ua_outdated ? "true" : "false") << ",";
   ss << "\"is_ua_headless\":"
-     << (alert_data.analysis_context.is_ua_headless ? "true" : "false") << ",";
+     << (analysis_context.is_ua_headless ? "true" : "false") << ",";
   ss << "\"is_ua_cycling\":"
-     << (alert_data.analysis_context.is_ua_cycling ? "true" : "false") << ",";
+     << (analysis_context.is_ua_cycling ? "true" : "false") << ",";
   ss << "\"found_suspicious_path_str\":"
-     << (alert_data.analysis_context.found_suspicious_path_str ? "true"
-                                                               : "false")
-     << ",";
+     << (analysis_context.found_suspicious_path_str ? "true" : "false") << ",";
   ss << "\"found_suspicious_ua_str\":"
-     << (alert_data.analysis_context.found_suspicious_ua_str ? "true" : "false")
-     << ",";
+     << (analysis_context.found_suspicious_ua_str ? "true" : "false") << ",";
   // Tier 2 Z-scores
   ss << "\"ip_req_time_zscore\":"
-     << alert_data.analysis_context.ip_req_time_zscore.value_or(0.0) << ",";
+     << analysis_context.ip_req_time_zscore.value_or(0.0) << ",";
   ss << "\"ip_bytes_sent_zscore\":"
-     << alert_data.analysis_context.ip_bytes_sent_zscore.value_or(0.0) << ",";
+     << analysis_context.ip_bytes_sent_zscore.value_or(0.0) << ",";
   ss << "\"ip_error_event_zscore\":"
-     << alert_data.analysis_context.ip_error_event_zscore.value_or(0.0) << ",";
+     << analysis_context.ip_error_event_zscore.value_or(0.0) << ",";
   ss << "\"ip_req_vol_zscore\":"
-     << alert_data.analysis_context.ip_req_vol_zscore.value_or(0.0);
+     << analysis_context.ip_req_vol_zscore.value_or(0.0);
   // Add more analysis fields here as they are created
   ss << "}";
 

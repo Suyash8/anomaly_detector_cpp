@@ -4,7 +4,6 @@
 #include "config.hpp"
 #include "log_entry.hpp"
 #include "rule_engine.hpp"
-// #include "sliding_window.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -14,29 +13,6 @@
 #include <istream>
 #include <optional>
 #include <string>
-
-void print_entry_details(const LogEntry &entry) {
-  std::cout << "Parsed (Line " << entry.original_line_number
-            << "): " << "IP=" << entry.ip_address;
-  if (entry.parsed_timestamp_ms)
-    std::cout << ", Timestamp=" << *entry.parsed_timestamp_ms;
-  else
-    std::cout << ", Timestamp=N/A";
-
-  if (entry.http_status_code)
-    std::cout << ", Status=" << *entry.http_status_code;
-  else
-    std::cout << ", Status=N/A";
-
-  std::cout << ", Path=" << entry.request_path;
-
-  if (entry.bytes_sent)
-    std::cout << ", Bytes=" << *entry.bytes_sent;
-  else
-    std::cout << ", Bytes=N/A";
-
-  std::cout << std::endl;
-}
 
 int main(int argc, char *argv[]) {
   std::ios_base::sync_with_stdio(false); // Potentially faster I/O
@@ -57,8 +33,6 @@ int main(int argc, char *argv[]) {
 
   AnalysisEngine analysis_engine_instance(current_config);
   RuleEngine rule_engine_instance(alert_manager_instance, current_config);
-
-  // test_sliding_window_functionality();
 
   // --- Log Processing ---
   std::istream *p_log_stream = nullptr;
