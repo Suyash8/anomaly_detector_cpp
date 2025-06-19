@@ -11,8 +11,18 @@
 
 enum class RequestType { HTML, ASSET, OTHER };
 
-RequestType get_request_type(const std::string &path,
+RequestType get_request_type(const std::string &raw_path,
                              const Config::Tier1Config &cfg) {
+
+  std::string path = raw_path;
+  size_t query_pos = path.find('?');
+  if (query_pos != std::string::npos)
+    path = path.substr(0, query_pos);
+
+  size_t fragment_pos = path.find('#');
+  if (fragment_pos != std::string::npos)
+    path = path.substr(0, fragment_pos);
+
   for (const auto &exact : cfg.html_exact_paths) {
     if (path == exact)
       return RequestType::HTML;
