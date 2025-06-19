@@ -3,10 +3,10 @@
 
 #include "analyzed_event.hpp"
 #include "config.hpp"
-#include "log_entry.hpp"
 
 #include <cstdint>
 #include <fstream>
+#include <memory>
 #include <string>
 
 // Forward declare AppConfig if AlertManager needs it for initialization
@@ -34,12 +34,11 @@ struct Alert {
   std::string raw_log_trigger_sample;
   std::string ml_feature_contribution;
 
-  LogEntry log_context;
-  AnalyzedEvent analysis_context;
+  std::shared_ptr<const AnalyzedEvent> event_context;
 
   // Constructor for convenience
-  Alert(const AnalyzedEvent &event, const std::string &reason, AlertTier tier,
-        const std::string &action, double score,
+  Alert(std::shared_ptr<const AnalyzedEvent> event, const std::string &reason,
+        AlertTier tier, const std::string &action, double score,
         const std::string &key_id = "");
 };
 

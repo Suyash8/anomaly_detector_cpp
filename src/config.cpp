@@ -77,77 +77,77 @@ bool load_configuration(std::string &config_filepath) {
     try {
       // Global (non-section) keys
       if (current_section.empty()) {
-        if (key == "log_input_path")
+        if (key == Keys::LOG_INPUT_PATH)
           GlobalAppConfig.log_input_path = value;
-        else if (key == "allowlist_path")
+        else if (key == Keys::ALLOWLIST_PATH)
           GlobalAppConfig.allowlist_path = value;
-        else if (key == "alerts_to_stdout")
+        else if (key == Keys::ALERTS_TO_STDOUT)
           GlobalAppConfig.alerts_to_stdout = string_to_bool(value);
-        else if (key == "alerts_to_file")
+        else if (key == Keys::ALERTS_TO_FILE)
           GlobalAppConfig.alerts_to_file = string_to_bool(value);
-        else if (key == "alert_output_path")
+        else if (key == Keys::ALERT_OUTPUT_PATH)
           GlobalAppConfig.alert_output_path = value;
         else
           GlobalAppConfig.custom_settings[key] = value;
 
         // Tier 1 settings
       } else if (current_section == "Tier1") {
-        if (key == "enabled")
+        if (key == Keys::T1_ENABLED)
           GlobalAppConfig.tier1.enabled = string_to_bool(value);
-        else if (key == "sliding_window_duration_seconds")
+        else if (key == Keys::T1_SLIDING_WINDOW_SECONDS)
           GlobalAppConfig.tier1.sliding_window_duration_seconds =
               Utils::string_to_number<uint64_t>(value).value_or(
                   GlobalAppConfig.tier1.sliding_window_duration_seconds);
-        else if (key == "max_requests_per_ip_in_window")
+        else if (key == Keys::T1_MAX_REQUESTS_PER_IP)
           GlobalAppConfig.tier1.max_requests_per_ip_in_window =
               Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.max_requests_per_ip_in_window);
-        else if (key == "max_failed_logins_per_ip")
+        else if (key == Keys::T1_MAX_FAILED_LOGINS_PER_IP)
           GlobalAppConfig.tier1.max_failed_logins_per_ip =
               Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.max_failed_logins_per_ip);
-        else if (key == "check_user_agent_anomalies")
+        else if (key == Keys::T1_CHECK_UA_ANOMALIES)
           GlobalAppConfig.tier1.check_user_agent_anomalies =
               string_to_bool(value);
-        else if (key == "min_chrome_version")
+        else if (key == Keys::T1_MIN_CHROME_VERSION)
           GlobalAppConfig.tier1.min_chrome_version =
               Utils::string_to_number<int>(value).value_or(
                   GlobalAppConfig.tier1.min_chrome_version);
-        else if (key == "min_firefox_version")
+        else if (key == Keys::T1_MIN_FIREFOX_VERSION)
           GlobalAppConfig.tier1.min_firefox_version =
               Utils::string_to_number<int>(value).value_or(
                   GlobalAppConfig.tier1.min_firefox_version);
-        else if (key == "max_unique_uas_per_ip_in_window")
+        else if (key == Keys::T1_MAX_UNIQUE_UAS_PER_IP)
           GlobalAppConfig.tier1.max_unique_uas_per_ip_in_window =
               Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.max_unique_uas_per_ip_in_window);
-        else if (key == "inactive_state_ttl_seconds")
+        else if (key == Keys::T1_INACTIVE_STATE_TTL_SECONDS)
           GlobalAppConfig.tier1.inactive_state_ttl_seconds =
               Utils::string_to_number<uint64_t>(value).value_or(
                   GlobalAppConfig.tier1.inactive_state_ttl_seconds);
-        else if (key == "html_path_suffixes")
+        else if (key == Keys::T1_HTML_PATH_SUFFIXES)
           GlobalAppConfig.tier1.html_path_suffixes =
               Utils::split_string(value, ',');
-        else if (key == "html_exact_paths")
+        else if (key == Keys::T1_HTML_EXACT_PATHS)
           GlobalAppConfig.tier1.html_exact_paths =
               Utils::split_string(value, ',');
-        else if (key == "asset_path_prefixes")
+        else if (key == Keys::T1_ASSET_PATH_PREFIXES)
           GlobalAppConfig.tier1.asset_path_prefixes =
               Utils::split_string(value, ',');
-        else if (key == "asset_path_suffixes")
+        else if (key == Keys::T1_ASSET_PATH_SUFFIXES)
           GlobalAppConfig.tier1.asset_path_suffixes =
               Utils::split_string(value, ',');
-        else if (key == "min_html_requests_for_ratio_check")
+        else if (key == Keys::T1_MIN_HTML_REQUESTS_FOR_RATIO)
           GlobalAppConfig.tier1.min_html_requests_for_ratio_check =
               Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.min_html_requests_for_ratio_check);
-        else if (key == "min_assets_per_html_ratio")
+        else if (key == Keys::T1_MIN_ASSETS_PER_HTML_RATIO)
           GlobalAppConfig.tier1.min_assets_per_html_ratio =
               Utils::string_to_number<double>(value).value_or(
                   GlobalAppConfig.tier1.min_assets_per_html_ratio);
 
         // Suspicious path/UA/sensitive substrings
-        else if (key == "suspicious_path_substrings") {
+        else if (key == Keys::T1_SUSPICIOUS_PATH_SUBSTRINGS) {
           std::string current_substr;
           std::istringstream substr_stream(value);
           while (std::getline(substr_stream, current_substr, ',')) {
@@ -156,7 +156,7 @@ bool load_configuration(std::string &config_filepath) {
               GlobalAppConfig.tier1.suspicious_path_substrings.push_back(
                   trimmed_substr);
           }
-        } else if (key == "suspicious_ua_substrings") {
+        } else if (key == Keys::T1_SUSPICIOUS_UA_SUBSTRINGS) {
           std::string current_substr;
           std::istringstream substr_stream(value);
           while (std::getline(substr_stream, current_substr, ',')) {
@@ -165,7 +165,7 @@ bool load_configuration(std::string &config_filepath) {
               GlobalAppConfig.tier1.suspicious_ua_substrings.push_back(
                   trimmed_substr);
           }
-        } else if (key == "sensitive_path_substrings") {
+        } else if (key == Keys::T1_SENSITIVE_PATH_SUBSTRINGS) {
           std::string current_substr;
           std::istringstream substr_stream(value);
           while (std::getline(substr_stream, current_substr, ',')) {
@@ -178,28 +178,28 @@ bool load_configuration(std::string &config_filepath) {
 
         // Tier 2 settings
       } else if (current_section == "Tier2") {
-        if (key == "enabled")
+        if (key == Keys::T2_ENABLED)
           GlobalAppConfig.tier2.enabled = string_to_bool(value);
-        else if (key == "z_score_threshold")
+        else if (key == Keys::T2_Z_SCORE_THRESHOLD)
           GlobalAppConfig.tier2.z_score_threshold =
               Utils::string_to_number<double>(value).value_or(
                   GlobalAppConfig.tier2.z_score_threshold);
-        else if (key == "min_samples_for_z_score")
+        else if (key == Keys::T2_MIN_SAMPLES_FOR_Z_SCORE)
           GlobalAppConfig.tier2.min_samples_for_z_score =
               Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier2.min_samples_for_z_score);
-        else if (key == "historical_deviation_factor")
+        else if (key == Keys::T2_HISTORICAL_DEVIATION_FACTOR)
           GlobalAppConfig.tier2.historical_deviation_factor =
               Utils::string_to_number<double>(value).value_or(
                   GlobalAppConfig.tier2.historical_deviation_factor);
 
         // Tier 3 settings
       } else if (current_section == "Tier3") {
-        if (key == "enabled")
+        if (key == Keys::T3_ENABLED)
           GlobalAppConfig.tier3.enabled = string_to_bool(value);
-        else if (key == "model_path")
+        else if (key == Keys::T3_MODEL_PATH)
           GlobalAppConfig.tier3.model_path = value;
-        else if (key == "anomaly_score_threshold")
+        else if (key == Keys::T3_ANOMALY_SCORE_THRESHOLD)
           GlobalAppConfig.tier3.anomaly_score_threshold =
               Utils::string_to_number<double>(value).value_or(
                   GlobalAppConfig.tier3.anomaly_score_threshold);
