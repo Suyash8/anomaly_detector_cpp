@@ -15,7 +15,7 @@ BINDIR = bin
 TARGET = $(BINDIR)/anomaly_detector
 
 # Find all .cpp files in SRCDIR
-SOURCES = $(wildcard $(SRCDIR)/*.cpp)
+SOURCES = $(shell find $(SRCDIR) -name '*.cpp')
 # Create object file paths: replace src/%.cpp with obj/%.o
 OBJECTS = $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SOURCES))
 
@@ -31,7 +31,7 @@ $(TARGET): $(OBJECTS)
 # Rule to compile .cpp files into .o object files
 # $< is the first prerequisite (the .cpp file)
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
-	@mkdir -p $(OBJDIR) # Create obj directory if it doesn't exist
+	@mkdir -p $(@D) # Create obj directory if it doesn't exist
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Phony targets (targets that don't represent files)
