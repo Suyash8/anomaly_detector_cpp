@@ -5,6 +5,7 @@
 #include "config.hpp"
 #include "log_entry.hpp"
 #include "ml_models/random_forest_model.hpp"
+#include "rules/scoring.hpp"
 #include "utils.hpp"
 
 #include <cstddef>
@@ -101,11 +102,18 @@ bool RuleEngine::load_ip_allowlist(const std::string &filepath) {
 // Private Helper Functions
 // =================================================================================
 
-void RuleEngine::create_and_record_alert(
-    const AnalyzedEvent &event, const std::string &reason, AlertTier tier,
-    const std::string &action, double score, const std::string &key_id) {
-  alert_mgr.record_alert(Alert(std::make_shared<AnalyzedEvent>(event), reason,
-                               tier, action, score, key_id));
+void RuleEngine::create_and_record_alert(const AnalyzedEvent &event,
+                                         const std::string &reason,
+                                         AlertTier tier, AlertAction action,
+                                         const std::string &action_str,
+                                         double score,
+                                         const std::string &key_id) {
+  if (score <= 0.0)
+    return;
+
+  alert_mgr.record_alert(Alert(std::make_shared<const AnalyzedEvent>(event),
+                               reason, tier, action, action_str, score,
+                               key_id));
 }
 
 // =================================================================================
@@ -116,16 +124,23 @@ void RuleEngine::check_requests_per_ip_rule(const AnalyzedEvent &event) {
   if (event.current_ip_request_count_in_window &&
       *event.current_ip_request_count_in_window >
           app_config.tier1.max_requests_per_ip_in_window) {
+    double current_val = *event.current_ip_request_count_in_window;
+    double threshold = app_config.tier1.max_requests_per_ip_in_window;
+    double dangerous_val = threshold * 10;
+    double score =
+        Scoring::from_threshold(current_val, threshold, dangerous_val, 60.0);
+
     std::string reason =
         "High request rate from IP. Count: " +
         std::to_string(*event.current_ip_request_count_in_window) +
         " in last " +
         std::to_string(app_config.tier1.sliding_window_duration_seconds) + "s.";
+    std::string action_str = "Consider rate-limiting IP; traffic volume "
+                             "exceeds configured threshold.";
 
-    create_and_record_alert(
-        event, reason, AlertTier::TIER1_HEURISTIC, "Monitor/Block IP",
-        static_cast<double>(*event.current_ip_request_count_in_window),
-        event.raw_log.ip_address);
+    create_and_record_alert(event, reason, AlertTier::TIER1_HEURISTIC,
+                            AlertAction::RATE_LIMIT, action_str, score,
+                            event.raw_log.ip_address);
   }
 }
 
@@ -133,25 +148,23 @@ void RuleEngine::check_failed_logins_rule(const AnalyzedEvent &event) {
   if (event.current_ip_failed_login_count_in_window &&
       *event.current_ip_failed_login_count_in_window >
           app_config.tier1.max_failed_logins_per_ip) {
+    double current_val = *event.current_ip_failed_login_count_in_window;
+    double threshold = app_config.tier1.max_failed_logins_per_ip;
+    double dangerous_val = threshold * 5;
+    double score = Scoring::from_threshold(current_val, threshold,
+                                           dangerous_val, 70.0, 99.0);
+
     std::string reason =
         "Multiple failed login attempts from IP. Count: " +
         std::to_string(*event.current_ip_failed_login_count_in_window) +
         " in last " +
         std::to_string(app_config.tier1.sliding_window_duration_seconds) + "s.";
+    std::string action_str = "Investigate IP for brute-force/credential "
+                             "stuffing; consider blocking.";
 
-    std::string key_identifier = event.raw_log.ip_address;
-    if (!event.raw_log.request_path.empty() &&
-        event.raw_log.request_path != "/") {
-      reason +=
-          " Target path (sample): " + event.raw_log.request_path.substr(0, 50);
-      key_identifier += " -> " + event.raw_log.request_path.substr(0, 50);
-    }
-
-    create_and_record_alert(
-        event, reason, AlertTier::TIER1_HEURISTIC,
-        "Investigate IP for brute-force/credential stuffing",
-        static_cast<double>(*event.current_ip_failed_login_count_in_window),
-        key_identifier);
+    create_and_record_alert(event, reason, AlertTier::TIER1_HEURISTIC,
+                            AlertAction::BLOCK, action_str, score,
+                            event.raw_log.ip_address);
   }
 }
 
@@ -160,16 +173,17 @@ void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event) {
       !suspicious_path_matcher_->find_all(event.raw_log.request_path).empty()) {
     create_and_record_alert(
         event, "Request path contains a suspicious pattern",
-        AlertTier::TIER1_HEURISTIC,
-        "High Priority: Block IP and investigate for exploit attempts", 15.0,
-        event.raw_log.ip_address);
+        AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
+        "High Priority: Block IP and investigate for exploit attempts",
+        Scoring::BaseScores::SUSPICIOUS_PATH_STRING, event.raw_log.ip_address);
   }
 
   if (suspicious_ua_matcher_ &&
       !suspicious_ua_matcher_->find_all(event.raw_log.user_agent).empty()) {
     create_and_record_alert(event, "User-Agent contains a suspicious pattern",
-                            AlertTier::TIER1_HEURISTIC,
-                            "Block IP; known scanner/bot UA pattern", 10.0,
+                            AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
+                            "Block IP; known scanner/bot UA pattern",
+                            Scoring::BaseScores::KNOWN_BAD_UA,
                             event.raw_log.ip_address);
   }
 }
@@ -178,49 +192,54 @@ void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
   if (!app_config.tier1.check_user_agent_anomalies)
     return;
 
-  if (event.is_ua_missing) {
+  if (event.is_ua_missing)
     create_and_record_alert(
         event, "Request with missing User-Agent", AlertTier::TIER1_HEURISTIC,
-        "Investigate IP for scripted activity", 1.0, event.raw_log.ip_address);
-  }
-  if (event.is_ua_known_bad) {
+        AlertAction::LOG, "Investigate IP for scripted activity",
+        Scoring::BaseScores::MISSING_UA, event.raw_log.ip_address);
+
+  if (event.is_ua_known_bad)
     create_and_record_alert(
         event, "Request from a known malicious User-Agent signature",
-        AlertTier::TIER1_HEURISTIC, "Block IP; known scanner/bot", 10.0,
+        AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
+        "Block IP; known scanner/bot", Scoring::BaseScores::KNOWN_BAD_UA,
         event.raw_log.ip_address);
-  }
-  if (event.is_ua_headless) {
+
+  if (event.is_ua_headless)
     create_and_record_alert(
         event, "Request from a known headless browser signature",
-        AlertTier::TIER1_HEURISTIC,
-        "High likelihood of automated activity; monitor or challenge", 5.0,
-        event.raw_log.ip_address);
-  }
-  if (event.is_ua_outdated) {
+        AlertTier::TIER1_HEURISTIC, AlertAction::CHALLENGE,
+        "High likelihood of automated activity; monitor or challenge",
+        Scoring::BaseScores::HEADLESS_BROWSER, event.raw_log.ip_address);
+
+  if (event.is_ua_outdated)
     create_and_record_alert(
         event,
         "Request from outdated browser: " + event.detected_browser_version,
-        AlertTier::TIER1_HEURISTIC,
-        "Investigate IP for vulnerable client or bot activity", 2.0,
-        event.raw_log.ip_address);
-  }
-  if (event.is_ua_cycling) {
-    create_and_record_alert(event,
-                            "IP rapidly cycling through different User-Agents",
-                            AlertTier::TIER1_HEURISTIC,
-                            "Very high likelihood of bot; consider blocking",
-                            20.0, event.raw_log.ip_address);
-  }
+        AlertTier::TIER1_HEURISTIC, AlertAction::LOG,
+        "Investigate IP for vulnerable client or bot activity",
+        Scoring::BaseScores::OUTDATED_BROWSER, event.raw_log.ip_address);
+
+  if (event.is_ua_cycling)
+    create_and_record_alert(
+        event, "IP rapidly cycling through different User-Agents",
+        AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
+        "Very high likelihood of bot; consider blocking",
+        Scoring::BaseScores::UA_CYCLING, event.raw_log.ip_address);
 }
 
 void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
   const auto &cfg = app_config.tier1;
+
   if (static_cast<size_t>(event.ip_html_requests_in_window) <
-      cfg.min_html_requests_for_ratio_check) {
+      cfg.min_html_requests_for_ratio_check)
     return;
-  }
+
   if (event.ip_assets_per_html_ratio &&
       *event.ip_assets_per_html_ratio < cfg.min_assets_per_html_ratio) {
+    double score = Scoring::from_threshold(cfg.min_assets_per_html_ratio,
+                                           *event.ip_assets_per_html_ratio, 0.1,
+                                           50.0, 95.0);
     std::string reason =
         "Low Asset-to-HTML request ratio detected. Ratio: " +
         std::to_string(*event.ip_assets_per_html_ratio) +
@@ -229,12 +248,11 @@ void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
         "HTML: " + std::to_string(event.ip_html_requests_in_window) +
         ", Assets: " + std::to_string(event.ip_asset_requests_in_window) +
         " in window.";
-    double score =
-        cfg.min_assets_per_html_ratio - *event.ip_assets_per_html_ratio;
-    create_and_record_alert(
-        event, reason, AlertTier::TIER1_HEURISTIC,
-        "High confidence of bot activity (content scraping). Investigate IP.",
-        score, event.raw_log.ip_address);
+    std::string action_str =
+        "High confidence of bot activity (content scraping). Investigate IP.";
+    create_and_record_alert(event, reason, AlertTier::TIER1_HEURISTIC,
+                            AlertAction::CHALLENGE, action_str, score,
+                            event.raw_log.ip_address);
   }
 }
 
@@ -244,15 +262,17 @@ void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
 
 void RuleEngine::check_ip_zscore_rules(const AnalyzedEvent &event) {
   const double threshold = app_config.tier2.z_score_threshold;
+  std::string action_str = "Investigate IP for anomalous statistical behavior.";
+
   auto check = [&](const std::optional<double> &zscore_opt,
                    const std::string &metric_name) {
     if (zscore_opt && std::abs(*zscore_opt) > threshold) {
+      double score = Scoring::from_z_score(*zscore_opt, threshold);
       std::string reason = "Anomalous IP " + metric_name +
                            " (Z-score: " + std::to_string(*zscore_opt) + ")";
-      create_and_record_alert(
-          event, reason, AlertTier::TIER2_STATISTICAL,
-          "Investigate IP for anomalous statistical behavior",
-          std::abs(*zscore_opt), event.raw_log.ip_address);
+      create_and_record_alert(event, reason, AlertTier::TIER2_STATISTICAL,
+                              AlertAction::LOG, action_str, score,
+                              event.raw_log.ip_address);
     }
   };
   check(event.ip_req_time_zscore, "request time");
@@ -263,17 +283,19 @@ void RuleEngine::check_ip_zscore_rules(const AnalyzedEvent &event) {
 
 void RuleEngine::check_path_zscore_rules(const AnalyzedEvent &event) {
   const double threshold = app_config.tier2.z_score_threshold;
+  std::string action_str = "Investigate path for anomalous statistical "
+                           "behaviour (e.g., performance issue, data exfil).";
+
   auto check = [&](const std::optional<double> &zscore_opt,
                    const std::string &metric_name) {
     if (zscore_opt && std::abs(*zscore_opt) > threshold) {
+      double score = Scoring::from_z_score(*zscore_opt, threshold);
       std::string reason = "Anomalous " + metric_name + " for path '" +
                            event.raw_log.request_path +
                            "' (Z-score: " + std::to_string(*zscore_opt) + ")";
-      create_and_record_alert(event, reason, AlertTier::TIER2_STATISTICAL,
-                              "Investigate path for anomalous statistical "
-                              "behaviour(e.g., performance issue, data exfil)",
-                              std::abs(*zscore_opt),
-                              event.raw_log.request_path);
+      create_and_record_alert(
+          event, reason, AlertTier::TIER2_STATISTICAL, AlertAction::LOG,
+          action_str, std::abs(*zscore_opt), event.raw_log.request_path);
     }
   };
   check(event.path_req_time_zscore, "request time");
@@ -288,23 +310,29 @@ void RuleEngine::check_new_seen_rules(const AnalyzedEvent &event) {
         std::string reason =
             "Newly seen IP immediately accessed a sensitive path containing '" +
             sensitive + "'.";
-        create_and_record_alert(
-            event, reason, AlertTier::TIER1_HEURISTIC,
-            "High Priority: Investigate IP for targeted probing", 15.0);
-        break; // Alert once per event
+        std::string alert_str =
+            "High Priority: Investigate IP for targeted probing.";
+        create_and_record_alert(event, reason, AlertTier::TIER1_HEURISTIC,
+                                AlertAction::BLOCK, alert_str,
+                                Scoring::BaseScores::SENSITIVE_PATH_ON_NEW_IP,
+                                event.raw_log.ip_address);
+        break;
       }
     }
   }
 
   if (event.is_path_new_for_ip && event.ip_error_event_zscore &&
       *event.ip_error_event_zscore > 2.5) {
+    double score =
+        Scoring::from_z_score(*event.ip_error_event_zscore, 2.5, 70.0);
     std::string reason = "IP began generating a high error rate (Z-score: " +
                          std::to_string(*event.ip_error_event_zscore) +
                          ") while accessing a new path for the first time";
-    create_and_record_alert(
-        event, reason, AlertTier::TIER2_STATISTICAL,
-        "Investigate for vulnerability scanning or forced browsing",
-        *event.ip_error_event_zscore);
+    std::string action_str =
+        "Investigate for vulnerability scanning or forced browsing.";
+    create_and_record_alert(event, reason, AlertTier::TIER2_STATISTICAL,
+                            AlertAction::CHALLENGE, action_str, score,
+                            event.raw_log.ip_address);
   }
 }
 
@@ -318,16 +346,22 @@ void RuleEngine::check_historical_comparison_rules(const AnalyzedEvent &event) {
       *event.ip_hist_req_time_mean > 0) {
     if (*event.raw_log.request_time_s >
         (*event.ip_hist_req_time_mean * cfg.historical_deviation_factor)) {
+      double score = Scoring::from_threshold(
+          *event.raw_log.request_time_s,
+          *event.ip_hist_req_time_mean * cfg.historical_deviation_factor,
+          *event.ip_hist_req_time_mean * cfg.historical_deviation_factor * 5,
+          50.0);
       std::string reason =
           "Sudden performance degradation for IP. Request time " +
           std::to_string(*event.raw_log.request_time_s) + "s is >" +
           std::to_string(cfg.historical_deviation_factor) +
           "x the historical average of " +
           std::to_string(*event.ip_hist_req_time_mean) + "s";
+      std::string action_str =
+          "Investigate IP for unusual load or targeted DoS.";
       create_and_record_alert(event, reason, AlertTier::TIER2_STATISTICAL,
-                              "Investigate IP for unusual load or targeted DoS",
-                              *event.raw_log.request_time_s /
-                                  *event.ip_hist_req_time_mean);
+                              AlertAction::LOG, action_str, score,
+                              event.raw_log.ip_address);
     }
   }
 }
@@ -344,14 +378,14 @@ void RuleEngine::check_ml_rules(const AnalyzedEvent &event) {
       anomaly_model_->score_with_explanation(event.feature_vector);
 
   if (score > app_config.tier3.anomaly_score_threshold) {
+    double normalized_score = score * 100.0;
     std::string reason =
         "High ML Anomaly Score detected: " + std::to_string(score);
+    std::string action_str = "Review event; flagged as anomalous by ML model.";
 
-    // Create the alert using the helper. The helper takes care of the
-    // shared_ptr.
-    Alert ml_alert(std::make_shared<const AnalyzedEvent>(event), reason,
-                   AlertTier::TIER3_ML,
-                   "Review event; flagged as anomalous by ML model.", score);
+    auto ml_alert =
+        Alert(std::make_shared<const AnalyzedEvent>(event), reason,
+              AlertTier::TIER3_ML, AlertAction::BLOCK, action_str, score);
 
     std::string contrib_str;
     for (const auto &factor : explanation) {

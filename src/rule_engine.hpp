@@ -31,7 +31,8 @@ private:
 private:
   void create_and_record_alert(const AnalyzedEvent &event,
                                const std::string &reason, AlertTier tier,
-                               const std::string &action, double score,
+                               AlertAction action,
+                               const std::string &action_str, double score,
                                const std::string &key_id = "");
 
   void check_requests_per_ip_rule(const AnalyzedEvent &event);
