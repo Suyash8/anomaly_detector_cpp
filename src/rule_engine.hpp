@@ -1,6 +1,7 @@
 #ifndef RULE_ENGINE_HPP
 #define RULE_ENGINE_HPP
 
+#include "aho_corasick.hpp"
 #include "alert_manager.hpp"
 #include "analyzed_event.hpp"
 #include "config.hpp"
@@ -20,9 +21,12 @@ public:
 private:
   AlertManager &alert_mgr;
   const Config::AppConfig &app_config;
-  // std::unordered_set<std::string> ip_allowlist_cache;
+
   std::vector<Utils::CIDRBlock> cidr_allowlist_cache_;
   std::unique_ptr<IAnomalyModel> anomaly_model_;
+
+  std::unique_ptr<Utils::AhoCorasick> suspicious_path_matcher_;
+  std::unique_ptr<Utils::AhoCorasick> suspicious_ua_matcher_;
 
 private:
   void check_requests_per_ip_rule(const AnalyzedEvent &event);

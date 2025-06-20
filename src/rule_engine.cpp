@@ -1,4 +1,5 @@
 #include "rule_engine.hpp"
+#include "aho_corasick.hpp"
 #include "alert_manager.hpp"
 #include "analyzed_event.hpp"
 #include "config.hpp"
@@ -28,6 +29,13 @@ RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg)
       std::cerr << "Warning: Failed to load IP allowlist from: "
                 << app_config.allowlist_path << std::endl;
   }
+
+  if (!app_config.tier1.suspicious_path_substrings.empty())
+    suspicious_path_matcher_ = std::make_unique<Utils::AhoCorasick>(
+        app_config.tier1.suspicious_path_substrings);
+  if (!app_config.tier1.suspicious_ua_substrings.empty())
+    suspicious_ua_matcher_ = std::make_unique<Utils::AhoCorasick>(
+        app_config.tier1.suspicious_ua_substrings);
 
   if (app_config.tier3.enabled) {
     std::cout << "Tier 3 ML detection is enabled (using RandomForestModel)."
@@ -219,21 +227,24 @@ void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event_ref) {
   }
 }
 
-void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event_ref) {
-  const auto event = std::make_shared<const AnalyzedEvent>(event_ref);
-  auto create_suspicious_string_alert =
-      [&](const std::string &reason, const std::string action, double score) {
-        Alert suspicious_string_alert(event, reason, AlertTier::TIER1_HEURISTIC,
-                                      action, score, event->raw_log.ip_address);
-        alert_mgr.record_alert(suspicious_string_alert);
-      };
+void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event) {
+  auto create_suspicious_string_alert = [&](const std::string &reason,
+                                            const std::string action,
+                                            double score) {
+    Alert suspicious_string_alert(std::make_shared<const AnalyzedEvent>(event),
+                                  reason, AlertTier::TIER1_HEURISTIC, action,
+                                  score, event.raw_log.ip_address);
+    alert_mgr.record_alert(suspicious_string_alert);
+  };
 
-  if (event->found_suspicious_path_str)
+  if (suspicious_path_matcher_ &&
+      !suspicious_path_matcher_->find_all(event.raw_log.request_path).empty())
     create_suspicious_string_alert(
         "Request path contains a suspicious pattern",
         "High Priority: Block IP and investigate for exploit attempts", 15.0);
 
-  if (event->found_suspicious_ua_str)
+  if (suspicious_ua_matcher_ &&
+      !suspicious_ua_matcher_->find_all(event.raw_log.user_agent).empty())
     create_suspicious_string_alert("User-Agent contains a suspicious pattern",
                                    "Block IP; known scanner/bot UA pattern",
                                    10.0);

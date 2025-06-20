@@ -420,21 +420,6 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
                                current_ip_state, event, current_event_ts,
                                max_timestamp_seen_);
 
-  // --- Suspicious string scaning ---
-  for (const auto &substr : app_config.tier1.suspicious_path_substrings) {
-    if (raw_log.request_path.find(substr) != std::string::npos) {
-      event.found_suspicious_path_str = true;
-      break;
-    }
-  }
-
-  for (const auto &substr : app_config.tier1.suspicious_ua_substrings) {
-    if (raw_log.user_agent.find(substr) != std::string::npos) {
-      event.found_suspicious_ua_str = true;
-      break;
-    }
-  }
-
   // --- Feature extraction for ML ---
   if (app_config.tier3.enabled)
     event.feature_vector = feature_manager_.extract_and_normalize(event);
