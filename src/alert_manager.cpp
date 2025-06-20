@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "log_entry.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <iomanip>
@@ -56,6 +57,9 @@ void AlertManager::initialize(const Config::AppConfig &app_config) {
   output_alerts_to_file = app_config.alerts_to_file;
   alert_file_output_path = app_config.alert_output_path;
 
+  throttle_duration_ms_ = app_config.alert_throttle_duration_seconds * 1000;
+  max_throttled_alerts_ = app_config.alert_throttle_max_alerts;
+
   if (alert_file_stream.is_open())
     alert_file_stream.close();
 
@@ -76,6 +80,27 @@ void AlertManager::initialize(const Config::AppConfig &app_config) {
 }
 
 void AlertManager::record_alert(const Alert &new_alert) {
+  if (throttle_duration_ms_ > 0) {
+    std::string throttle_key =
+        new_alert.source_ip + ":" + new_alert.alert_reason;
+    auto it = recent_alert_timestamps_.find(throttle_key);
+
+    if (it != recent_alert_timestamps_.end()) {
+      uint64_t last_alert_time = it->second;
+      if (new_alert.event_timestamp_ms <
+              (last_alert_time + throttle_duration_ms_) &&
+          (max_throttled_alerts_ == 0 ||
+           throttled_alerts_ < max_throttled_alerts_)) {
+        throttled_alerts_++;
+        return;
+      }
+    }
+    // Update the timestamp for this throttle key
+    recent_alert_timestamps_[throttle_key] = new_alert.event_timestamp_ms;
+  }
+
+  throttled_alerts_ = 0;
+
   if (output_alerts_to_stdout)
     std::cout << format_alert_to_human_readable(new_alert) << std::endl;
 

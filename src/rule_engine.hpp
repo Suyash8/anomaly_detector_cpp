@@ -5,10 +5,10 @@
 #include "analyzed_event.hpp"
 #include "config.hpp"
 #include "ml_models/base_model.hpp"
+#include "utils.hpp"
 
 #include <memory>
 #include <string>
-#include <unordered_set>
 
 class RuleEngine {
 public:
@@ -20,7 +20,8 @@ public:
 private:
   AlertManager &alert_mgr;
   const Config::AppConfig &app_config;
-  std::unordered_set<std::string> ip_allowlist_cache;
+  // std::unordered_set<std::string> ip_allowlist_cache;
+  std::vector<Utils::CIDRBlock> cidr_allowlist_cache_;
   std::unique_ptr<IAnomalyModel> anomaly_model_;
 
 private:

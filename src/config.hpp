@@ -18,6 +18,9 @@ constexpr const char *ALLOWLIST_PATH = "allowlist_path";
 constexpr const char *ALERTS_TO_STDOUT = "alerts_to_stdout";
 constexpr const char *ALERTS_TO_FILE = "alerts_to_file";
 constexpr const char *ALERT_OUTPUT_PATH = "alert_output_path";
+constexpr const char *ALERT_THROTTLE_DURATION_SECONDS =
+    "alert_throttle_duration_seconds";
+constexpr const char *ALERT_THROTTLE_MAX_ALERTS = "alert_throttle_max_alerts";
 
 // Tier1 Settings
 constexpr const char *T1_ENABLED = "enabled";
@@ -25,6 +28,8 @@ constexpr const char *T1_SLIDING_WINDOW_SECONDS =
     "sliding_window_duration_seconds";
 constexpr const char *T1_MAX_REQUESTS_PER_IP = "max_requests_per_ip_in_window";
 constexpr const char *T1_MAX_FAILED_LOGINS_PER_IP = "max_failed_logins_per_ip";
+constexpr const char *T1_FAILED_LOGIN_STATUS_CODES =
+    "failed_login_status_codes";
 constexpr const char *T1_CHECK_UA_ANOMALIES = "check_user_agent_anomalies";
 constexpr const char *T1_MIN_CHROME_VERSION = "min_chrome_version";
 constexpr const char *T1_MIN_FIREFOX_VERSION = "min_firefox_version";
@@ -64,6 +69,7 @@ struct Tier1Config {
   uint64_t sliding_window_duration_seconds = 60;
   size_t max_requests_per_ip_in_window = 100;
   size_t max_failed_logins_per_ip = 5;
+  std::vector<short> failed_login_status_codes = {401, 403};
 
   bool check_user_agent_anomalies = true;
   int min_chrome_version = 90;
@@ -103,6 +109,8 @@ struct AppConfig {
   bool alerts_to_stdout = true;
   bool alerts_to_file = false;
   std::string alert_output_path = "alerts.json";
+  uint64_t alert_throttle_duration_seconds = 300; // 5 minutes default
+  uint64_t alert_throttle_max_alerts = 10;
 
   Tier1Config tier1;
   Tier2Config tier2;

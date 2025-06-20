@@ -106,7 +106,18 @@ bool load_configuration(std::string &config_filepath) {
           GlobalAppConfig.tier1.max_failed_logins_per_ip =
               Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.max_failed_logins_per_ip);
-        else if (key == Keys::T1_CHECK_UA_ANOMALIES)
+        else if (key == Keys::T1_FAILED_LOGIN_STATUS_CODES) {
+          std::vector<short> codes;
+          std::string code_str;
+          std::istringstream stream(value);
+          while (std::getline(stream, code_str, ','))
+            if (auto code_opt =
+                    Utils::string_to_number<short>(Utils::trim_copy(code_str)))
+              codes.push_back(*code_opt);
+
+          if (!codes.empty())
+            GlobalAppConfig.tier1.failed_login_status_codes = codes;
+        } else if (key == Keys::T1_CHECK_UA_ANOMALIES)
           GlobalAppConfig.tier1.check_user_agent_anomalies =
               string_to_bool(value);
         else if (key == Keys::T1_MIN_CHROME_VERSION)

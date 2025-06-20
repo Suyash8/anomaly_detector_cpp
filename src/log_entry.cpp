@@ -2,7 +2,6 @@
 #include "utils.hpp"
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -22,17 +21,32 @@ void LogEntry::parse_request_details(const std::string &full_request_field,
     return;
   }
 
-  std::istringstream request_stream(full_request_field);
-  request_stream >> out_method >> out_path >> out_protocol;
-
-  // If protocol is empty, it means that it might be a simple "METHOD /path"
-  // request or the parsing did not capture it. For robustness, default is empty
-  if (out_method.empty())
-    out_method = "-"; // Should not happen if field not "-"
-  if (out_path.empty())
-    out_path = "/"; // Default to root path if empty
-  if (out_protocol.empty())
+  // Find the first space for the method
+  size_t method_end = full_request_field.find(' ');
+  if (method_end == std::string::npos) {
+    // Malformed, treat the whole thing as the path
+    out_method = "-";
+    out_path = full_request_field;
     out_protocol = "-";
+    return;
+  }
+  out_method = full_request_field.substr(0, method_end);
+
+  // Find the last space for the protocol
+  size_t protocol_start = full_request_field.rfind(' ');
+  if (protocol_start == std::string::npos || protocol_start <= method_end) {
+    // No protocol found, or it's the same space as the method end
+    out_path = full_request_field.substr(method_end + 1);
+    out_protocol = "-";
+    return;
+  }
+  out_protocol = full_request_field.substr(protocol_start + 1);
+  // The path is everything in between
+  out_path = full_request_field.substr(method_end + 1,
+                                       protocol_start - (method_end + 1));
+
+  if (out_path.empty())
+    out_path = "/";
 }
 
 std::optional<LogEntry> LogEntry::parse_from_string(const std::string &log_line,
