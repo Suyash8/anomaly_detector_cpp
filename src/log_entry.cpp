@@ -58,48 +58,48 @@ std::optional<LogEntry> LogEntry::parse_from_string(const std::string &log_line,
 
   entry.successfully_parsed_structure = false;
 
-  std::vector<std::string> fields = Utils::split_string(log_line, '|');
+  std::vector<std::string_view> fields =
+      Utils::split_string_view(log_line, '|');
 
   const int EXPECTED_FIELDS_COUNT = 15;
 
   if (fields.size() != EXPECTED_FIELDS_COUNT) {
     if (verbose_warnings)
-      std::cerr << "Warning (Line " << line_num << "): Expected"
+      std::cerr << "Warning (Line " << line_num << "): Expected "
                 << EXPECTED_FIELDS_COUNT << " fields, but found "
                 << fields.size() << ". Skipping line." << std::endl;
     return std::nullopt;
   }
 
   // Basic string fields
-  entry.ip_address = Utils::trim_copy(fields[0]);
-  entry.remote_user = Utils::trim_copy(fields[1]);
-  entry.timestamp_str = Utils::trim_copy(fields[2]);
-  entry.referer = Utils::trim_copy(fields[8]);
-  entry.user_agent = Utils::trim_copy(fields[9]);
-  entry.host = Utils::trim_copy(fields[10]);
-  entry.country_code = Utils::trim_copy(fields[11]);
-  entry.upstream_addr = Utils::trim_copy(fields[12]);
-  entry.x_request_id = Utils::trim_copy(fields[13]);
-  entry.accept_encoding = Utils::trim_copy(fields[14]);
+  entry.ip_address = std::string(fields[0]);
+  entry.remote_user = std::string(fields[1]);
+  entry.timestamp_str = std::string(fields[2]);
+  entry.referer = std::string(fields[8]);
+  entry.user_agent = std::string(fields[9]);
+  entry.host = std::string(fields[10]);
+  entry.country_code = std::string(fields[11]);
+  entry.upstream_addr = std::string(fields[12]);
+  entry.x_request_id = std::string(fields[13]);
+  entry.accept_encoding = std::string(fields[14]);
 
   entry.successfully_parsed_structure = true;
 
-  // Attempt to parse critical fields. If any fail, we might consider the whole
-  // entry invalid.
+  // Attempt to parse critical fields
   entry.parsed_timestamp_ms =
       Utils::convert_log_time_to_ms(entry.timestamp_str);
   if (!entry.parsed_timestamp_ms) {
     if (verbose_warnings)
       std::cerr << "Warning (Line " << line_num
                 << "): Failed to parse timestamp. Critical." << std::endl;
-    return std::nullopt; // Timestamp is crucial
+    return std::nullopt;
   }
 
   entry.request_time_s = Utils::string_to_number<double>(fields[3]);
   entry.upstream_response_time_s = Utils::string_to_number<double>(fields[4]);
 
-  parse_request_details(fields[5], entry.request_method, entry.request_path,
-                        entry.request_protocol);
+  parse_request_details(std::string(fields[5]), entry.request_method,
+                        entry.request_path, entry.request_protocol);
   Utils::trim_inplace(entry.request_method);
   Utils::trim_inplace(entry.request_path);
   Utils::trim_inplace(entry.request_protocol);
@@ -107,21 +107,15 @@ std::optional<LogEntry> LogEntry::parse_from_string(const std::string &log_line,
   entry.request_path = Utils::url_decode(entry.request_path);
 
   entry.http_status_code = Utils::string_to_number<int>(fields[6]);
-  if (!entry.http_status_code &&
-      fields[6] != "-") { // If parsing failed AND it wasn't just a "-"
+  if (!entry.http_status_code && fields[6] != "-") {
     if (verbose_warnings)
       std::cerr << "Warning (Line " << line_num
                 << "): Failed to parse status code: " << fields[6]
                 << ". Critical." << std::endl;
-    return std::nullopt; // Status code is crucial
+    return std::nullopt;
   }
 
   entry.bytes_sent = Utils::string_to_number<uint64_t>(fields[7]);
-  // bytes_sent might be less critical to fail entire parsing for, depends on
-  // requirements. If it's "-", string_to_number will return 0, which is
-  // acceptable.
 
-  // If all critical parsing steps were okay (timestamp, status), return the
-  // entry.
   return entry;
 }

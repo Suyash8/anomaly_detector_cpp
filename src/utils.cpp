@@ -10,7 +10,9 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace Utils {
 std::string url_decode(const std::string &encoded_string) {
@@ -43,6 +45,20 @@ std::vector<std::string> split_string(const std::string &text, char delimiter) {
     tokens.push_back(current_token);
   }
   return tokens;
+}
+
+std::vector<std::string_view> split_string_view(std::string_view str,
+                                                char delimiter) {
+  std::vector<std::string_view> result;
+  size_t start = 0;
+  size_t end = str.find(delimiter);
+  while (end != std::string_view::npos) {
+    result.push_back(str.substr(start, end - start));
+    start = end + 1;
+    end = str.find(delimiter, start);
+  }
+  result.push_back(str.substr(start));
+  return result;
 }
 
 std::optional<uint64_t>
