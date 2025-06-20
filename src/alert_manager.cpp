@@ -104,16 +104,13 @@ void AlertManager::record_alert(const Alert &new_alert) {
         new_alert.source_ip + ":" + new_alert.alert_reason;
     auto it = recent_alert_timestamps_.find(throttle_key);
 
-    // Increment the intervention count for ALL OTHER tracked alerts
-    for (auto &pair : recent_alert_timestamps_) {
-      if (pair.first != throttle_key)
-        pair.second.second++;
-    }
-
     if (it != recent_alert_timestamps_.end()) {
       auto &throttle_info = it->second;
       uint64_t last_alert_time = throttle_info.first;
-      size_t intervening_alerts = throttle_info.second;
+      size_t last_alert_global_count = throttle_info.second;
+
+      size_t intervening_alerts =
+          total_alerts_recorded_ - last_alert_global_count;
 
       bool is_in_time_window = new_alert.event_timestamp_ms <
                                (last_alert_time + throttle_duration_ms_);
@@ -121,12 +118,15 @@ void AlertManager::record_alert(const Alert &new_alert) {
           (alert_throttle_max_intervening_alerts_ > 0) &&
           (intervening_alerts >= alert_throttle_max_intervening_alerts_);
 
-      if (is_in_time_window && !has_exceeded_intervening_limit)
-        return;
+      if (is_in_time_window && !has_exceeded_intervening_limit) {
+        return; // Suppress the alert
+      }
     }
 
-    // Update the timestamp for this throttle key
-    recent_alert_timestamps_[throttle_key] = {new_alert.event_timestamp_ms, 0};
+    // If we are here, the alert will be recorded
+    total_alerts_recorded_++;
+    recent_alert_timestamps_[throttle_key] = {new_alert.event_timestamp_ms,
+                                              total_alerts_recorded_};
   }
 
   if (output_alerts_to_stdout)

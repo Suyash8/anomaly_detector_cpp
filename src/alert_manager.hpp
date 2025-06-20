@@ -72,9 +72,8 @@ private:
 
   uint64_t throttle_duration_ms_ = 0;
   size_t alert_throttle_max_intervening_alerts_ = 0;
+  size_t total_alerts_recorded_ = 0;
 
-  // Key: "IP:RuleReason", Value: {Timestamp of last alert, Count of intervening
-  // alerts}
   std::unordered_map<std::string, std::pair<uint64_t, size_t>>
       recent_alert_timestamps_;
 };
