@@ -183,7 +183,10 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
   formatted_alert +=
       "  Score:     " + std::to_string(alert_data.normalized_score) + "\n";
 
-  formatted_alert += "  Action:    " + alert_data.suggested_action + "\n";
+  formatted_alert += "  Action Str:" + alert_data.suggested_action + "\n";
+
+  formatted_alert +=
+      "  Action:    " + alert_action_to_string(alert_data.action_code) + "\n";
 
   if (!alert_data.ml_feature_contribution.empty())
     formatted_alert +=
@@ -239,6 +242,8 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
      << alert_tier_to_string_representation(alert_data.detection_tier) << "\",";
   ss << "\"suggested_action\":\""
      << escape_json_value(alert_data.suggested_action) << "\",";
+  ss << "\"action\":\""
+     << escape_json_value(alert_action_to_string(alert_data.action_code));
   ss << "\"anomaly_score\":" << alert_data.normalized_score << ",";
   ss << "\"offending_key\":\""
      << escape_json_value(alert_data.offending_key_identifier) << "\",";
