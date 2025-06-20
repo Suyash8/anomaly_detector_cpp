@@ -16,6 +16,16 @@ std::optional<uint64_t> convert_log_time_to_ms(const std::string &log_time_str);
 uint64_t get_current_time_ms();
 std::string url_decode(const std::string &encoded_string);
 
+struct CIDRBlock {
+  uint32_t network_address = 0;
+  uint32_t netmask = 0;
+
+  bool contains(uint32_t ip) const;
+};
+
+std::optional<CIDRBlock> parse_cidr(const std::string &cidr_string);
+uint32_t ip_string_to_uint32(const std::string &ip_str);
+
 template <typename T> std::optional<T> string_to_number(const std::string &s) {
   if (s.empty() || s == "-") { // Ngnix often uses "-" for empty numeric fields
     if constexpr (std::is_floating_point_v<T>)

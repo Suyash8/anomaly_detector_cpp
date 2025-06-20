@@ -7,6 +7,7 @@
 #include "utils.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -22,7 +23,7 @@ RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg)
   if (!app_config.allowlist_path.empty()) {
     if (load_ip_allowlist(app_config.allowlist_path))
       std::cout << "IP Allowlist loaded successfully: "
-                << ip_allowlist_cache.size() << " entries" << std::endl;
+                << cidr_allowlist_cache_.size() << " entries" << std::endl;
     else
       std::cerr << "Warning: Failed to load IP allowlist from: "
                 << app_config.allowlist_path << std::endl;
@@ -43,18 +44,26 @@ bool RuleEngine::load_ip_allowlist(const std::string &filepath) {
     return false;
   std::string ip_line;
   while (std::getline(allowlist_file, ip_line)) {
-    std::string trimmed_ip = Utils::trim_copy(ip_line);
-    if (!trimmed_ip.empty() && trimmed_ip[0] != '#')
-      ip_allowlist_cache.insert(trimmed_ip);
+    std::string trimmed_line = Utils::trim_copy(ip_line);
+    if (!trimmed_line.empty() && trimmed_line[0] != '#') {
+      if (auto cidr_opt = Utils::parse_cidr(trimmed_line))
+        cidr_allowlist_cache_.push_back(*cidr_opt);
+      else
+        std::cerr << "Warning: Could not parse allowlist entry: "
+                  << trimmed_line << std::endl;
+    }
   }
   return true;
 }
 
 void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
-  const auto event = std::make_shared<const AnalyzedEvent>(event_ref);
+  uint32_t event_ip = Utils::ip_string_to_uint32(event_ref.raw_log.ip_address);
+  if (event_ip != 0)
+    for (const auto &block : cidr_allowlist_cache_)
+      if (block.contains(event_ip))
+        return;
 
-  if (ip_allowlist_cache.count(event->raw_log.ip_address))
-    return;
+  const auto event = std::make_shared<const AnalyzedEvent>(event_ref);
 
   if (app_config.tier1.enabled) {
     check_requests_per_ip_rule(*event);

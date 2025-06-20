@@ -131,4 +131,58 @@ uint64_t get_current_time_ms() {
   auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(epoch);
   return ms.count();
 }
+
+uint32_t ip_string_to_uint32(const std::string &ip_str) {
+  uint32_t ip_uint = 0;
+  std::istringstream ip_stream(ip_str);
+  std::string segment;
+  int i = 3;
+  while (std::getline(ip_stream, segment, '.')) {
+    if (i < 0)
+      return 0;
+
+    try {
+      ip_uint |= (std::stoi(segment) & 0xFF) << (i * 8);
+    } catch (...) {
+      return 0;
+    }
+    i--;
+  }
+  return (i == -1) ? ip_uint : 0;
+}
+
+std::optional<CIDRBlock> parse_cidr(const std::string &cidr_string) {
+  size_t slash_pos = cidr_string.find('/');
+  if (slash_pos == std::string::npos) {
+    uint32_t ip = ip_string_to_uint32(cidr_string);
+    if (ip == 0)
+      return std::nullopt;
+    return CIDRBlock{ip, 0xFFFFFFFF};
+  }
+
+  std::string ip_part = cidr_string.substr(0, slash_pos);
+  std::string mask_part = cidr_string.substr(slash_pos + 1);
+
+  uint32_t ip = ip_string_to_uint32(ip_part);
+  if (ip == 0)
+    return std::nullopt;
+
+  int mask_len = 0;
+  try {
+    mask_len = std::stoi(mask_part);
+  } catch (...) {
+    return std::nullopt;
+  }
+
+  if (mask_len < 0 || mask_len > 32)
+    return std::nullopt;
+
+  uint32_t netmask = (mask_len == 0) ? 0 : (0xFFFFFFFF << (32 - mask_len));
+
+  return CIDRBlock{ip & netmask, netmask};
+}
+
+bool CIDRBlock::contains(uint32_t ip) const {
+  return (ip & netmask) == network_address;
+}
 } // namespace Utils
