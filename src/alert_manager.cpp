@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "log_entry.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
@@ -13,16 +14,34 @@
 #include <sstream>
 #include <string>
 
+std::string alert_action_to_string(AlertAction action) {
+  switch (action) {
+  case AlertAction::NO_ACTION:
+    return "NO_ACTION";
+  case AlertAction::LOG:
+    return "LOG";
+  case AlertAction::CHALLENGE:
+    return "CHALLENGE";
+  case AlertAction::RATE_LIMIT:
+    return "RATE_LIMIT";
+  case AlertAction::BLOCK:
+    return "BLOCK";
+  default:
+    return "UNKNOWN_ACTION";
+  }
+}
+
 Alert::Alert(std::shared_ptr<const AnalyzedEvent> event,
-             const std::string &reason, AlertTier tier,
-             const std::string &action, double score, const std::string &key_id)
+             const std::string &reason, AlertTier tier, AlertAction action,
+             const std::string &action_str, double score,
+             const std::string &key_id)
     : event_context(event),
       event_timestamp_ms(event->raw_log.parsed_timestamp_ms.value_or(0)),
       source_ip(event->raw_log.ip_address), alert_reason(reason),
-      detection_tier(tier), suggested_action(action),
+      detection_tier(tier), action_code(action), suggested_action(action_str),
+      normalized_score(score),
       offending_key_identifier(key_id.empty() ? event->raw_log.ip_address
                                               : key_id),
-      anomaly_score(score),
       associated_log_line(event->raw_log.original_line_number),
       raw_log_trigger_sample(event->raw_log.raw_log_line),
       ml_feature_contribution("") {}
@@ -58,12 +77,12 @@ void AlertManager::initialize(const Config::AppConfig &app_config) {
   alert_file_output_path = app_config.alert_output_path;
 
   throttle_duration_ms_ = app_config.alert_throttle_duration_seconds * 1000;
-  max_throttled_alerts_ = app_config.alert_throttle_max_alerts;
+  alert_throttle_max_intervening_alerts_ = app_config.alert_throttle_max_alerts;
 
   if (alert_file_stream.is_open())
     alert_file_stream.close();
 
-  // A very simple approach for file output if enabled:
+  // A very simple approach for file output if enabled
   if (output_alerts_to_file && !alert_file_output_path.empty()) {
     alert_file_stream.open(alert_file_output_path,
                            std::ios::app); // Append mode
@@ -85,35 +104,41 @@ void AlertManager::record_alert(const Alert &new_alert) {
         new_alert.source_ip + ":" + new_alert.alert_reason;
     auto it = recent_alert_timestamps_.find(throttle_key);
 
-    if (it != recent_alert_timestamps_.end()) {
-      uint64_t last_alert_time = it->second;
-      if (new_alert.event_timestamp_ms <
-              (last_alert_time + throttle_duration_ms_) &&
-          (max_throttled_alerts_ == 0 ||
-           throttled_alerts_ < max_throttled_alerts_)) {
-        throttled_alerts_++;
-        return;
-      }
+    // Increment the intervention count for ALL OTHER tracked alerts
+    for (auto &pair : recent_alert_timestamps_) {
+      if (pair.first != throttle_key)
+        pair.second.second++;
     }
-    // Update the timestamp for this throttle key
-    recent_alert_timestamps_[throttle_key] = new_alert.event_timestamp_ms;
-  }
 
-  throttled_alerts_ = 0;
+    if (it != recent_alert_timestamps_.end()) {
+      auto &throttle_info = it->second;
+      uint64_t last_alert_time = throttle_info.first;
+      size_t intervening_alerts = throttle_info.second;
+
+      bool is_in_time_window = new_alert.event_timestamp_ms <
+                               (last_alert_time + throttle_duration_ms_);
+      bool has_exceeded_intervening_limit =
+          (alert_throttle_max_intervening_alerts_ > 0) &&
+          (intervening_alerts >= alert_throttle_max_intervening_alerts_);
+
+      if (is_in_time_window && !has_exceeded_intervening_limit)
+        return;
+    }
+
+    // Update the timestamp for this throttle key
+    recent_alert_timestamps_[throttle_key] = {new_alert.event_timestamp_ms, 0};
+  }
 
   if (output_alerts_to_stdout)
     std::cout << format_alert_to_human_readable(new_alert) << std::endl;
 
   if (output_alerts_to_file && alert_file_stream.is_open())
-    alert_file_stream << format_alert_to_json(new_alert)
-                      << std::endl; // Use JSON for file
+    alert_file_stream << format_alert_to_json(new_alert) << std::endl;
 }
 
 void AlertManager::flush_all_alerts() {
   if (output_alerts_to_file && alert_file_stream.is_open())
     alert_file_stream.flush();
-
-  // std::cout << "AlertManager: flush_all_alerts() called." << std::endl;
 }
 
 std::string
@@ -155,9 +180,8 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
     formatted_alert +=
         "  Key ID:    " + alert_data.offending_key_identifier + "\n";
 
-  if (alert_data.anomaly_score != 0)
-    formatted_alert +=
-        "  Score:     " + std::to_string(alert_data.anomaly_score) + "\n";
+  formatted_alert +=
+      "  Score:     " + std::to_string(alert_data.normalized_score) + "\n";
 
   formatted_alert += "  Action:    " + alert_data.suggested_action + "\n";
 
@@ -215,7 +239,7 @@ std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
      << alert_tier_to_string_representation(alert_data.detection_tier) << "\",";
   ss << "\"suggested_action\":\""
      << escape_json_value(alert_data.suggested_action) << "\",";
-  ss << "\"anomaly_score\":" << alert_data.anomaly_score << ",";
+  ss << "\"anomaly_score\":" << alert_data.normalized_score << ",";
   ss << "\"offending_key\":\""
      << escape_json_value(alert_data.offending_key_identifier) << "\",";
   ss << "\"ml_contributing_factors\":\""
