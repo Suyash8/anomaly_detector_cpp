@@ -3,8 +3,8 @@ CXX = g++
 # C++17 for std::optional, std::from_chars, etc.
 # -Isrc allows #include "header.hpp" from .cpp files in src/
 # -Wall -Wextra -pedantic for more warnings
-# -O3 for optimization, -march=native for targeting current CPU
-CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -Isrc -O3 -march=native 
+# -O3 for optimization
+CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -Isrc -O3
 
 # Directories
 SRCDIR = src
