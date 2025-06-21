@@ -10,11 +10,18 @@
 
 template <typename Key, typename Value> class LRUCache {
 public:
+  struct CacheEntry {
+    Value value;
+    bool is_dirty = false;
+  };
+
   explicit LRUCache(size_t max_size);
 
-  void put(const Key &key, Value value);
-  std::optional<std::reference_wrapper<Value>> get(const Key &key);
+  std::optional<std::pair<Key, Value>> put(const Key &key, Value value);
+  std::optional<std::reference_wrapper<CacheEntry>> get(const Key &key);
   size_t size() const;
+
+  const std::list<std::pair<Key, CacheEntry>> &get_all_items() const;
 
 private:
   using ListIterator = typename std::list<std::pair<Key, Value>>::iterator;

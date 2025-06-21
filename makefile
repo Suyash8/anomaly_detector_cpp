@@ -35,7 +35,8 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(@D) # Create obj directory if it doesn't exist
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-test-%: $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o, $(filter-out $(SRCDIR)/main.cpp,$(SOURCES))) tests/test_%.cpp
+test-%: $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o, $(filter-out $(SRCDIR)/main.cpp,$(SOURCES))) \
+        $(addprefix tests/test_, $(subst -,_,$*)).cpp
 	@mkdir -p $(BINDIR)
 	$(CXX) $(CXXFLAGS) -I./src -o $(BINDIR)/$@ $^
 	@echo "--- Running Test: $@ ---"
