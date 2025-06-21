@@ -71,8 +71,26 @@ PerPathState &StateManager::get_path_state(const std::string &path) {
   return new_cacle_entry_ref->get().value;
 }
 
-void StateManager::shutdown() {}
+void StateManager::shutdown() {
+  // Flush IP cache
+  for (const auto &item : ip_cache_.get_all_items())
+    if (item.second.is_dirty)
+      write_dirty_ip_state(item.first, item.second.value);
+
+  // Flush Path cache
+  for (const auto &item : path_cache_.get_all_items())
+    if (item.second.is_dirty)
+      write_dirty_path_state(item.first, item.second.value);
+}
+
 void StateManager::write_dirty_ip_state(const std::string &key,
-                                        const PerIpState &state) {}
+                                        const PerIpState &state) {
+  auto serialized_data = StateSerializer::serialize(state);
+  ip_persistence_->write_state(key, serialized_data);
+}
+
 void StateManager::write_dirty_path_state(const std::string &key,
-                                          const PerPathState &state) {}
+                                          const PerPathState &state) {
+  auto serialized_data = StateSerializer::serialize(state);
+  path_persistence_->write_state(key, serialized_data);
+}
