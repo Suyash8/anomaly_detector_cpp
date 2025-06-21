@@ -6,6 +6,11 @@
 #include <deque>
 #include <utility>
 #include <vector>
+
+namespace StateSerializer {
+class Accessor;
+}
+
 template <typename ValueType> class SlidingWindow {
 public:
   SlidingWindow(uint64_t duration_ms, size_t max_elements_limit = 0)
@@ -61,6 +66,8 @@ public:
   }
 
 private:
+  friend class StateSerializer::Accessor;
+
   std::deque<std::pair<uint64_t, ValueType>> window_data;
   uint64_t configured_duration_ms;
   size_t configured_max_elements; // 0 means no limit
