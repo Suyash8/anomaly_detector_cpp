@@ -80,6 +80,135 @@ bool read_set(const std::vector<char> &buffer, size_t &offset,
   return true;
 }
 
+// Forward declare these to use them in the Accessor
+void write_stats_tracker(std::vector<char> &buffer,
+                         const StatsTracker &tracker);
+void write_sliding_window_u64(std::vector<char> &buffer,
+                              const SlidingWindow<uint64_t> &window);
+void write_sliding_window_str(std::vector<char> &buffer,
+                              const SlidingWindow<std::string> &window);
+
+bool read_stats_tracker(const std::vector<char> &buffer, size_t &offset,
+                        StatsTracker &tracker);
+bool read_sliding_window_u64(const std::vector<char> &buffer, size_t &offset,
+                             SlidingWindow<uint64_t> &window);
+bool read_sliding_window_str(const std::vector<char> &buffer, size_t &offset,
+                             SlidingWindow<std::string> &window);
+
+} // namespace
+
+class Accessor {
+public:
+  static void write_stats(std::vector<char> &buffer,
+                          const StatsTracker &tracker) {
+    write_primitive(buffer, tracker.count_);
+    write_primitive(buffer, tracker.mean_);
+    write_primitive(buffer, tracker.m2_);
+  }
+
+  static bool read_stats(const std::vector<char> &buffer, size_t &offset,
+                         StatsTracker &tracker) {
+    if (!read_primitive(buffer, offset, tracker.count_))
+      return false;
+    if (!read_primitive(buffer, offset, tracker.mean_))
+      return false;
+    if (!read_primitive(buffer, offset, tracker.m2_))
+      return false;
+    return true;
+  }
+
+  static void write_window_u64(std::vector<char> &buffer,
+                               const SlidingWindow<uint64_t> &window) {
+    write_primitive(buffer, window.configured_duration_ms);
+    write_primitive(buffer, window.configured_max_elements);
+    write_primitive<uint32_t>(buffer, window.window_data.size());
+    for (const auto &pair : window.window_data) {
+      write_primitive(buffer, pair.first);  // timestamp
+      write_primitive(buffer, pair.second); // value
+    }
+  }
+
+  static bool read_window_u64(const std::vector<char> &buffer, size_t &offset,
+                              SlidingWindow<uint64_t> &window) {
+    if (!read_primitive(buffer, offset, window.configured_duration_ms))
+      return false;
+    if (!read_primitive(buffer, offset, window.configured_max_elements))
+      return false;
+    uint32_t count;
+    if (!read_primitive(buffer, offset, count))
+      return false;
+    window.window_data.clear();
+    for (uint32_t i = 0; i < count; ++i) {
+      uint64_t ts, val;
+      if (!read_primitive(buffer, offset, ts))
+        return false;
+      if (!read_primitive(buffer, offset, val))
+        return false;
+      window.window_data.emplace_back(ts, val);
+    }
+    return true;
+  }
+
+  static void write_window_str(std::vector<char> &buffer,
+                               const SlidingWindow<std::string> &window) {
+    write_primitive(buffer, window.configured_duration_ms);
+    write_primitive(buffer, window.configured_max_elements);
+    write_primitive<uint32_t>(buffer, window.window_data.size());
+    for (const auto &pair : window.window_data) {
+      write_primitive(buffer, pair.first); // timestamp
+      write_string(buffer, pair.second);   // value
+    }
+  }
+
+  static bool read_window_str(const std::vector<char> &buffer, size_t &offset,
+                              SlidingWindow<std::string> &window) {
+    if (!read_primitive(buffer, offset, window.configured_duration_ms))
+      return false;
+    if (!read_primitive(buffer, offset, window.configured_max_elements))
+      return false;
+    uint32_t count;
+    if (!read_primitive(buffer, offset, count))
+      return false;
+    window.window_data.clear();
+    for (uint32_t i = 0; i < count; ++i) {
+      uint64_t ts;
+      std::string val;
+      if (!read_primitive(buffer, offset, ts))
+        return false;
+      if (!read_string(buffer, offset, val))
+        return false;
+      window.window_data.emplace_back(ts, val);
+    }
+    return true;
+  }
+};
+
+namespace {
+// Connect helpers to the accessor
+void write_stats_tracker(std::vector<char> &buffer,
+                         const StatsTracker &tracker) {
+  Accessor::write_stats(buffer, tracker);
+}
+bool read_stats_tracker(const std::vector<char> &buffer, size_t &offset,
+                        StatsTracker &tracker) {
+  return Accessor::read_stats(buffer, offset, tracker);
+}
+void write_sliding_window_u64(std::vector<char> &buffer,
+                              const SlidingWindow<uint64_t> &window) {
+  Accessor::write_window_u64(buffer, window);
+}
+bool read_sliding_window_u64(const std::vector<char> &buffer, size_t &offset,
+                             SlidingWindow<uint64_t> &window) {
+  return Accessor::read_window_u64(buffer, offset, window);
+}
+void write_sliding_window_str(std::vector<char> &buffer,
+                              const SlidingWindow<std::string> &window) {
+  Accessor::write_window_str(buffer, window);
+}
+bool read_sliding_window_str(const std::vector<char> &buffer, size_t &offset,
+                             SlidingWindow<std::string> &window) {
+  return Accessor::read_window_str(buffer, offset, window);
+}
 } // namespace
 
 // Empty stubs to allow compilation
