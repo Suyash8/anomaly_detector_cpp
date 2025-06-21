@@ -56,4 +56,24 @@ void LRUCache<Key, Value>::put(const Key &key, Value value) {
   items_map_[key] = items_list_.begin();
 }
 
+template <typename Key, typename Value>
+std::optional<std::reference_wrapper<Value>>
+LRUCache<Key, Value>::get(const Key &key) {
+  auto it = items_map_.find(key);
+
+  // Key not found
+  if (it == items_map_.end())
+    return std::nullopt;
+
+  // Key found, move the accessed item to the front of the list
+  items_list_.splice(items_list_.begin(), items_list_, it->second);
+
+  return it->second->second;
+}
+
+template <typename Key, typename Value>
+size_t LRUCache<Key, Value>::size() const {
+  return items_map_.size();
+}
+
 #endif // LRU_CACHE_HPP
