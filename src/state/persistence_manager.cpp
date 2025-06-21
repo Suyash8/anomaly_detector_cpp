@@ -1,19 +1,89 @@
 #include "persistence_manager.hpp"
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 PersistenceManager::PersistenceManager(std::string base_dir, size_t num_shards)
-    : base_dir_(std::move(base_dir)), num_shards_(num_shards) {}
+    : base_dir_(std::move(base_dir)), num_shards_(num_shards) {
+  if (!std::filesystem::exists(base_dir_))
+    std::filesystem::create_directories(base_dir_);
+}
 
 bool PersistenceManager::write_state(const std::string &key,
                                      const std::vector<char> &data) {
-  return false;
+  const std::string shard_path = get_shard_path_for_key(key);
+  if (shard_path.empty())
+    return false;
+
+  // Read the whole shard into a map
+  std::unordered_map<std::string, std::vector<char>> shard_data;
+  std::ifstream in_file(shard_path, std::ios::binary);
+  if (in_file.is_open()) {
+    while (in_file.peek() != EOF) {
+      uint32_t key_len, val_len;
+      in_file.read(reinterpret_cast<char *>(&key_len), sizeof(key_len));
+      std::string current_key(key_len, '\0');
+      in_file.read(reinterpret_cast<char *>(current_key[0]), key_len);
+      in_file.read(reinterpret_cast<char *>(&val_len), sizeof(val_len));
+      std::vector<char> current_val(val_len);
+      in_file.read(current_val.data(), val_len);
+      shard_data[current_key] = current_val;
+    }
+    in_file.close();
+  }
+
+  // Update the map with the new data
+  shard_data[key] = data;
+
+  // Write the entire map back to the file
+  std::ofstream out_file(shard_path, std::ios::binary | std::ios::trunc);
+  if (!out_file.is_open())
+    return false;
+
+  for (const auto &[k, v] : shard_data) {
+    uint32_t key_len = k.length();
+    uint32_t val_len = v.size();
+    out_file.write(reinterpret_cast<const char *>(&key_len), sizeof(key_len));
+    out_file.write(k.data(), key_len);
+    out_file.write(reinterpret_cast<const char *>(&val_len), sizeof(val_len));
+    out_file.write(v.data(), val_len);
+  }
+
+  return true;
 }
 
 std::optional<std::vector<char>>
 PersistenceManager::read_state(const std::string &key) {
+  const std::string shard_path = get_shard_path_for_key(key);
+  if (shard_path.empty())
+    return std::nullopt;
+
+  std::ifstream file(shard_path, std::ios::binary);
+  if (!file.is_open())
+    return std::nullopt;
+
+  while (file.peek() != EOF) {
+    uint32_t key_len, val_len;
+    file.read(reinterpret_cast<char *>(&key_len), sizeof(key));
+    std::string current_key(key_len, '\0');
+    file.read(reinterpret_cast<char *>(current_key[0]), key_len);
+    file.read(reinterpret_cast<char *>(&val_len), sizeof(val_len));
+
+    if (current_key == key) {
+      std::vector<char> val(val_len);
+      file.read(val.data(), val_len);
+      return val;
+    } else
+      file.seekg(val_len, std::ios::cur);
+  }
+
   return std::nullopt;
 }
 
