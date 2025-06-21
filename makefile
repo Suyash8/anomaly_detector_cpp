@@ -11,39 +11,44 @@ LDFLAGS = -lstdc++fs
 SRCDIR = src
 OBJDIR = obj
 BINDIR = bin
+TESTDIR = tests
 
 # Target executable
 TARGET = $(BINDIR)/anomaly_detector
 
-# Find all .cpp files in SRCDIR
-SOURCES = $(shell find $(SRCDIR) -name '*.cpp')
-# Create object file paths: replace src/%.cpp with obj/%.o
-OBJECTS = $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SOURCES))
+# Find all .cpp files in SRCDIR that are NOT main.cpp
+LIB_SOURCES = $(filter-out $(SRCDIR)/main.cpp, $(shell find $(SRCDIR) -name '*.cpp'))
+# Create object file paths for these "library" objects
+LIB_OBJECTS = $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(LIB_SOURCES))
+
+# Main executable source and object
+MAIN_SOURCE = $(SRCDIR)/main.cpp
+MAIN_OBJECT = $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(MAIN_SOURCE))
 
 # Default target: build all
 all: $(TARGET)
 
-# Rule to link the target executable
-$(TARGET): $(OBJECTS)
-	@mkdir -p $(BINDIR) # Create bin directory if it doesn't exist
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) # $^ is all prerequisites (OBJECTS), $@ is the target
+# Rule to link the main target executable
+$(TARGET): $(MAIN_OBJECT) $(LIB_OBJECTS)
+	@mkdir -p $(BINDIR)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 	@echo "Built $(TARGET) successfully."
 
 # Rule to compile .cpp files into .o object files
-# $< is the first prerequisite (the .cpp file)
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
-	@mkdir -p $(@D) # Create obj directory if it doesn't exist
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-test-%: $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o, $(filter-out $(SRCDIR)/main.cpp,$(SOURCES))) \
-        $(addprefix tests/test_, $(subst -,_,$*)).cpp
-	@mkdir -p $(BINDIR)
-	$(CXX) $(CXXFLAGS) -I./src -o $(BINDIR)/$@ $^
-	@echo "--- Running Test: $@ ---"
-	./$(BINDIR)/$@
+# Phony targets
+.PHONY: clean all run build test-%
 
-# Phony targets (targets that don't represent files)
-.PHONY: clean all run test-% build
+test-%: $(LIB_OBJECTS)
+	@echo "--- Building and Running Test: test-$* ---"
+	@mkdir -p $(BINDIR)
+	# This command explicitly lists the test source file and the library objects
+	$(CXX) $(CXXFLAGS) -o $(BINDIR)/test-$* $(TESTDIR)/test_$(subst -,_,$*).cpp $^ $(LDFLAGS)
+	./$(BINDIR)/test-$*
+
 
 # Clean up build files
 clean:
