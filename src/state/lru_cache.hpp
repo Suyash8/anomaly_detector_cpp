@@ -1,7 +1,7 @@
+// src/state/lru_cache.hpp
 #ifndef LRU_CACHE_HPP
 #define LRU_CACHE_HPP
 
-#include <cstddef>
 #include <functional>
 #include <list>
 #include <optional>
@@ -26,7 +26,7 @@ public:
 private:
   using ListIterator = typename std::list<std::pair<Key, CacheEntry>>::iterator;
 
-  std::list<std::pair<Key, Value>> items_list_;
+  std::list<std::pair<Key, CacheEntry>> items_list_;
   std::unordered_map<Key, ListIterator> items_map_;
   size_t max_size_;
 };
@@ -34,7 +34,6 @@ private:
 // --- Implementation ---
 
 template <typename Key, typename Value>
-
 LRUCache<Key, Value>::LRUCache(size_t max_size) : max_size_(max_size) {
   if (max_size_ < 1)
     max_size_ = 1;
