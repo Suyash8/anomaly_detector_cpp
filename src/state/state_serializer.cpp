@@ -211,15 +211,93 @@ bool read_sliding_window_str(const std::vector<char> &buffer, size_t &offset,
 }
 } // namespace
 
-// Empty stubs to allow compilation
-std::vector<char> serialize(const PerIpState &state) { return {}; }
-std::vector<char> serialize(const PerPathState &state) { return {}; }
-std::optional<PerIpState> deserialize_ip_state(const std::vector<char> &data) {
-  return std::nullopt;
+// ================== PerIpState IMPLEMENTATION ==================
+std::vector<char> serialize(const PerIpState &state) {
+  std::vector<char> buffer;
+  write_sliding_window_u64(buffer, state.request_timestamps_window);
+  write_sliding_window_u64(buffer, state.failed_login_timestamps_window);
+  write_sliding_window_u64(buffer, state.html_request_timestamps);
+  write_sliding_window_u64(buffer, state.asset_request_timestamps);
+  write_primitive(buffer, state.last_seen_timestamp_ms);
+  write_primitive(buffer, state.ip_first_seen_timestamp_ms);
+  write_set(buffer, state.paths_seen_by_ip);
+  write_string(buffer, state.last_known_user_agent);
+  write_set(buffer, state.historical_user_agents);
+  write_sliding_window_str(buffer, state.recent_unique_ua_window);
+  write_stats_tracker(buffer, state.request_time_tracker);
+  write_stats_tracker(buffer, state.bytes_sent_tracker);
+  write_stats_tracker(buffer, state.error_rate_tracker);
+  write_stats_tracker(buffer, state.requests_in_window_count_tracker);
+  return buffer;
 }
+
+std::optional<PerIpState> deserialize_ip_state(const std::vector<char> &data) {
+  size_t offset = 0;
+  PerIpState state(0, 0, 0);
+  if (!read_sliding_window_u64(data, offset, state.request_timestamps_window))
+    return std::nullopt;
+  if (!read_sliding_window_u64(data, offset,
+                               state.failed_login_timestamps_window))
+    return std::nullopt;
+  if (!read_sliding_window_u64(data, offset, state.html_request_timestamps))
+    return std::nullopt;
+  if (!read_sliding_window_u64(data, offset, state.asset_request_timestamps))
+    return std::nullopt;
+  if (!read_primitive(data, offset, state.last_seen_timestamp_ms))
+    return std::nullopt;
+  if (!read_primitive(data, offset, state.ip_first_seen_timestamp_ms))
+    return std::nullopt;
+  if (!read_set(data, offset, state.paths_seen_by_ip))
+    return std::nullopt;
+  if (!read_string(data, offset, state.last_known_user_agent))
+    return std::nullopt;
+  if (!read_set(data, offset, state.historical_user_agents))
+    return std::nullopt;
+  if (!read_sliding_window_str(data, offset, state.recent_unique_ua_window))
+    return std::nullopt;
+  if (!read_stats_tracker(data, offset, state.request_time_tracker))
+    return std::nullopt;
+  if (!read_stats_tracker(data, offset, state.bytes_sent_tracker))
+    return std::nullopt;
+  if (!read_stats_tracker(data, offset, state.error_rate_tracker))
+    return std::nullopt;
+  if (!read_stats_tracker(data, offset, state.requests_in_window_count_tracker))
+    return std::nullopt;
+
+  if (offset != data.size())
+    return std::nullopt;
+  return state;
+}
+
+// ================== PerPathState IMPLEMENTATION ==================
+std::vector<char> serialize(const PerPathState &state) {
+  std::vector<char> buffer;
+  write_stats_tracker(buffer, state.request_time_tracker);
+  write_stats_tracker(buffer, state.bytes_sent_tracker);
+  write_stats_tracker(buffer, state.error_rate_tracker);
+  write_stats_tracker(buffer, state.request_volume_tracker);
+  write_primitive(buffer, state.last_seen_timestamp_ms);
+  return buffer;
+}
+
 std::optional<PerPathState>
 deserialize_path_state(const std::vector<char> &data) {
-  return std::nullopt;
+  size_t offset = 0;
+  PerPathState state(0);
+  if (!read_stats_tracker(data, offset, state.request_time_tracker))
+    return std::nullopt;
+  if (!read_stats_tracker(data, offset, state.bytes_sent_tracker))
+    return std::nullopt;
+  if (!read_stats_tracker(data, offset, state.error_rate_tracker))
+    return std::nullopt;
+  if (!read_stats_tracker(data, offset, state.request_volume_tracker))
+    return std::nullopt;
+  if (!read_primitive(data, offset, state.last_seen_timestamp_ms))
+    return std::nullopt;
+
+  if (offset != data.size())
+    return std::nullopt;
+  return state;
 }
 
 } // namespace StateSerializer
