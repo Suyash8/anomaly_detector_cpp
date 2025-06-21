@@ -28,13 +28,26 @@ bool PersistenceManager::write_state(const std::string &key,
   std::ifstream in_file(shard_path, std::ios::binary);
   if (in_file.is_open()) {
     while (in_file.peek() != EOF) {
-      uint32_t key_len, val_len;
+      uint32_t key_len = 0, val_len = 0;
+
       in_file.read(reinterpret_cast<char *>(&key_len), sizeof(key_len));
+      if (in_file.gcount() != sizeof(key_len))
+        break;
+
       std::string current_key(key_len, '\0');
-      in_file.read(reinterpret_cast<char *>(current_key[0]), key_len);
+      in_file.read(current_key.data(), key_len);
+      if (in_file.gcount() != key_len)
+        break;
+
       in_file.read(reinterpret_cast<char *>(&val_len), sizeof(val_len));
+      if (in_file.gcount() != sizeof(val_len))
+        break;
+
       std::vector<char> current_val(val_len);
       in_file.read(current_val.data(), val_len);
+      if (in_file.gcount() != val_len)
+        break;
+
       shard_data[current_key] = current_val;
     }
     in_file.close();
@@ -47,7 +60,7 @@ bool PersistenceManager::write_state(const std::string &key,
   const std::string temp_path = shard_path + ".tmp";
 
   // 1. Write the entire map back to a temporary file
-  std::ofstream out_file(shard_path, std::ios::binary | std::ios::trunc);
+  std::ofstream out_file(temp_path, std::ios::binary | std::ios::trunc);
   if (!out_file.is_open())
     return false;
 
@@ -61,8 +74,10 @@ bool PersistenceManager::write_state(const std::string &key,
   }
 
   out_file.close();
-  if (!out_file)
+  if (!out_file) {
+    std::filesystem::remove(temp_path);
     return false;
+  }
 
   // 2. Automatically replace the original file with the temporary one
   std::error_code ec;
@@ -82,15 +97,26 @@ PersistenceManager::read_state(const std::string &key) {
     return std::nullopt;
 
   while (file.peek() != EOF) {
-    uint32_t key_len, val_len;
-    file.read(reinterpret_cast<char *>(&key_len), sizeof(key));
+    uint32_t key_len = 0, val_len = 0;
+
+    file.read(reinterpret_cast<char *>(&key_len), sizeof(key_len));
+    if (file.gcount() != sizeof(key_len))
+      break;
+
     std::string current_key(key_len, '\0');
-    file.read(reinterpret_cast<char *>(current_key[0]), key_len);
+    file.read(current_key.data(), key_len);
+    if (file.gcount() != key_len)
+      break;
+
     file.read(reinterpret_cast<char *>(&val_len), sizeof(val_len));
+    if (file.gcount() != sizeof(val_len))
+      break;
 
     if (current_key == key) {
       std::vector<char> val(val_len);
       file.read(val.data(), val_len);
+      if (file.gcount() != val_len)
+        break;
       return val;
     } else
       file.seekg(val_len, std::ios::cur);
