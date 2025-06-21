@@ -66,9 +66,9 @@ PerPathState &StateManager::get_path_state(const std::string &path) {
   if (evicted_item.has_value())
     write_dirty_path_state(evicted_item->first, evicted_item->second);
 
-  auto new_cacle_entry_ref = path_cache_.get(path);
-  new_cacle_entry_ref->get().is_dirty = true;
-  return new_cacle_entry_ref->get().value;
+  auto new_cache_entry_ref = path_cache_.get(path);
+  new_cache_entry_ref->get().is_dirty = true;
+  return new_cache_entry_ref->get().value;
 }
 
 void StateManager::shutdown() {
