@@ -7,6 +7,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -42,7 +43,10 @@ bool PersistenceManager::write_state(const std::string &key,
   // Update the map with the new data
   shard_data[key] = data;
 
-  // Write the entire map back to the file
+  // ---- ATOMIC WRITE SEQUENCE ----
+  const std::string temp_path = shard_path + ".tmp";
+
+  // 1. Write the entire map back to a temporary file
   std::ofstream out_file(shard_path, std::ios::binary | std::ios::trunc);
   if (!out_file.is_open())
     return false;
@@ -56,7 +60,15 @@ bool PersistenceManager::write_state(const std::string &key,
     out_file.write(v.data(), val_len);
   }
 
-  return true;
+  out_file.close();
+  if (!out_file)
+    return false;
+
+  // 2. Automatically replace the original file with the temporary one
+  std::error_code ec;
+  std::filesystem::rename(temp_path, shard_path, ec);
+
+  return !ec;
 }
 
 std::optional<std::vector<char>>
