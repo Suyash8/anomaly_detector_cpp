@@ -30,9 +30,50 @@ void test_put_and_get() {
   std::cout << "OK!" << std::endl;
 }
 
+void test_eviction_policy() {
+  std::cout << "Running test_eviction_policy..." << std::endl;
+  LRUCache<int, std::string> cache(3);
+
+  cache.put(1, "one");
+  cache.put(2, "two");
+  cache.put(3, "three");
+
+  // Adding a 4th item should evict item 1 (the LRU)
+  cache.put(4, "four"); // 4, 3, 2
+
+  assert(cache.size() == 3);
+  assert(!cache.get(1).has_value());
+  assert(cache.get(2).has_value());
+  assert(cache.get(3).has_value());
+  assert(cache.get(4).has_value());
+  std::cout << "OK!" << std::endl;
+}
+
+void test_usage_order() {
+  std::cout << "Running test_usage_order..." << std::endl;
+  LRUCache<int, std::string> cache(3);
+
+  cache.put(1, "one");
+  cache.put(2, "two");
+  cache.put(3, "three"); // 3, 2, 1
+
+  cache.get(1); // Order is now: 1, 3, 2
+
+  cache.put(4, "four"); // 4, 1, 3
+
+  assert(cache.size() == 3);
+  assert(!cache.get(2).has_value()); // 2 should be gone
+  assert(cache.get(1).has_value());
+  assert(cache.get(3).has_value());
+  assert(cache.get(4).has_value());
+  std::cout << "OK!" << std::endl;
+}
+
 int main() {
   std::cout << "--- Running LRU Cache Test ---" << std::endl;
   test_put_and_get();
+  test_eviction_policy();
+  test_usage_order();
   std::cout << "\n--- LRU Cache Test Initial Phase Passed! ---" << std::endl;
   return 0;
 }
