@@ -34,8 +34,14 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(@D) # Create obj directory if it doesn't exist
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+test-%: $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o, $(filter-out $(SRCDIR)/main.cpp,$(SOURCES))) tests/test_%.cpp
+	@mkdir -p $(BINDIR)
+	$(CXX) $(CXXFLAGS) -I./src -o $(BINDIR)/$@ $^
+	@echo "--- Running Test: $@ ---"
+	./$(BINDIR)/$@
+
 # Phony targets (targets that don't represent files)
-.PHONY: clean all run
+.PHONY: clean all run test-% build
 
 # Clean up build files
 clean:
