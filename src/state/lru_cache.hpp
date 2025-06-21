@@ -24,7 +24,7 @@ public:
   const std::list<std::pair<Key, CacheEntry>> &get_all_items() const;
 
 private:
-  using ListIterator = typename std::list<std::pair<Key, Value>>::iterator;
+  using ListIterator = typename std::list<std::pair<Key, CacheEntry>>::iterator;
 
   std::list<std::pair<Key, Value>> items_list_;
   std::unordered_map<Key, ListIterator> items_map_;
