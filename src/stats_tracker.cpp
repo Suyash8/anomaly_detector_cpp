@@ -1,6 +1,7 @@
 #include "stats_tracker.hpp"
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 
 StatsTracker::StatsTracker() : count_(0), mean_(0), m2_(0) {}
 
@@ -27,3 +28,15 @@ double StatsTracker::get_variance() const {
 }
 
 double StatsTracker::get_stddev() const { return std::sqrt(get_variance()); }
+
+void StatsTracker::save(std::ofstream &out) const {
+  out.write(reinterpret_cast<const char *>(&count_), sizeof(count_));
+  out.write(reinterpret_cast<const char *>(&mean_), sizeof(mean_));
+  out.write(reinterpret_cast<const char *>(&m2_), sizeof(m2_));
+}
+
+void StatsTracker::load(std::ifstream &in) {
+  in.read(reinterpret_cast<char *>(&count_), sizeof(count_));
+  in.read(reinterpret_cast<char *>(&mean_), sizeof(mean_));
+  in.read(reinterpret_cast<char *>(&m2_), sizeof(m2_));
+}

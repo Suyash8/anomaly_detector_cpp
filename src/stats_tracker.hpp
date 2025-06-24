@@ -2,6 +2,7 @@
 #define STATS_TRACKER_HPP
 
 #include <cstdint>
+#include <fstream>
 
 class StatsTracker {
 public:
@@ -15,6 +16,9 @@ public:
   double get_mean() const;
   double get_variance() const;
   double get_stddev() const;
+
+  void save(std::ofstream &out) const;
+  void load(std::ifstream &in);
 
 private:
   int64_t count_;
