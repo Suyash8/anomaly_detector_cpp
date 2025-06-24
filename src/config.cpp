@@ -87,6 +87,24 @@ bool load_configuration(std::string &config_filepath) {
           GlobalAppConfig.alerts_to_file = string_to_bool(value);
         else if (key == Keys::ALERT_OUTPUT_PATH)
           GlobalAppConfig.alert_output_path = value;
+        else if (key == Keys::STATE_PERSISTENCE_ENABLED)
+          GlobalAppConfig.state_persistence_enabled = string_to_bool(value);
+        else if (key == Keys::STATE_FILE_PATH)
+          GlobalAppConfig.state_file_path = value;
+        else if (key == Keys::STATE_SAVE_INTERVAL_EVENTS)
+          GlobalAppConfig.state_save_interval_events =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  GlobalAppConfig.state_save_interval_events);
+        else if (key == Keys::STATE_PRUNING_ENABLED)
+          GlobalAppConfig.state_pruning_enabled = string_to_bool(value);
+        else if (key == Keys::STATE_TTL_SECONDS)
+          GlobalAppConfig.state_ttl_seconds =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  GlobalAppConfig.state_ttl_seconds);
+        else if (key == Keys::STATE_PRUNE_INTERVAL_EVENTS)
+          GlobalAppConfig.state_prune_interval_events =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  GlobalAppConfig.state_prune_interval_events);
         else
           GlobalAppConfig.custom_settings[key] = value;
 
@@ -132,10 +150,6 @@ bool load_configuration(std::string &config_filepath) {
           GlobalAppConfig.tier1.max_unique_uas_per_ip_in_window =
               Utils::string_to_number<size_t>(value).value_or(
                   GlobalAppConfig.tier1.max_unique_uas_per_ip_in_window);
-        else if (key == Keys::T1_INACTIVE_STATE_TTL_SECONDS)
-          GlobalAppConfig.tier1.inactive_state_ttl_seconds =
-              Utils::string_to_number<uint64_t>(value).value_or(
-                  GlobalAppConfig.tier1.inactive_state_ttl_seconds);
         else if (key == Keys::T1_HTML_PATH_SUFFIXES)
           GlobalAppConfig.tier1.html_path_suffixes =
               Utils::split_string(value, ',');

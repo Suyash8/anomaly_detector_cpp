@@ -21,6 +21,13 @@ constexpr const char *ALERT_OUTPUT_PATH = "alert_output_path";
 constexpr const char *ALERT_THROTTLE_DURATION_SECONDS =
     "alert_throttle_duration_seconds";
 constexpr const char *ALERT_THROTTLE_MAX_ALERTS = "alert_throttle_max_alerts";
+constexpr const char *STATE_PERSISTENCE_ENABLED = "state_persistence_enabled";
+constexpr const char *STATE_FILE_PATH = "state_file_path";
+constexpr const char *STATE_SAVE_INTERVAL_EVENTS = "state_save_interval_events";
+constexpr const char *STATE_PRUNING_ENABLED = "state_pruning_enabled";
+constexpr const char *STATE_TTL_SECONDS = "state_ttl_seconds";
+constexpr const char *STATE_PRUNE_INTERVAL_EVENTS =
+    "state_prune_interval_events";
 
 // Tier1 Settings
 constexpr const char *T1_ENABLED = "enabled";
@@ -35,8 +42,6 @@ constexpr const char *T1_MIN_CHROME_VERSION = "min_chrome_version";
 constexpr const char *T1_MIN_FIREFOX_VERSION = "min_firefox_version";
 constexpr const char *T1_MAX_UNIQUE_UAS_PER_IP =
     "max_unique_uas_per_ip_in_window";
-constexpr const char *T1_INACTIVE_STATE_TTL_SECONDS =
-    "inactive_state_ttl_seconds";
 constexpr const char *T1_HTML_PATH_SUFFIXES = "html_path_suffixes";
 constexpr const char *T1_HTML_EXACT_PATHS = "html_exact_paths";
 constexpr const char *T1_ASSET_PATH_PREFIXES = "asset_path_prefixes";
@@ -80,8 +85,6 @@ struct Tier1Config {
   std::vector<std::string> suspicious_ua_substrings;
   std::vector<std::string> sensitive_path_substrings;
 
-  uint64_t inactive_state_ttl_seconds = 86400;
-
   std::vector<std::string> html_path_suffixes;
   std::vector<std::string> html_exact_paths;
   std::vector<std::string> asset_path_prefixes;
@@ -111,6 +114,13 @@ struct AppConfig {
   std::string alert_output_path = "alerts.json";
   uint64_t alert_throttle_duration_seconds = 300; // 5 minutes default
   uint64_t alert_throttle_max_alerts = 10;
+
+  bool state_persistence_enabled = true;
+  std::string state_file_path = "data/engine_state.dat";
+  uint64_t state_save_interval_events = 50000;
+  bool state_pruning_enabled = true;
+  uint64_t state_ttl_seconds = 604800; // 7 days
+  uint64_t state_prune_interval_events = 100000;
 
   Tier1Config tier1;
   Tier2Config tier2;
