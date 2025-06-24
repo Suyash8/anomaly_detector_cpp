@@ -67,6 +67,9 @@ struct PerIpState {
       : request_timestamps_window(0, 0), failed_login_timestamps_window(0, 0),
         html_request_timestamps(0, 0), asset_request_timestamps(0, 0),
         recent_unique_ua_window(0, 0), last_seen_timestamp_ms(0) {}
+
+  void save(std::ofstream &out) const;
+  void load(std::ifstream &in);
 };
 
 class AnalysisEngine {
