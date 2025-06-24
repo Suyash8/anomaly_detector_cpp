@@ -4,9 +4,11 @@
 #include "log_entry.hpp"
 #include "ml_models/feature_manager.hpp"
 #include "ua_parser.hpp"
+#include "utils.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -425,4 +427,84 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     event.feature_vector = feature_manager_.extract_and_normalize(event);
 
   return event;
+}
+
+void PerPathState::save(std::ofstream &out) const {
+  request_time_tracker.save(out);
+  bytes_sent_tracker.save(out);
+  error_rate_tracker.save(out);
+  request_volume_tracker.save(out);
+  out.write(reinterpret_cast<const char *>(&last_seen_timestamp_ms),
+            sizeof(last_seen_timestamp_ms));
+}
+
+void PerPathState::load(std::ifstream &in) {
+  request_time_tracker.load(in);
+  bytes_sent_tracker.load(in);
+  error_rate_tracker.load(in);
+  request_volume_tracker.load(in);
+  in.read(reinterpret_cast<char *>(&last_seen_timestamp_ms),
+          sizeof(last_seen_timestamp_ms));
+}
+
+void PerIpState::save(std::ofstream &out) const {
+  // Tier 1 Windows
+  request_timestamps_window.save(out);
+  failed_login_timestamps_window.save(out);
+  html_request_timestamps.save(out);
+  asset_request_timestamps.save(out);
+  recent_unique_ua_window.save(out);
+
+  // Timestamps and simple members
+  out.write(reinterpret_cast<const char *>(&last_seen_timestamp_ms),
+            sizeof(last_seen_timestamp_ms));
+  out.write(reinterpret_cast<const char *>(&ip_first_seen_timestamp_ms),
+            sizeof(ip_first_seen_timestamp_ms));
+
+  // Unordered sets need special handling
+  size_t paths_seen_size = paths_seen_by_ip.size();
+  out.write(reinterpret_cast<const char *>(&paths_seen_size),
+            sizeof(paths_seen_size));
+  for (const auto &path : paths_seen_by_ip) {
+    Utils::save_string(out, path);
+  }
+
+  Utils::save_string(out, last_known_user_agent);
+
+  // Tier 2 Historical Trackers
+  request_time_tracker.save(out);
+  bytes_sent_tracker.save(out);
+  error_rate_tracker.save(out);
+  requests_in_window_count_tracker.save(out);
+}
+
+void PerIpState::load(std::ifstream &in) {
+  // Tier 1 Windows
+  request_timestamps_window.load(in);
+  failed_login_timestamps_window.load(in);
+  html_request_timestamps.load(in);
+  asset_request_timestamps.load(in);
+  recent_unique_ua_window.load(in);
+
+  // Timestamps and simple members
+  in.read(reinterpret_cast<char *>(&last_seen_timestamp_ms),
+          sizeof(last_seen_timestamp_ms));
+  in.read(reinterpret_cast<char *>(&ip_first_seen_timestamp_ms),
+          sizeof(ip_first_seen_timestamp_ms));
+
+  // Unordered sets
+  size_t paths_seen_size = 0;
+  in.read(reinterpret_cast<char *>(&paths_seen_size), sizeof(paths_seen_size));
+  paths_seen_by_ip.clear();
+  for (size_t i = 0; i < paths_seen_size; ++i) {
+    paths_seen_by_ip.insert(Utils::load_string(in));
+  }
+
+  last_known_user_agent = Utils::load_string(in);
+
+  // Tier 2 Historical Trackers
+  request_time_tracker.load(in);
+  bytes_sent_tracker.load(in);
+  error_rate_tracker.load(in);
+  requests_in_window_count_tracker.load(in);
 }

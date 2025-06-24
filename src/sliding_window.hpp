@@ -1,9 +1,13 @@
 #ifndef SLIDING_WINDOW_HPP
 #define SLIDING_WINDOW_HPP
 
+#include "utils.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <fstream>
+#include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 template <typename ValueType> class SlidingWindow {
@@ -58,6 +62,42 @@ public:
   void reconfigure(uint64_t new_duration_ms, size_t new_max_elements = 0) {
     configured_duration_ms = new_duration_ms;
     configured_max_elements = new_max_elements;
+  }
+
+  void save(std::ofstream &out) const {
+    size_t size = window_data.size();
+    out.write(reinterpret_cast<const char *>(&size), sizeof(size));
+
+    for (const auto &pair : window_data) {
+      out.write(reinterpret_cast<const char *>(&pair.first),
+                sizeof(pair.first));
+
+      if constexpr (std::is_same_v<ValueType, std::string>)
+        Utils::save_string(out, pair.second);
+      else
+        out.write(reinterpret_cast<const char *>(&pair.second),
+                  sizeof(pair.second));
+    }
+  }
+
+  void load(std::ifstream &in) {
+    window_data.clear();
+    size_t size = 0;
+    in.read(reinterpret_cast<char *>(&size), sizeof(size));
+
+    for (size_t i = 0; i < size; ++i) {
+      uint64_t timestamp;
+      ValueType value;
+
+      in.read(reinterpret_cast<char *>(&timestamp), sizeof(timestamp));
+
+      if constexpr (std::is_same_v<ValueType, std::string>)
+        value = Utils::load_string(in);
+      else
+        in.read(reinterpret_cast<char *>(&value), sizeof(value));
+
+      window_data.emplace_back(timestamp, std::move(value));
+    }
   }
 
 private:

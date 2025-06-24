@@ -36,6 +36,23 @@ std::string url_decode(const std::string &encoded_string) {
   return decoded_stream.str();
 }
 
+void save_string(std::ofstream &out, const std::string &s) {
+  size_t len = s.length();
+  out.write(reinterpret_cast<const char *>(&len), sizeof(len));
+  out.write(s.c_str(), len);
+}
+
+std::string load_string(std::ifstream &in) {
+  size_t len = 0;
+  in.read(reinterpret_cast<char *>(&len), sizeof(len));
+  if (len > 0) {
+    std::string s(len, '\0');
+    in.read(&s[0], len);
+    return s;
+  }
+  return "";
+}
+
 std::vector<std::string> split_string(const std::string &text, char delimiter) {
   std::vector<std::string> tokens;
   std::string current_token;

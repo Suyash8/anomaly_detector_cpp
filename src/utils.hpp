@@ -5,6 +5,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,6 +20,9 @@ std::vector<std::string_view> split_string_view(std::string_view str,
 std::optional<uint64_t> convert_log_time_to_ms(const std::string &log_time_str);
 uint64_t get_current_time_ms();
 std::string url_decode(const std::string &encoded_string);
+
+void save_string(std::ofstream &out, const std::string &s);
+std::string load_string(std::ifstream &in);
 
 struct CIDRBlock {
   uint32_t network_address = 0;
