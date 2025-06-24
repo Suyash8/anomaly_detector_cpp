@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -425,4 +426,22 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     event.feature_vector = feature_manager_.extract_and_normalize(event);
 
   return event;
+}
+
+void PerPathState::save(std::ofstream &out) const {
+  request_time_tracker.save(out);
+  bytes_sent_tracker.save(out);
+  error_rate_tracker.save(out);
+  request_volume_tracker.save(out);
+  out.write(reinterpret_cast<const char *>(&last_seen_timestamp_ms),
+            sizeof(last_seen_timestamp_ms));
+}
+
+void PerPathState::load(std::ifstream &in) {
+  request_time_tracker.load(in);
+  bytes_sent_tracker.load(in);
+  error_rate_tracker.load(in);
+  request_volume_tracker.load(in);
+  in.read(reinterpret_cast<char *>(&last_seen_timestamp_ms),
+          sizeof(last_seen_timestamp_ms));
 }

@@ -7,7 +7,9 @@
 #include "ml_models/feature_manager.hpp"
 #include "sliding_window.hpp"
 #include "stats_tracker.hpp"
+
 #include <cstdint>
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -24,6 +26,9 @@ struct PerPathState {
       : last_seen_timestamp_ms(current_timestamp_ms) {}
 
   PerPathState() : last_seen_timestamp_ms(0) {}
+
+  void save(std::ofstream &out) const;
+  void load(std::ifstream &in);
 };
 
 struct PerIpState {
