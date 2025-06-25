@@ -3,6 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -131,13 +133,19 @@ struct AppConfig {
   AppConfig() = default;
 };
 
-extern AppConfig GlobalAppConfig;
+class ConfigManager {
+public:
+  ConfigManager() = default;
+  bool load_configuration(const std::string &filepath);
+  std::shared_ptr<const AppConfig> get_config() const;
 
-// Function to load configuration from a file into GlobalAppConfig
-bool load_configuration(std::string &config_filepath);
+private:
+  std::string config_filepath_;
+  std::shared_ptr<const AppConfig> current_config_ =
+      std::make_shared<AppConfig>();
+  mutable std::mutex config_mutex_;
+};
 
-// Function to get a const reference to the global config
-const AppConfig &get_app_config();
 } // namespace Config
 
 #endif // CONFIG_HPP
