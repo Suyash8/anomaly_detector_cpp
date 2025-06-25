@@ -8,11 +8,16 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <string>
 
 enum class RequestType { HTML, ASSET, OTHER };
+
+constexpr uint32_t STATE_FILE_MAGIC =
+    0xADE57A7E; // Anomaly Detector Engine STaTE
+constexpr uint32_t STATE_FILE_VERSION = 1;
 
 RequestType get_request_type(const std::string &raw_path,
                              const Config::Tier1Config &cfg) {
@@ -166,9 +171,89 @@ void perform_advanced_ua_analysis(const std::string &ua,
     event.is_ua_cycling = true;
 }
 
-void ::AnalysisEngine::prune_inactive_states(uint64_t current_timestamp_ms) {
-  const uint64_t ttl_ms = app_config.tier1.inactive_state_ttl_seconds * 1000;
-  if (ttl_ms == 0)
+bool AnalysisEngine::save_state(const std::string &path) const {
+  std::string temp_path = path + ".tmp";
+  std::ofstream out(temp_path, std::ios::binary);
+  if (!out) {
+    std::cerr << "Error: Could not open temporary state file for writing: "
+              << temp_path << std::endl;
+    return false;
+  }
+
+  // Write header
+  out.write(reinterpret_cast<const char *>(&STATE_FILE_MAGIC),
+            sizeof(STATE_FILE_MAGIC));
+  out.write(reinterpret_cast<const char *>(&STATE_FILE_VERSION),
+            sizeof(STATE_FILE_VERSION));
+
+  // Write IP trackers
+  size_t ip_map_size = ip_activity_trackers.size();
+  out.write(reinterpret_cast<const char *>(&ip_map_size), sizeof(ip_map_size));
+  for (const auto &pair : ip_activity_trackers) {
+    Utils::save_string(out, pair.first);
+    pair.second.save(out);
+  }
+
+  out.close();
+
+  if (std::rename(temp_path.c_str(), path.c_str()) != 0) {
+    std::cerr << "Error: Could not rename temporary state file." << std::endl;
+    std::remove(temp_path.c_str());
+    return false;
+  }
+
+  return true;
+}
+
+bool AnalysisEngine::load_state(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in)
+    return false;
+
+  // Read and validate header
+  uint32_t magic = 0, version = 0;
+  in.read(reinterpret_cast<char *>(&magic), sizeof(magic));
+  in.read(reinterpret_cast<char *>(&version), sizeof(version));
+
+  if (magic != STATE_FILE_MAGIC || version != STATE_FILE_VERSION) {
+    std::cerr
+        << "Warning: State file is incompatible or corrupt. Starting fresh."
+        << std::endl;
+    return false;
+  }
+
+  // Read IP trackers
+  size_t ip_map_size = 0;
+  in.read(reinterpret_cast<char *>(&ip_map_size), sizeof(ip_map_size));
+  ip_activity_trackers.clear();
+  for (size_t i = 0; i < ip_map_size; ++i) {
+    std::string ip = Utils::load_string(in);
+    PerIpState state;
+    state.load(in);
+    ip_activity_trackers.emplace(ip, std::move(state));
+  }
+
+  // Read Path trackers
+  size_t path_map_size = 0;
+  in.read(reinterpret_cast<char *>(&path_map_size), sizeof(path_map_size));
+  path_activity_trackers.clear();
+  for (size_t i = 0; i < path_map_size; ++i) {
+    std::string path_str = Utils::load_string(in);
+    PerPathState state;
+    state.load(in);
+    path_activity_trackers.emplace(path_str, std::move(state));
+  }
+
+  return true;
+}
+
+uint64_t AnalysisEngine::get_max_timestamp_seen() const {
+  return max_timestamp_seen_;
+}
+
+void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
+  const uint64_t ttl_ms = app_config.state_ttl_seconds * 1000;
+  if (ttl_ms == 0 || !app_config.state_pruning_enabled)
     return;
 
   for (auto it = ip_activity_trackers.begin();
@@ -197,13 +282,6 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   if (current_event_ts > max_timestamp_seen_) {
     max_timestamp_seen_ = current_event_ts;
-  }
-
-  // --- Periodic Pruning ---
-  events_processed_since_last_prune_++;
-  if (events_processed_since_last_prune_ >= PRUNE_CHECK_INTERNVAL) {
-    prune_inactive_states(max_timestamp_seen_); // Use max timestamp
-    events_processed_since_last_prune_ = 0;
   }
 
   PerIpState current_ip_state =

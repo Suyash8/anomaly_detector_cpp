@@ -79,6 +79,12 @@ public:
 
   AnalyzedEvent process_and_analyze(const LogEntry &raw_log);
 
+  bool save_state(const std::string &path) const;
+  bool load_state(const std::string &path);
+
+  void run_pruning(uint64_t current_timestamp_ms);
+  uint64_t get_max_timestamp_seen() const;
+
 private:
   const Config::AppConfig &app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
@@ -86,14 +92,8 @@ private:
 
   FeatureManager feature_manager_;
 
-  uint64_t events_processed_since_last_prune_ = 0;
-  const uint64_t PRUNE_CHECK_INTERNVAL = 10000; // Check every 10k events
-
   // Track the highest seen timestamp to correctly handle out-of-order logs
   uint64_t max_timestamp_seen_ = 0;
-
-  //   std::unordered_map<std::string, PerPathState>
-  //       path_activity_trackers; // For later
 
   PerIpState &get_or_create_ip_state(const std::string &ip,
                                      uint64_t current_timestamp_ms);
