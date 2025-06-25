@@ -20,41 +20,42 @@ int main(int argc, char *argv[]) {
 
   std::cout << "Starting Anomaly Detection Engine..." << std::endl;
 
+  Config::ConfigManager config_manager;
   std::string config_file_to_load = "config.ini";
   if (argc > 1)
     config_file_to_load = argv[1];
-  Config::load_configuration(config_file_to_load);
+  config_manager.load_configuration(config_file_to_load);
 
-  const Config::AppConfig &current_config = Config::get_app_config();
+  auto current_config = config_manager.get_config();
 
   // --- Initialize Core Components ---
   AlertManager alert_manager_instance;
-  alert_manager_instance.initialize(current_config);
+  alert_manager_instance.initialize(*current_config);
 
-  AnalysisEngine analysis_engine_instance(current_config);
-  RuleEngine rule_engine_instance(alert_manager_instance, current_config);
+  AnalysisEngine analysis_engine_instance(*current_config);
+  RuleEngine rule_engine_instance(alert_manager_instance, *current_config);
 
   // --- Log Processing ---
   std::istream *p_log_stream = nullptr;
   std::ifstream log_file_stream;
 
-  if (current_config.log_input_path == "stdin") {
+  if (current_config->log_input_path == "stdin") {
     p_log_stream = &std::cin;
     std::cout << "Reading logs from stdin. Type logs and press Enter. Ctrl+D "
                  "(Linux/macOS) or Ctrl+Z then enter (Windows) to end."
               << std::endl;
   } else {
-    log_file_stream.open(current_config.log_input_path);
+    log_file_stream.open(current_config->log_input_path);
 
     if (!log_file_stream.is_open()) {
       std::cerr << "Error: Could not open log file: "
-                << current_config.log_input_path << std::endl;
+                << current_config->log_input_path << std::endl;
       return 1;
     }
 
     p_log_stream = &log_file_stream;
     std::cout << "Successfully opened log file: "
-              << current_config.log_input_path << std::endl;
+              << current_config->log_input_path << std::endl;
   }
 
   std::istream &log_input = *p_log_stream;
@@ -94,7 +95,7 @@ int main(int argc, char *argv[]) {
       }
     }
     // Progress update for file processing
-    if (current_config.log_input_path != "stdin" &&
+    if (current_config->log_input_path != "stdin" &&
         line_counter % 200000 == 0) { // Print every 200k lines for files
       auto now = std::chrono::high_resolution_clock::now();
       auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
