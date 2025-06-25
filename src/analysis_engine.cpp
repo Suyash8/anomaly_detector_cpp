@@ -247,9 +247,13 @@ bool AnalysisEngine::load_state(const std::string &path) {
   return true;
 }
 
-void ::AnalysisEngine::prune_inactive_states(uint64_t current_timestamp_ms) {
+uint64_t AnalysisEngine::get_max_timestamp_seen() const {
+  return max_timestamp_seen_;
+}
+
+void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
   const uint64_t ttl_ms = app_config.state_ttl_seconds * 1000;
-  if (ttl_ms == 0)
+  if (ttl_ms == 0 || !app_config.state_pruning_enabled)
     return;
 
   for (auto it = ip_activity_trackers.begin();
@@ -278,13 +282,6 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   if (current_event_ts > max_timestamp_seen_) {
     max_timestamp_seen_ = current_event_ts;
-  }
-
-  // --- Periodic Pruning ---
-  events_processed_since_last_prune_++;
-  if (events_processed_since_last_prune_ >= PRUNE_CHECK_INTERNVAL) {
-    prune_inactive_states(max_timestamp_seen_); // Use max timestamp
-    events_processed_since_last_prune_ = 0;
   }
 
   PerIpState current_ip_state =
