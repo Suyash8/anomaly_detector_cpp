@@ -79,6 +79,9 @@ public:
 
   AnalyzedEvent process_and_analyze(const LogEntry &raw_log);
 
+  bool save_state(const std::string &path) const;
+  bool load_state(const std::string &path);
+
 private:
   const Config::AppConfig &app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
