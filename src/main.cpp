@@ -60,6 +60,18 @@ int main(int argc, char *argv[]) {
 
   std::istream &log_input = *p_log_stream;
 
+  // Load state on startup
+  if (current_config->state_persistence_enabled) {
+    std::cout << "State persistence enabled. Attempting to load state from: "
+              << current_config->state_file_path << std::endl;
+    if (analysis_engine_instance.load_state(current_config->state_file_path))
+      std::cout << "Successfully loaded previous engine state." << std::endl;
+    else
+      std::cout << "No previous state file found or file was invalid. Starting "
+                   "with a fresh state."
+                << std::endl;
+  }
+
   std::string current_line;
   uint64_t line_counter = 0;
   int successfully_parsed_count = 0;
@@ -94,6 +106,25 @@ int main(int argc, char *argv[]) {
                   << (current_line.size() > 100 ? "..." : "") << std::endl;
       }
     }
+
+    // Periodic Pruning
+    if (current_config->state_pruning_enabled &&
+        current_config->state_prune_interval_events > 0 &&
+        line_counter % current_config->state_prune_interval_events == 0) {
+
+      uint64_t latest_ts = analysis_engine_instance.get_max_timestamp_seen();
+      analysis_engine_instance.run_pruning(latest_ts);
+    }
+
+    // Periodic Saving
+    if (current_config->state_persistence_enabled &&
+        current_config->state_save_interval_events > 0 &&
+        line_counter % current_config->state_save_interval_events == 0) {
+
+      std::cout << "Periodically saving engine state..." << std::endl;
+      analysis_engine_instance.save_state(current_config->state_file_path);
+    }
+
     // Progress update for file processing
     if (current_config->log_input_path != "stdin" &&
         line_counter % 200000 == 0) { // Print every 200k lines for files
@@ -110,6 +141,13 @@ int main(int argc, char *argv[]) {
         std::cout << "Progress: Read " << line_counter << " lines."
                   << std::endl;
     }
+  }
+
+  // Final save on graceful exit
+  if (current_config->state_persistence_enabled) {
+    std::cout << "Processing finished. Saving final engine state..."
+              << std::endl;
+    analysis_engine_instance.save_state(current_config->state_file_path);
   }
 
   if (log_file_stream.is_open())
