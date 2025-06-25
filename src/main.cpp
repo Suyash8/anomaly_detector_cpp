@@ -1,6 +1,5 @@
 #include "alert_manager.hpp"
 #include "analysis_engine.hpp"
-#include "analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
 #include "rule_engine.hpp"
@@ -15,6 +14,7 @@
 #include <istream>
 #include <optional>
 #include <string>
+#include <thread>
 
 // Global atomic flags for signal handling
 std::atomic<bool> g_shutdown_requested = false;
@@ -115,76 +115,136 @@ int main(int argc, char *argv[]) {
   uint64_t line_counter = 0;
   int successfully_parsed_count = 0;
   int skipped_line_count = 0;
-
   auto time_start = std::chrono::high_resolution_clock::now();
+  ServiceState current_state = ServiceState::RUNNING;
 
-  while (std::getline(log_input, current_line)) {
-    line_counter++;
+  while (!g_shutdown_requested) {
+    // --- Signal Polling and State Transition Block ---
+    if (g_reset_state_requested.exchange(false)) {
+      std::cout << "\nSIGUSR1 received. Resetting engine state..." << std::endl;
+      analysis_engine_instance.reset_in_memory_state();
+      if (current_config->state_persistence_enabled)
+        if (std::remove(current_config->state_file_path.c_str()) == 0)
+          std::cout << "Deleted persisted state file: "
+                    << current_config->state_file_path << std::endl;
+    }
 
-    std::optional<LogEntry> entry_opt =
-        LogEntry::parse_from_string(current_line, line_counter, false);
+    if (g_reload_config_requested.exchange(false)) {
+      std::cout << "\nSIGHUP received. Reloading configuration from "
+                << config_file_to_load << "..." << std::endl;
+      if (config_manager.load_configuration(config_file_to_load)) {
+        current_config = config_manager.get_config();
 
-    if (entry_opt) {
-      successfully_parsed_count++;
-      const LogEntry &current_log_entry =
-          *entry_opt; // Dereference to get the LogEntry
+        alert_manager_instance.reconfigure(*current_config);
+        rule_engine_instance.reconfigure(*current_config);
+        analysis_engine_instance.reconfigure(*current_config);
+        std::cout << "Configuration reloaded successfully." << std::endl;
+      } else
+        std::cerr << "Failed to reload configuration. Keeping old settings."
+                  << std::endl;
+    }
 
-      // Analyze Log entry
-      AnalyzedEvent analyzed_event =
-          analysis_engine_instance.process_and_analyze(current_log_entry);
-
-      // Evaluate rules based on the analyzed event
-      rule_engine_instance.evaluate_rules(analyzed_event);
-
-    } else {
-      skipped_line_count++;
-      if (skipped_line_count <= 10 || skipped_line_count % 1000 == 0) {
-        std::cerr << "Skipped line " << line_counter
-                  << " due to parsing issues. Raw: "
-                  << current_line.substr(0, 100)
-                  << (current_line.size() > 100 ? "..." : "") << std::endl;
+    if (g_resume_requested.exchange(false)) {
+      if (current_state == ServiceState::PAUSED) {
+        std::cout << "\nSIGCONT received. Resuming processing." << std::endl;
+        current_state = ServiceState::RUNNING;
       }
     }
 
-    // Periodic Pruning
-    if (current_config->state_pruning_enabled &&
-        current_config->state_prune_interval_events > 0 &&
-        line_counter % current_config->state_prune_interval_events == 0) {
-
-      uint64_t latest_ts = analysis_engine_instance.get_max_timestamp_seen();
-      analysis_engine_instance.run_pruning(latest_ts);
+    if (g_pause_requested.exchange(false)) {
+      if (current_state == ServiceState::RUNNING) {
+        std::cout << "\nSIGUSR2 received. Pausing processing." << std::endl;
+        current_state = ServiceState::PAUSED;
+      }
     }
 
-    // Periodic Saving
-    if (current_config->state_persistence_enabled &&
-        current_config->state_save_interval_events > 0 &&
-        line_counter % current_config->state_save_interval_events == 0) {
+    // --- State-Specific Action Block ---
+    if (current_state == ServiceState::RUNNING) {
+      if (std::getline(log_input, current_line)) {
+        line_counter++;
 
-      std::cout << "Periodically saving engine state..." << std::endl;
-      analysis_engine_instance.save_state(current_config->state_file_path);
-    }
+        // --- Standard Log Processing ---
+        std::optional<LogEntry> entry_opt =
+            LogEntry::parse_from_string(current_line, line_counter, false);
 
-    // Progress update for file processing
-    if (current_config->log_input_path != "stdin" &&
-        line_counter % 200000 == 0) { // Print every 200k lines for files
-      auto now = std::chrono::high_resolution_clock::now();
-      auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            now - time_start)
-                            .count();
+        if (entry_opt) {
+          successfully_parsed_count++;
+          const auto &current_log_entry = *entry_opt;
+          auto analyzed_event =
+              analysis_engine_instance.process_and_analyze(current_log_entry);
+          rule_engine_instance.evaluate_rules(analyzed_event);
 
-      if (elapsed_ms > 0)
-        std::cout << "Progress: Read " << line_counter << " lines ("
-                  << (line_counter * 1000 / elapsed_ms) << " lines/sec)."
-                  << std::endl;
-      else
-        std::cout << "Progress: Read " << line_counter << " lines."
-                  << std::endl;
+        } else {
+          skipped_line_count++;
+          if (skipped_line_count <= 10 || skipped_line_count % 1000 == 0) {
+            std::cerr << "Skipped line " << line_counter
+                      << " due to parsing issues. Raw: "
+                      << current_line.substr(0, 100)
+                      << (current_line.size() > 100 ? "..." : "") << std::endl;
+          }
+        }
+
+        // --- Periodic Tasks ---
+        if (current_config->state_pruning_enabled &&
+            current_config->state_prune_interval_events > 0 &&
+            line_counter % current_config->state_prune_interval_events == 0) {
+          analysis_engine_instance.run_pruning(
+              analysis_engine_instance.get_max_timestamp_seen());
+        }
+
+        if (current_config->state_persistence_enabled &&
+            current_config->state_save_interval_events > 0 &&
+            line_counter % current_config->state_save_interval_events == 0) {
+          std::cout << "Periodically saving engine state..." << std::endl;
+          analysis_engine_instance.save_state(current_config->state_file_path);
+        }
+
+        // Progress update for file processing
+        if (current_config->log_input_path != "stdin" &&
+            line_counter % 200000 == 0) { // Print every 200k lines for files
+          auto now = std::chrono::high_resolution_clock::now();
+          auto elapsed_ms =
+              std::chrono::duration_cast<std::chrono::milliseconds>(now -
+                                                                    time_start)
+                  .count();
+
+          if (elapsed_ms > 0)
+            std::cout << "Progress: Read " << line_counter << " lines ("
+                      << (line_counter * 1000 / elapsed_ms) << " lines/sec)."
+                      << std::endl;
+          else
+            std::cout << "Progress: Read " << line_counter << " lines."
+                      << std::endl;
+        }
+
+      } else {
+        // End of File (or closed stdin) reached
+        if (current_config->live_monitoring_enabled) {
+          std::cout << "End of log stream. Entering sleep mode for "
+                    << current_config->live_monitoring_sleep_seconds
+                    << " seconds... (Press Ctrl+C to exit)" << std::endl;
+          current_state = ServiceState::PAUSED;
+          if (log_input.eof()) {
+            log_input.clear(); // Clear EOF flags to allow for new data if file
+                               // is appended
+          }
+        } else {
+          // Not in live mode, so EOF means we're done
+          break;
+        }
+      }
+    } else if (current_state == ServiceState::PAUSED) {
+      // --- Efficient Sleep State ---
+      std::this_thread::sleep_for(
+          std::chrono::seconds(current_config->live_monitoring_sleep_seconds));
+      current_state = ServiceState::RUNNING;
     }
   }
 
-  // Final save on graceful exit
+  // --- Final Save on Graceful Exit ---
   if (current_config->state_persistence_enabled) {
-    std::cout << "Processing finished. Saving final engine state..."
+    std::cout << "\nProcessing finished or shutdown signal received. Saving "
+                 "final engine state..."
               << std::endl;
     analysis_engine_instance.save_state(current_config->state_file_path);
   }
