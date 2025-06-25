@@ -38,6 +38,8 @@ void signal_handler(int signum) {
   }
 }
 
+enum class ServiceState { RUNNING, PAUSED };
+
 int main(int argc, char *argv[]) {
   std::ios_base::sync_with_stdio(false); // Potentially faster I/O
   std::cin.tie(nullptr);                 // Untie cin from cout
