@@ -5,7 +5,9 @@
 #include "log_entry.hpp"
 #include "rule_engine.hpp"
 
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <fstream>
 #include <ios>
@@ -14,11 +16,46 @@
 #include <optional>
 #include <string>
 
+// Global atomic flags for signal handling
+std::atomic<bool> g_shutdown_requested = false;
+std::atomic<bool> g_reload_config_requested = false;
+std::atomic<bool> g_reset_state_requested = false;
+std::atomic<bool> g_pause_requested = false;
+std::atomic<bool> g_resume_requested = false;
+
+// A simple, safe signal handler function
+void signal_handler(int signum) {
+  if (signum == SIGINT || signum == SIGTERM) {
+    g_shutdown_requested = true;
+  } else if (signum == SIGHUP) {
+    g_reload_config_requested = true;
+  } else if (signum == SIGUSR1) {
+    g_reset_state_requested = true;
+  } else if (signum == SIGUSR2) {
+    g_pause_requested = true;
+  } else if (signum == SIGCONT) {
+    g_resume_requested = true;
+  }
+}
+
 int main(int argc, char *argv[]) {
   std::ios_base::sync_with_stdio(false); // Potentially faster I/O
   std::cin.tie(nullptr);                 // Untie cin from cout
 
   std::cout << "Starting Anomaly Detection Engine..." << std::endl;
+
+  // Register all signal handlers
+  struct sigaction action;
+  action.sa_handler = signal_handler;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = 0;
+
+  sigaction(SIGINT, &action, NULL);
+  sigaction(SIGTERM, &action, NULL);
+  sigaction(SIGHUP, &action, NULL);
+  sigaction(SIGUSR1, &action, NULL);
+  sigaction(SIGUSR2, &action, NULL); // Pause
+  sigaction(SIGCONT, &action, NULL); // Resume
 
   Config::ConfigManager config_manager;
   std::string config_file_to_load = "config.ini";
