@@ -273,6 +273,30 @@ void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
   }
 }
 
+void AnalysisEngine::reset_in_memory_state() {
+  ip_activity_trackers.clear();
+  path_activity_trackers.clear();
+  max_timestamp_seen_ = 0;
+  std::cout << "AnalysisEngine in-memory state has been reset." << std::endl;
+}
+
+void AnalysisEngine::reconfigure(const Config::AppConfig &new_config) {
+  app_config = new_config;
+
+  uint64_t window_duration_ms =
+      app_config.tier1.sliding_window_duration_seconds * 1000;
+  for (auto &pair : ip_activity_trackers) {
+    pair.second.request_timestamps_window.reconfigure(window_duration_ms, 0);
+    pair.second.failed_login_timestamps_window.reconfigure(window_duration_ms,
+                                                           0);
+    pair.second.html_request_timestamps.reconfigure(window_duration_ms, 0);
+    pair.second.asset_request_timestamps.reconfigure(window_duration_ms, 0);
+    pair.second.recent_unique_ua_window.reconfigure(window_duration_ms, 0);
+  }
+
+  std::cout << "AnalysisEngine has been reconfigured." << std::endl;
+}
+
 AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   AnalyzedEvent event(raw_log);
 
