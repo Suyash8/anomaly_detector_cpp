@@ -1,4 +1,5 @@
 #include "aho_corasick.hpp"
+
 #include <queue>
 
 namespace Utils {

@@ -1,12 +1,12 @@
 #include "rule_engine.hpp"
-#include "aho_corasick.hpp"
-#include "alert_manager.hpp"
-#include "analyzed_event.hpp"
-#include "config.hpp"
-#include "log_entry.hpp"
-#include "ml_models/random_forest_model.hpp"
+#include "../analysis/analyzed_event.hpp"
+#include "../core/alert_manager.hpp"
+#include "../core/config.hpp"
+#include "../core/log_entry.hpp"
+#include "../models/random_forest_model.hpp"
+#include "../utils/aho_corasick.hpp"
+#include "../utils/utils.hpp"
 #include "rules/scoring.hpp"
-#include "utils.hpp"
 
 #include <cstddef>
 #include <cstdint>

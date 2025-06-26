@@ -1,8 +1,8 @@
-#include "alert_manager.hpp"
-#include "analysis_engine.hpp"
-#include "config.hpp"
-#include "log_entry.hpp"
-#include "rule_engine.hpp"
+#include "analysis/analysis_engine.hpp"
+#include "core/alert_manager.hpp"
+#include "core/config.hpp"
+#include "core/log_entry.hpp"
+#include "detection/rule_engine.hpp"
 
 #include <atomic>
 #include <cerrno>

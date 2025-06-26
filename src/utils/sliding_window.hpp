@@ -2,6 +2,7 @@
 #define SLIDING_WINDOW_HPP
 
 #include "utils.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <deque>

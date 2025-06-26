@@ -1,5 +1,5 @@
 #include "alert_manager.hpp"
-#include "analyzed_event.hpp"
+#include "../analysis/analyzed_event.hpp"
 #include "config.hpp"
 #include "log_entry.hpp"
 

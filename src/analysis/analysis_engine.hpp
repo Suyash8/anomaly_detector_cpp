@@ -1,12 +1,12 @@
 #ifndef ANALYSIS_ENGINE_HPP
 #define ANALYSIS_ENGINE_HPP
 
+#include "../core/config.hpp"
+#include "../core/log_entry.hpp"
+#include "../models/feature_manager.hpp"
+#include "../utils/sliding_window.hpp"
+#include "../utils/stats_tracker.hpp"
 #include "analyzed_event.hpp"
-#include "config.hpp"
-#include "log_entry.hpp"
-#include "ml_models/feature_manager.hpp"
-#include "sliding_window.hpp"
-#include "stats_tracker.hpp"
 
 #include <cstdint>
 #include <fstream>

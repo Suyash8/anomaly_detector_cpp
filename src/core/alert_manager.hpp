@@ -1,7 +1,7 @@
 #ifndef ALERT_MANAGER_HPP
 #define ALERT_MANAGER_HPP
 
-#include "analyzed_event.hpp"
+#include "../analysis/analyzed_event.hpp"
 #include "config.hpp"
 
 #include <cstdint>

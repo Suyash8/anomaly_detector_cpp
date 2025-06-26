@@ -1,12 +1,12 @@
 #ifndef RULE_ENGINE_HPP
 #define RULE_ENGINE_HPP
 
-#include "aho_corasick.hpp"
-#include "alert_manager.hpp"
-#include "analyzed_event.hpp"
-#include "config.hpp"
-#include "ml_models/base_model.hpp"
-#include "utils.hpp"
+#include "../analysis/analyzed_event.hpp"
+#include "../core/alert_manager.hpp"
+#include "../core/config.hpp"
+#include "../models/base_model.hpp"
+#include "../utils/aho_corasick.hpp"
+#include "../utils/utils.hpp"
 
 #include <memory>
 #include <string>

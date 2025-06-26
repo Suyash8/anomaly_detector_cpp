@@ -1,5 +1,5 @@
 #include "config.hpp"
-#include "utils.hpp"
+#include "../utils/utils.hpp"
 
 #include <algorithm>
 #include <cctype>
