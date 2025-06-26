@@ -37,6 +37,7 @@ struct PerIpState {
   SlidingWindow<uint64_t> failed_login_timestamps_window;
   SlidingWindow<uint64_t> html_request_timestamps;
   SlidingWindow<uint64_t> asset_request_timestamps;
+  SlidingWindow<std::string> recent_unique_ua_window;
 
   // std::unordered_map<std::string, SlidingWindow<uint64_t>>
   // asset_path_access_window; //Will re add later
@@ -46,7 +47,6 @@ struct PerIpState {
 
   std::string last_known_user_agent;
   std::unordered_set<std::string> historical_user_agents;
-  SlidingWindow<std::string> recent_unique_ua_window;
 
   // Tier 2 Historical Trackers
   StatsTracker request_time_tracker;

@@ -442,7 +442,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // Path Req Time Z-score
   if (raw_log.request_time_s &&
-      current_path_state.request_time_tracker.get_count() >= min_samples) {
+      static_cast<size_t>(
+          current_path_state.request_time_tracker.get_count()) >= min_samples) {
     double stddev = *event.path_hist_req_time_stddev;
     if (stddev > 1e-6)
       event.path_req_time_zscore =
@@ -451,7 +452,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // Path Bytes Sent Z-score
   if (raw_log.bytes_sent &&
-      current_path_state.bytes_sent_tracker.get_count() >= min_samples) {
+      static_cast<size_t>(current_path_state.bytes_sent_tracker.get_count()) >=
+          min_samples) {
     double stddev = *event.path_hist_bytes_stddev;
     if (stddev > 1.0)
       event.path_bytes_sent_zscore = (static_cast<double>(*raw_log.bytes_sent) -
@@ -460,7 +462,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   // Path Error Event Z-score
-  if (current_path_state.error_rate_tracker.get_count() >= min_samples) {
+  if (static_cast<size_t>(current_path_state.error_rate_tracker.get_count()) >=
+      min_samples) {
     double current_error_val =
         (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
                                                                        : 0.0;
@@ -472,7 +475,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // Req Time Z-score
   if (raw_log.request_time_s &&
-      current_ip_state.request_time_tracker.get_count() >= min_samples) {
+      static_cast<size_t>(current_ip_state.request_time_tracker.get_count()) >=
+          min_samples) {
     double stddev = current_ip_state.request_time_tracker.get_stddev();
     if (stddev > 1e-6) // Avoid division by zero
       event.ip_req_time_zscore =
@@ -483,7 +487,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // Bytes Sent Z-score
   if (raw_log.bytes_sent &&
-      current_ip_state.bytes_sent_tracker.get_count() >= min_samples) {
+      static_cast<size_t>(current_ip_state.bytes_sent_tracker.get_count()) >=
+          min_samples) {
     double stddev = current_ip_state.bytes_sent_tracker.get_stddev();
     if (stddev > 1.0) // Require at least 1 byte of stddev to be meaningful
       event.ip_bytes_sent_zscore =
@@ -493,7 +498,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   // Error Event Z-score
-  if (current_ip_state.error_rate_tracker.get_count() >= min_samples) {
+  if (static_cast<size_t>(current_ip_state.error_rate_tracker.get_count()) >=
+      min_samples) {
     double current_error_val =
         (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
                                                                        : 0.0;
@@ -506,7 +512,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   // Request Volume Z-score
-  if (current_ip_state.requests_in_window_count_tracker.get_count() >=
+  if (static_cast<size_t>(
+          current_ip_state.requests_in_window_count_tracker.get_count()) >=
       min_samples) {
     double current_req_vol = static_cast<double>(
         current_ip_state.request_timestamps_window.get_event_count());

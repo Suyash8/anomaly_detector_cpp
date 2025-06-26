@@ -316,9 +316,9 @@ void RuleEngine::check_path_zscore_rules(const AnalyzedEvent &event) {
       std::string reason = "Anomalous " + metric_name + " for path '" +
                            event.raw_log.request_path +
                            "' (Z-score: " + std::to_string(*zscore_opt) + ")";
-      create_and_record_alert(
-          event, reason, AlertTier::TIER2_STATISTICAL, AlertAction::LOG,
-          action_str, std::abs(*zscore_opt), event.raw_log.request_path);
+      create_and_record_alert(event, reason, AlertTier::TIER2_STATISTICAL,
+                              AlertAction::LOG, action_str, score,
+                              event.raw_log.request_path);
     }
   };
   check(event.path_req_time_zscore, "request time");
@@ -401,7 +401,6 @@ void RuleEngine::check_ml_rules(const AnalyzedEvent &event) {
       anomaly_model_->score_with_explanation(event.feature_vector);
 
   if (score > app_config.tier3.anomaly_score_threshold) {
-    double normalized_score = score * 100.0;
     std::string reason =
         "High ML Anomaly Score detected: " + std::to_string(score);
     std::string action_str = "Review event; flagged as anomalous by ML model.";
