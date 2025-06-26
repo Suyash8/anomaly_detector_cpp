@@ -62,6 +62,14 @@ constexpr const char *T1_SUSPICIOUS_PATH_SUBSTRINGS =
 constexpr const char *T1_SUSPICIOUS_UA_SUBSTRINGS = "suspicious_ua_substrings";
 constexpr const char *T1_SENSITIVE_PATH_SUBSTRINGS =
     "sensitive_path_substrings";
+constexpr const char *T1_SCORE_MISSING_UA = "score_missing_ua";
+constexpr const char *T1_SCORE_OUTDATED_BROWSER = "score_outdated_browser";
+constexpr const char *T1_SCORE_KNOWN_BAD_UA = "score_known_bad_ua";
+constexpr const char *T1_SCORE_HEADLESS_BROWSER = "score_headless_browser";
+constexpr const char *T1_SCORE_UA_CYCLING = "score_ua_cycling";
+constexpr const char *T1_SCORE_SUSPICIOUS_PATH = "score_suspicious_path";
+constexpr const char *T1_SCORE_SENSITIVE_PATH_NEW_IP =
+    "score_sensitive_path_new_ip";
 
 // Tier2 Settings
 constexpr const char *T2_ENABLED = "enabled";
@@ -100,6 +108,14 @@ struct Tier1Config {
   std::vector<std::string> asset_path_suffixes;
   size_t min_html_requests_for_ratio_check = 5;
   double min_assets_per_html_ratio = 10.0;
+
+  double score_missing_ua = 5.0;
+  double score_outdated_browser = 10.0;
+  double score_known_bad_ua = 75.0;
+  double score_headless_browser = 40.0;
+  double score_ua_cycling = 85.0;
+  double score_suspicious_path = 95.0;
+  double score_sensitive_path_new_ip = 80.0;
 };
 
 struct Tier2Config {

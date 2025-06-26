@@ -205,7 +205,34 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
             if (!trimmed_substr.empty())
               config.tier1.sensitive_path_substrings.push_back(trimmed_substr);
           }
-        }
+        } else if (key == Keys::T1_SCORE_MISSING_UA)
+          config.tier1.score_missing_ua =
+              Utils::string_to_number<double>(value).value_or(
+                  config.tier1.score_missing_ua);
+        else if (key == Keys::T1_SCORE_OUTDATED_BROWSER)
+          config.tier1.score_outdated_browser =
+              Utils::string_to_number<double>(value).value_or(
+                  config.tier1.score_outdated_browser);
+        else if (key == Keys::T1_SCORE_KNOWN_BAD_UA)
+          config.tier1.score_known_bad_ua =
+              Utils::string_to_number<double>(value).value_or(
+                  config.tier1.score_known_bad_ua);
+        else if (key == Keys::T1_SCORE_HEADLESS_BROWSER)
+          config.tier1.score_headless_browser =
+              Utils::string_to_number<double>(value).value_or(
+                  config.tier1.score_headless_browser);
+        else if (key == Keys::T1_SCORE_UA_CYCLING)
+          config.tier1.score_ua_cycling =
+              Utils::string_to_number<double>(value).value_or(
+                  config.tier1.score_ua_cycling);
+        else if (key == Keys::T1_SCORE_SUSPICIOUS_PATH)
+          config.tier1.score_suspicious_path =
+              Utils::string_to_number<double>(value).value_or(
+                  config.tier1.score_suspicious_path);
+        else if (key == Keys::T1_SCORE_SENSITIVE_PATH_NEW_IP)
+          config.tier1.score_sensitive_path_new_ip =
+              Utils::string_to_number<double>(value).value_or(
+                  config.tier1.score_sensitive_path_new_ip);
 
         // Tier 2 settings
       } else if (current_section == "Tier2") {
