@@ -16,8 +16,6 @@
 
 enum class RequestType { HTML, ASSET, OTHER };
 
-constexpr uint32_t STATE_FILE_MAGIC =
-    0xADE57A7E; // Anomaly Detector Engine STaTE
 constexpr uint32_t STATE_FILE_VERSION = 1;
 
 RequestType get_request_type(const std::string &raw_path,
@@ -115,14 +113,14 @@ void perform_advanced_ua_analysis(const std::string &ua,
   }
 
   // 2. Headless/Known Bad Bot detection
-  if (ua.find("HeadlessChrome") != std::string::npos ||
-      ua.find("Puppeteer") != std::string::npos) {
-    event.is_ua_headless = true;
-  }
+  for (const auto &headless_str : cfg.headless_browser_substrings)
+    if (ua.find(headless_str) != std::string::npos) {
+      event.is_ua_headless = true;
+      break;
+    }
   if (ua.find("sqlmap") != std::string::npos ||
-      ua.find("Nmap") != std::string::npos) {
+      ua.find("Nmap") != std::string::npos)
     event.is_ua_known_bad = true;
-  }
 
   // 3. Version Check
   if (auto ver = UAParser::get_major_version(ua, "Chrome/");
@@ -182,8 +180,8 @@ bool AnalysisEngine::save_state(const std::string &path) const {
   }
 
   // Write header
-  out.write(reinterpret_cast<const char *>(&STATE_FILE_MAGIC),
-            sizeof(STATE_FILE_MAGIC));
+  out.write(reinterpret_cast<const char *>(&app_config.state_file_magic),
+            sizeof(app_config.state_file_magic));
   out.write(reinterpret_cast<const char *>(&STATE_FILE_VERSION),
             sizeof(STATE_FILE_VERSION));
 
@@ -216,7 +214,7 @@ bool AnalysisEngine::load_state(const std::string &path) {
   in.read(reinterpret_cast<char *>(&magic), sizeof(magic));
   in.read(reinterpret_cast<char *>(&version), sizeof(version));
 
-  if (magic != STATE_FILE_MAGIC || version != STATE_FILE_VERSION) {
+  if (magic != app_config.state_file_magic || version != STATE_FILE_VERSION) {
     std::cerr
         << "Warning: State file is incompatible or corrupt. Starting fresh."
         << std::endl;

@@ -112,6 +112,10 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.live_monitoring_sleep_seconds =
               Utils::string_to_number<uint64_t>(value).value_or(
                   config.live_monitoring_sleep_seconds);
+        else if (key == Keys::STATE_FILE_MAGIC)
+          config.state_file_magic =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.state_file_magic);
         else
           config.custom_settings[key] = value;
 
@@ -144,6 +148,9 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
             config.tier1.failed_login_status_codes = codes;
         } else if (key == Keys::T1_CHECK_UA_ANOMALIES)
           config.tier1.check_user_agent_anomalies = string_to_bool(value);
+        else if (key == Keys::T1_HEADLESS_BROWSER_STRINGS)
+          config.tier1.headless_browser_substrings =
+              Utils::split_string(value, ',');
         else if (key == Keys::T1_MIN_CHROME_VERSION)
           config.tier1.min_chrome_version =
               Utils::string_to_number<int>(value).value_or(
