@@ -6,16 +6,6 @@
 
 namespace Scoring {
 
-namespace BaseScores {
-constexpr double MISSING_UA = 5.0;
-constexpr double OUTDATED_BROWSER = 10.0;
-constexpr double KNOWN_BAD_UA = 75.0;
-constexpr double HEADLESS_BROWSER = 40.0;
-constexpr double UA_CYCLING = 85.0;
-constexpr double SUSPICIOUS_PATH_STRING = 95.0;
-constexpr double SENSITIVE_PATH_ON_NEW_IP = 80.0;
-} // namespace BaseScores
-
 // Normalizes a value that has exceeded a threshold into a 0-100 score
 inline double from_threshold(double value, double threshold,
                              double dangerous_value, double base_score,

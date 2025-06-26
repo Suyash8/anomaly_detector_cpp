@@ -33,6 +33,7 @@ constexpr const char *STATE_PRUNE_INTERVAL_EVENTS =
 constexpr const char *LIVE_MONITORING_ENABLED = "live_monitoring_enabled";
 constexpr const char *LIVE_MONITORING_SLEEP_SECONDS =
     "live_monitoring_sleep_seconds";
+constexpr const char *STATE_FILE_MAGIC = "state_file_magic";
 
 // Tier1 Settings
 constexpr const char *T1_ENABLED = "enabled";
@@ -43,6 +44,7 @@ constexpr const char *T1_MAX_FAILED_LOGINS_PER_IP = "max_failed_logins_per_ip";
 constexpr const char *T1_FAILED_LOGIN_STATUS_CODES =
     "failed_login_status_codes";
 constexpr const char *T1_CHECK_UA_ANOMALIES = "check_user_agent_anomalies";
+constexpr const char *T1_HEADLESS_BROWSER_STRINGS = "headless_browser_strings";
 constexpr const char *T1_MIN_CHROME_VERSION = "min_chrome_version";
 constexpr const char *T1_MIN_FIREFOX_VERSION = "min_firefox_version";
 constexpr const char *T1_MAX_UNIQUE_UAS_PER_IP =
@@ -60,6 +62,14 @@ constexpr const char *T1_SUSPICIOUS_PATH_SUBSTRINGS =
 constexpr const char *T1_SUSPICIOUS_UA_SUBSTRINGS = "suspicious_ua_substrings";
 constexpr const char *T1_SENSITIVE_PATH_SUBSTRINGS =
     "sensitive_path_substrings";
+constexpr const char *T1_SCORE_MISSING_UA = "score_missing_ua";
+constexpr const char *T1_SCORE_OUTDATED_BROWSER = "score_outdated_browser";
+constexpr const char *T1_SCORE_KNOWN_BAD_UA = "score_known_bad_ua";
+constexpr const char *T1_SCORE_HEADLESS_BROWSER = "score_headless_browser";
+constexpr const char *T1_SCORE_UA_CYCLING = "score_ua_cycling";
+constexpr const char *T1_SCORE_SUSPICIOUS_PATH = "score_suspicious_path";
+constexpr const char *T1_SCORE_SENSITIVE_PATH_NEW_IP =
+    "score_sensitive_path_new_ip";
 
 // Tier2 Settings
 constexpr const char *T2_ENABLED = "enabled";
@@ -82,6 +92,8 @@ struct Tier1Config {
   std::vector<short> failed_login_status_codes = {401, 403};
 
   bool check_user_agent_anomalies = true;
+  std::vector<std::string> headless_browser_substrings = {"HeadlessChrome",
+                                                          "Puppeteer"};
   int min_chrome_version = 90;
   int min_firefox_version = 85;
   size_t max_unique_uas_per_ip_in_window = 3;
@@ -96,6 +108,14 @@ struct Tier1Config {
   std::vector<std::string> asset_path_suffixes;
   size_t min_html_requests_for_ratio_check = 5;
   double min_assets_per_html_ratio = 10.0;
+
+  double score_missing_ua = 5.0;
+  double score_outdated_browser = 10.0;
+  double score_known_bad_ua = 75.0;
+  double score_headless_browser = 40.0;
+  double score_ua_cycling = 85.0;
+  double score_suspicious_path = 95.0;
+  double score_sensitive_path_new_ip = 80.0;
 };
 
 struct Tier2Config {
@@ -129,6 +149,7 @@ struct AppConfig {
 
   bool live_monitoring_enabled = false;
   uint64_t live_monitoring_sleep_seconds = 5;
+  uint32_t state_file_magic = 0xADE57A7E;
 
   Tier1Config tier1;
   Tier2Config tier2;

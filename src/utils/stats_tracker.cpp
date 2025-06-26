@@ -1,4 +1,5 @@
 #include "stats_tracker.hpp"
+
 #include <cmath>
 #include <cstdint>
 #include <fstream>

@@ -1,10 +1,8 @@
 #ifndef FEATURES_HPP
 #define FEATURES_HPP
 
-// Enum to define exact order and identity of each feature
-// This is CRITICAL for model training and inference consistency
-// The order here MUST match the order of extraction in FeatureManager
 #include <string>
+
 enum class Feature {
   // Raw log features
   REQUEST_TIME_S,

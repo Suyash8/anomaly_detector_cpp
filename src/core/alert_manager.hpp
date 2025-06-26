@@ -1,7 +1,7 @@
 #ifndef ALERT_MANAGER_HPP
 #define ALERT_MANAGER_HPP
 
-#include "analyzed_event.hpp"
+#include "../analysis/analyzed_event.hpp"
 #include "config.hpp"
 
 #include <cstdint>
@@ -31,6 +31,7 @@ std::string alert_action_to_string(AlertAction action);
 std::string alert_tier_to_string_representation(AlertTier tier);
 
 struct Alert {
+  std::shared_ptr<const AnalyzedEvent> event_context;
   uint64_t event_timestamp_ms;
   std::string source_ip;
   std::string alert_reason;
@@ -44,8 +45,6 @@ struct Alert {
   uint64_t associated_log_line;
   std::string raw_log_trigger_sample;
   std::string ml_feature_contribution;
-
-  std::shared_ptr<const AnalyzedEvent> event_context;
 
   Alert(std::shared_ptr<const AnalyzedEvent> event, const std::string &reason,
         AlertTier tier, AlertAction action, const std::string &action_str,

@@ -1,4 +1,6 @@
 #include "aho_corasick.hpp"
+
+#include <cstddef>
 #include <queue>
 
 namespace Utils {
@@ -8,7 +10,7 @@ AhoCorasick::AhoCorasick(const std::vector<std::string> &patterns)
   trie_.emplace_back(); // Root node
 
   // 1. Build the basic trie structure
-  for (int i = 0; i < patterns.size(); ++i) {
+  for (size_t i = 0; i < patterns.size(); ++i) {
     int node = 0;
     for (char ch : patterns[i]) {
       if (trie_[node].children.find(ch) == trie_[node].children.end()) {

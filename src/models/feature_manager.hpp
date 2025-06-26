@@ -1,8 +1,9 @@
 #ifndef FEATURE_MANAGER_HPP
 #define FEATURE_MANAGER_HPP
 
-#include "../analyzed_event.hpp"
-#include "features.hpp"
+#include "../analysis/analyzed_event.hpp"
+#include "../models/features.hpp"
+
 #include <utility>
 #include <vector>
 

@@ -1,12 +1,12 @@
 #include "rule_engine.hpp"
-#include "aho_corasick.hpp"
-#include "alert_manager.hpp"
-#include "analyzed_event.hpp"
-#include "config.hpp"
-#include "log_entry.hpp"
-#include "ml_models/random_forest_model.hpp"
+#include "../analysis/analyzed_event.hpp"
+#include "../core/alert_manager.hpp"
+#include "../core/config.hpp"
+#include "../core/log_entry.hpp"
+#include "../models/random_forest_model.hpp"
+#include "../utils/aho_corasick.hpp"
+#include "../utils/utils.hpp"
 #include "rules/scoring.hpp"
-#include "utils.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -198,7 +198,7 @@ void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event) {
         event, "Request path contains a suspicious pattern",
         AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
         "High Priority: Block IP and investigate for exploit attempts",
-        Scoring::BaseScores::SUSPICIOUS_PATH_STRING, event.raw_log.ip_address);
+        app_config.tier1.score_suspicious_path, event.raw_log.ip_address);
   }
 
   if (suspicious_ua_matcher_ &&
@@ -206,7 +206,7 @@ void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event) {
     create_and_record_alert(event, "User-Agent contains a suspicious pattern",
                             AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
                             "Block IP; known scanner/bot UA pattern",
-                            Scoring::BaseScores::KNOWN_BAD_UA,
+                            app_config.tier1.score_known_bad_ua,
                             event.raw_log.ip_address);
   }
 }
@@ -219,13 +219,13 @@ void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
     create_and_record_alert(
         event, "Request with missing User-Agent", AlertTier::TIER1_HEURISTIC,
         AlertAction::LOG, "Investigate IP for scripted activity",
-        Scoring::BaseScores::MISSING_UA, event.raw_log.ip_address);
+        app_config.tier1.score_missing_ua, event.raw_log.ip_address);
 
   if (event.is_ua_known_bad)
     create_and_record_alert(
         event, "Request from a known malicious User-Agent signature",
         AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
-        "Block IP; known scanner/bot", Scoring::BaseScores::KNOWN_BAD_UA,
+        "Block IP; known scanner/bot", app_config.tier1.score_known_bad_ua,
         event.raw_log.ip_address);
 
   if (event.is_ua_headless)
@@ -233,7 +233,7 @@ void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
         event, "Request from a known headless browser signature",
         AlertTier::TIER1_HEURISTIC, AlertAction::CHALLENGE,
         "High likelihood of automated activity; monitor or challenge",
-        Scoring::BaseScores::HEADLESS_BROWSER, event.raw_log.ip_address);
+        app_config.tier1.score_headless_browser, event.raw_log.ip_address);
 
   if (event.is_ua_outdated)
     create_and_record_alert(
@@ -241,14 +241,14 @@ void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
         "Request from outdated browser: " + event.detected_browser_version,
         AlertTier::TIER1_HEURISTIC, AlertAction::LOG,
         "Investigate IP for vulnerable client or bot activity",
-        Scoring::BaseScores::OUTDATED_BROWSER, event.raw_log.ip_address);
+        app_config.tier1.score_outdated_browser, event.raw_log.ip_address);
 
   if (event.is_ua_cycling)
     create_and_record_alert(
         event, "IP rapidly cycling through different User-Agents",
         AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
         "Very high likelihood of bot; consider blocking",
-        Scoring::BaseScores::UA_CYCLING, event.raw_log.ip_address);
+        app_config.tier1.score_ua_cycling, event.raw_log.ip_address);
 }
 
 void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
@@ -316,9 +316,9 @@ void RuleEngine::check_path_zscore_rules(const AnalyzedEvent &event) {
       std::string reason = "Anomalous " + metric_name + " for path '" +
                            event.raw_log.request_path +
                            "' (Z-score: " + std::to_string(*zscore_opt) + ")";
-      create_and_record_alert(
-          event, reason, AlertTier::TIER2_STATISTICAL, AlertAction::LOG,
-          action_str, std::abs(*zscore_opt), event.raw_log.request_path);
+      create_and_record_alert(event, reason, AlertTier::TIER2_STATISTICAL,
+                              AlertAction::LOG, action_str, score,
+                              event.raw_log.request_path);
     }
   };
   check(event.path_req_time_zscore, "request time");
@@ -337,7 +337,7 @@ void RuleEngine::check_new_seen_rules(const AnalyzedEvent &event) {
             "High Priority: Investigate IP for targeted probing.";
         create_and_record_alert(event, reason, AlertTier::TIER1_HEURISTIC,
                                 AlertAction::BLOCK, alert_str,
-                                Scoring::BaseScores::SENSITIVE_PATH_ON_NEW_IP,
+                                app_config.tier1.score_sensitive_path_new_ip,
                                 event.raw_log.ip_address);
         break;
       }
@@ -401,7 +401,6 @@ void RuleEngine::check_ml_rules(const AnalyzedEvent &event) {
       anomaly_model_->score_with_explanation(event.feature_vector);
 
   if (score > app_config.tier3.anomaly_score_threshold) {
-    double normalized_score = score * 100.0;
     std::string reason =
         "High ML Anomaly Score detected: " + std::to_string(score);
     std::string action_str = "Review event; flagged as anomalous by ML model.";

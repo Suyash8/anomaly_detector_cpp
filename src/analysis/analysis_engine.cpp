@@ -1,10 +1,11 @@
 #include "analysis_engine.hpp"
+#include "../core/config.hpp"
+#include "../core/log_entry.hpp"
+#include "../models/feature_manager.hpp"
+#include "../utils/ua_parser.hpp"
+#include "../utils/utils.hpp"
 #include "analyzed_event.hpp"
-#include "config.hpp"
-#include "log_entry.hpp"
-#include "ml_models/feature_manager.hpp"
-#include "ua_parser.hpp"
-#include "utils.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -15,8 +16,6 @@
 
 enum class RequestType { HTML, ASSET, OTHER };
 
-constexpr uint32_t STATE_FILE_MAGIC =
-    0xADE57A7E; // Anomaly Detector Engine STaTE
 constexpr uint32_t STATE_FILE_VERSION = 1;
 
 RequestType get_request_type(const std::string &raw_path,
@@ -114,14 +113,14 @@ void perform_advanced_ua_analysis(const std::string &ua,
   }
 
   // 2. Headless/Known Bad Bot detection
-  if (ua.find("HeadlessChrome") != std::string::npos ||
-      ua.find("Puppeteer") != std::string::npos) {
-    event.is_ua_headless = true;
-  }
+  for (const auto &headless_str : cfg.headless_browser_substrings)
+    if (ua.find(headless_str) != std::string::npos) {
+      event.is_ua_headless = true;
+      break;
+    }
   if (ua.find("sqlmap") != std::string::npos ||
-      ua.find("Nmap") != std::string::npos) {
+      ua.find("Nmap") != std::string::npos)
     event.is_ua_known_bad = true;
-  }
 
   // 3. Version Check
   if (auto ver = UAParser::get_major_version(ua, "Chrome/");
@@ -181,8 +180,8 @@ bool AnalysisEngine::save_state(const std::string &path) const {
   }
 
   // Write header
-  out.write(reinterpret_cast<const char *>(&STATE_FILE_MAGIC),
-            sizeof(STATE_FILE_MAGIC));
+  out.write(reinterpret_cast<const char *>(&app_config.state_file_magic),
+            sizeof(app_config.state_file_magic));
   out.write(reinterpret_cast<const char *>(&STATE_FILE_VERSION),
             sizeof(STATE_FILE_VERSION));
 
@@ -215,7 +214,7 @@ bool AnalysisEngine::load_state(const std::string &path) {
   in.read(reinterpret_cast<char *>(&magic), sizeof(magic));
   in.read(reinterpret_cast<char *>(&version), sizeof(version));
 
-  if (magic != STATE_FILE_MAGIC || version != STATE_FILE_VERSION) {
+  if (magic != app_config.state_file_magic || version != STATE_FILE_VERSION) {
     std::cerr
         << "Warning: State file is incompatible or corrupt. Starting fresh."
         << std::endl;
@@ -441,7 +440,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // Path Req Time Z-score
   if (raw_log.request_time_s &&
-      current_path_state.request_time_tracker.get_count() >= min_samples) {
+      static_cast<size_t>(
+          current_path_state.request_time_tracker.get_count()) >= min_samples) {
     double stddev = *event.path_hist_req_time_stddev;
     if (stddev > 1e-6)
       event.path_req_time_zscore =
@@ -450,7 +450,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // Path Bytes Sent Z-score
   if (raw_log.bytes_sent &&
-      current_path_state.bytes_sent_tracker.get_count() >= min_samples) {
+      static_cast<size_t>(current_path_state.bytes_sent_tracker.get_count()) >=
+          min_samples) {
     double stddev = *event.path_hist_bytes_stddev;
     if (stddev > 1.0)
       event.path_bytes_sent_zscore = (static_cast<double>(*raw_log.bytes_sent) -
@@ -459,7 +460,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   // Path Error Event Z-score
-  if (current_path_state.error_rate_tracker.get_count() >= min_samples) {
+  if (static_cast<size_t>(current_path_state.error_rate_tracker.get_count()) >=
+      min_samples) {
     double current_error_val =
         (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
                                                                        : 0.0;
@@ -471,7 +473,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // Req Time Z-score
   if (raw_log.request_time_s &&
-      current_ip_state.request_time_tracker.get_count() >= min_samples) {
+      static_cast<size_t>(current_ip_state.request_time_tracker.get_count()) >=
+          min_samples) {
     double stddev = current_ip_state.request_time_tracker.get_stddev();
     if (stddev > 1e-6) // Avoid division by zero
       event.ip_req_time_zscore =
@@ -482,7 +485,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // Bytes Sent Z-score
   if (raw_log.bytes_sent &&
-      current_ip_state.bytes_sent_tracker.get_count() >= min_samples) {
+      static_cast<size_t>(current_ip_state.bytes_sent_tracker.get_count()) >=
+          min_samples) {
     double stddev = current_ip_state.bytes_sent_tracker.get_stddev();
     if (stddev > 1.0) // Require at least 1 byte of stddev to be meaningful
       event.ip_bytes_sent_zscore =
@@ -492,7 +496,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   // Error Event Z-score
-  if (current_ip_state.error_rate_tracker.get_count() >= min_samples) {
+  if (static_cast<size_t>(current_ip_state.error_rate_tracker.get_count()) >=
+      min_samples) {
     double current_error_val =
         (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
                                                                        : 0.0;
@@ -505,7 +510,8 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   // Request Volume Z-score
-  if (current_ip_state.requests_in_window_count_tracker.get_count() >=
+  if (static_cast<size_t>(
+          current_ip_state.requests_in_window_count_tracker.get_count()) >=
       min_samples) {
     double current_req_vol = static_cast<double>(
         current_ip_state.request_timestamps_window.get_event_count());
