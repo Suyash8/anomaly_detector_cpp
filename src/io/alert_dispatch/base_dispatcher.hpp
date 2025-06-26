@@ -1,8 +1,7 @@
-
 #ifndef BASE_DISPATCHER_HPP
 #define BASE_DISPATCHER_HPP
 
-#include "../../core/alert_manager.hpp"
+#include "../../core/alert.hpp"
 
 struct Alert;
 
