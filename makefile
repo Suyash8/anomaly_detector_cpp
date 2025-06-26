@@ -5,6 +5,7 @@ CXX = g++
 # -Wall -Wextra -pedantic for more warnings
 # -O3 for optimization
 CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -Isrc -O3
+LDFLAGS = -lpthread
 
 # Directories
 SRCDIR = src

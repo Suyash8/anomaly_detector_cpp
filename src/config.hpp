@@ -30,6 +30,9 @@ constexpr const char *STATE_PRUNING_ENABLED = "state_pruning_enabled";
 constexpr const char *STATE_TTL_SECONDS = "state_ttl_seconds";
 constexpr const char *STATE_PRUNE_INTERVAL_EVENTS =
     "state_prune_interval_events";
+constexpr const char *LIVE_MONITORING_ENABLED = "live_monitoring_enabled";
+constexpr const char *LIVE_MONITORING_SLEEP_SECONDS =
+    "live_monitoring_sleep_seconds";
 
 // Tier1 Settings
 constexpr const char *T1_ENABLED = "enabled";
@@ -123,6 +126,9 @@ struct AppConfig {
   bool state_pruning_enabled = true;
   uint64_t state_ttl_seconds = 604800; // 7 days
   uint64_t state_prune_interval_events = 100000;
+
+  bool live_monitoring_enabled = false;
+  uint64_t live_monitoring_sleep_seconds = 5;
 
   Tier1Config tier1;
   Tier2Config tier2;

@@ -98,6 +98,39 @@ void AlertManager::initialize(const Config::AppConfig &app_config) {
             << (output_alerts_to_stdout ? "Enabled" : "Disabled") << std::endl;
 }
 
+void AlertManager::reconfigure(const Config::AppConfig &new_config) {
+  output_alerts_to_stdout = new_config.alerts_to_stdout;
+  throttle_duration_ms_ = new_config.alert_throttle_duration_seconds * 1000;
+  alert_throttle_max_intervening_alerts_ = new_config.alert_throttle_max_alerts;
+
+  // Check if the output file path has changed or if file output was just
+  // enabled
+  if (output_alerts_to_file != new_config.alerts_to_file ||
+      alert_file_output_path != new_config.alert_output_path) {
+    output_alerts_to_file = new_config.alerts_to_file;
+    alert_file_output_path = new_config.alert_output_path;
+
+    if (alert_file_stream.is_open()) {
+      alert_file_stream.flush();
+      alert_file_stream.close();
+    }
+
+    if (output_alerts_to_file && !alert_file_output_path.empty()) {
+      alert_file_stream.open(alert_file_output_path, std::ios::app);
+      if (!alert_file_stream.is_open()) {
+        std::cerr
+            << "Error: AlertManager could not open new alert output file: "
+            << alert_file_output_path << std::endl;
+        output_alerts_to_file = false;
+      } else {
+        std::cout << "Alerts will now be logged to: " << alert_file_output_path
+                  << std::endl;
+      }
+    }
+  }
+  std::cout << "AlertManager has been reconfigured." << std::endl;
+}
+
 void AlertManager::record_alert(const Alert &new_alert) {
   if (throttle_duration_ms_ > 0) {
     std::string throttle_key =

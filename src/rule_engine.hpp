@@ -18,9 +18,11 @@ public:
   void evaluate_rules(const AnalyzedEvent &event);
   bool load_ip_allowlist(const std::string &filepath);
 
+  void reconfigure(const Config::AppConfig &new_config);
+
 private:
   AlertManager &alert_mgr;
-  const Config::AppConfig &app_config;
+  Config::AppConfig app_config;
 
   std::vector<Utils::CIDRBlock> cidr_allowlist_cache_;
   std::unique_ptr<IAnomalyModel> anomaly_model_;

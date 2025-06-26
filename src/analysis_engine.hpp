@@ -85,8 +85,11 @@ public:
   void run_pruning(uint64_t current_timestamp_ms);
   uint64_t get_max_timestamp_seen() const;
 
+  void reconfigure(const Config::AppConfig &new_config);
+  void reset_in_memory_state();
+
 private:
-  const Config::AppConfig &app_config;
+  Config::AppConfig app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
   std::unordered_map<std::string, PerPathState> path_activity_trackers;
 
@@ -99,12 +102,6 @@ private:
                                      uint64_t current_timestamp_ms);
   PerPathState &get_or_create_path_state(const std::string &path,
                                          uint64_t current_timestamp_ms);
-
-  void prune_inactive_states(uint64_t current_timestamp_ms);
-
-  // Helper to check if a path is an asset path - might be needed here if asset
-  // analysis moves
-  // bool is_path_an_asset(const std::string &request_path) const;
 };
 
 #endif // ANALYSIS_ENGINE_HPP

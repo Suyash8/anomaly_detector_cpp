@@ -98,6 +98,29 @@ bool RuleEngine::load_ip_allowlist(const std::string &filepath) {
   return true;
 }
 
+void RuleEngine::reconfigure(const Config::AppConfig &new_config) {
+  app_config = new_config;
+
+  cidr_allowlist_cache_.clear();
+  if (!app_config.allowlist_path.empty())
+    load_ip_allowlist(app_config.allowlist_path);
+
+  // Re-build the Aho-Corasick matchers
+  if (!app_config.tier1.suspicious_path_substrings.empty())
+    suspicious_path_matcher_ = std::make_unique<Utils::AhoCorasick>(
+        app_config.tier1.suspicious_path_substrings);
+  else
+    suspicious_path_matcher_.reset();
+
+  if (!app_config.tier1.suspicious_ua_substrings.empty())
+    suspicious_ua_matcher_ = std::make_unique<Utils::AhoCorasick>(
+        app_config.tier1.suspicious_ua_substrings);
+  else
+    suspicious_ua_matcher_.reset();
+
+  std::cout << "RuleEngine has been reconfigured." << std::endl;
+}
+
 // =================================================================================
 // Private Helper Functions
 // =================================================================================

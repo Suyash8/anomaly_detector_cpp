@@ -106,6 +106,12 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.state_prune_interval_events =
               Utils::string_to_number<uint64_t>(value).value_or(
                   config.state_prune_interval_events);
+        else if (key == Keys::LIVE_MONITORING_ENABLED)
+          config.live_monitoring_enabled = string_to_bool(value);
+        else if (key == Keys::LIVE_MONITORING_SLEEP_SECONDS)
+          config.live_monitoring_sleep_seconds =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.live_monitoring_sleep_seconds);
         else
           config.custom_settings[key] = value;
 
