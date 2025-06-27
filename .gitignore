@@ -10,6 +10,7 @@ anomaly_detector
 # anomaly_detector.exe # If on Windows
 
 # Build files (if any specific to your IDE/environment)
+.cache/
 *.swp
 *~
 # .DS_Store # macOS specific
@@ -17,6 +18,7 @@ anomaly_detector
 # Personal editor/IDE configuration
 .vscode/
 .idea/
+compile_commands.json
 
 # Log files
 data/*.log
