@@ -18,9 +18,6 @@ private:
   std::string alert_file_output_path_;
   std::ofstream alert_file_stream_;
 
-  std::string format_alert_to_json(const Alert &alert_data) const;
-  std::string escape_json_value(const std::string &input) const;
-
   friend class HttpDispatcher;
 };
 
