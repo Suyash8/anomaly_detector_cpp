@@ -1,8 +1,8 @@
 #ifndef PER_IP_STATE_HPP
 #define PER_IP_STATE_HPP
 
-#include "../utils/sliding_window.hpp"
-#include "../utils/stats_tracker.hpp"
+#include "utils/sliding_window.hpp"
+#include "utils/stats_tracker.hpp"
 
 #include <cstdint>
 #include <fstream>

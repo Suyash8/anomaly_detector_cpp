@@ -1,7 +1,7 @@
 #ifndef JSON_FORMATTER_HPP
 #define JSON_FORMATTER_HPP
 
-#include "../core/alert.hpp"
+#include "core/alert.hpp"
 
 #include <string>
 

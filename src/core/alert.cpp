@@ -1,5 +1,5 @@
 #include "alert.hpp"
-#include "../analysis/analyzed_event.hpp"
+#include "analysis/analyzed_event.hpp"
 
 #include <memory>
 #include <string>

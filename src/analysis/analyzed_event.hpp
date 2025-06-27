@@ -1,7 +1,7 @@
 #ifndef ANALYZED_EVENT_HPP
 #define ANALYZED_EVENT_HPP
 
-#include "../core/log_entry.hpp"
+#include "core/log_entry.hpp"
 
 #include <cstddef>
 #include <cstdint>

@@ -1,7 +1,7 @@
-#include "../../io/alert_dispatch/http_dispatcher.hpp"
-#include "../../../third_party/cpp-httplib/httplib.h"
-#include "../../utils/json_formatter.hpp"
+#include "io/alert_dispatch/http_dispatcher.hpp"
 #include "http_dispatcher.hpp"
+#include "httplib.h"
+#include "utils/json_formatter.hpp"
 
 #include <iostream>
 #include <regex>

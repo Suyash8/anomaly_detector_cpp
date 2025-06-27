@@ -1,5 +1,6 @@
 #include "log_entry.hpp"
-#include "../utils/utils.hpp"
+#include "utils/utils.hpp"
+
 #include <iostream>
 #include <optional>
 #include <string>

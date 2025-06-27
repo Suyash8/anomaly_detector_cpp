@@ -1,7 +1,7 @@
 #ifndef ALERT_HPP
 #define ALERT_HPP
 
-#include "../analysis/analyzed_event.hpp"
+#include "analysis/analyzed_event.hpp"
 
 #include <cstdint>
 #include <memory>

@@ -1,10 +1,10 @@
 #include "analysis_engine.hpp"
-#include "../core/config.hpp"
-#include "../core/log_entry.hpp"
-#include "../models/feature_manager.hpp"
-#include "../utils/ua_parser.hpp"
-#include "../utils/utils.hpp"
 #include "analyzed_event.hpp"
+#include "core/config.hpp"
+#include "core/log_entry.hpp"
+#include "models/feature_manager.hpp"
+#include "utils/ua_parser.hpp"
+#include "utils/utils.hpp"
 
 #include <algorithm>
 #include <cstddef>

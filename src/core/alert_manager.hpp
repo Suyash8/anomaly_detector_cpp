@@ -1,8 +1,8 @@
 #ifndef ALERT_MANAGER_HPP
 #define ALERT_MANAGER_HPP
 
-#include "../io/alert_dispatch/base_dispatcher.hpp"
 #include "config.hpp"
+#include "io/alert_dispatch/base_dispatcher.hpp"
 
 #include <cstdint>
 #include <memory>

@@ -1,7 +1,8 @@
 #ifndef HTTP_DISPATCHER_HPP
 #define HTTP_DISPATCHER_HPP
 
-#include "../../io/alert_dispatch/base_dispatcher.hpp"
+#include "io/alert_dispatch/base_dispatcher.hpp"
+
 #include <string>
 
 class HttpDispatcher : public IAlertDispatcher {

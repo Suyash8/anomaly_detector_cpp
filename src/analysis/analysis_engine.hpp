@@ -1,10 +1,10 @@
 #ifndef ANALYSIS_ENGINE_HPP
 #define ANALYSIS_ENGINE_HPP
 
-#include "../core/config.hpp"
-#include "../core/log_entry.hpp"
-#include "../models/feature_manager.hpp"
 #include "analyzed_event.hpp"
+#include "core/config.hpp"
+#include "core/log_entry.hpp"
+#include "models/feature_manager.hpp"
 #include "per_ip_state.hpp"
 #include "per_path_state.hpp"
 

@@ -1,7 +1,7 @@
 #include "alert_manager.hpp"
-#include "../io/alert_dispatch/file_dispatcher.hpp"
 #include "alert.hpp"
 #include "config.hpp"
+#include "io/alert_dispatch/file_dispatcher.hpp"
 
 #include <cstddef>
 #include <cstdint>

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+
 struct LogEntry {
   std::string raw_log_line;
   uint64_t original_line_number;
