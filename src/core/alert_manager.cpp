@@ -1,101 +1,24 @@
 #include "alert_manager.hpp"
-#include "../analysis/analyzed_event.hpp"
+#include "../io/alert_dispatch/file_dispatcher.hpp"
+#include "alert.hpp"
 #include "config.hpp"
-#include "log_entry.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
-#include <iomanip>
-#include <ios>
 #include <iostream>
 #include <memory>
-#include <sstream>
 #include <string>
 
-std::string alert_action_to_string(AlertAction action) {
-  switch (action) {
-  case AlertAction::NO_ACTION:
-    return "NO_ACTION";
-  case AlertAction::LOG:
-    return "LOG";
-  case AlertAction::CHALLENGE:
-    return "CHALLENGE";
-  case AlertAction::RATE_LIMIT:
-    return "RATE_LIMIT";
-  case AlertAction::BLOCK:
-    return "BLOCK";
-  default:
-    return "UNKNOWN_ACTION";
-  }
-}
-
-Alert::Alert(std::shared_ptr<const AnalyzedEvent> event,
-             const std::string &reason, AlertTier tier, AlertAction action,
-             const std::string &action_str, double score,
-             const std::string &key_id)
-    : event_context(event),
-      event_timestamp_ms(event->raw_log.parsed_timestamp_ms.value_or(0)),
-      source_ip(event->raw_log.ip_address), alert_reason(reason),
-      detection_tier(tier), action_code(action), suggested_action(action_str),
-      normalized_score(score),
-      offending_key_identifier(key_id.empty() ? event->raw_log.ip_address
-                                              : key_id),
-      associated_log_line(event->raw_log.original_line_number),
-      raw_log_trigger_sample(event->raw_log.raw_log_line),
-      ml_feature_contribution("") {}
-
-std::string alert_tier_to_string_representation(AlertTier tier) {
-  switch (tier) {
-  case AlertTier::TIER1_HEURISTIC:
-    return "TIER1_HEURISTIC";
-  case AlertTier::TIER2_STATISTICAL:
-    return "TIER2_STATISTICAL";
-  case AlertTier::TIER3_ML:
-    return "TIER3_ML";
-  default:
-    return "UNKNOWN_TIER";
-  }
-}
-
-AlertManager::AlertManager()
-    : output_alerts_to_stdout(true), output_alerts_to_file(false) {
+AlertManager::AlertManager() : output_alerts_to_stdout(true) {
   std::cout << "AlertManager created" << std::endl;
 }
 
-AlertManager::~AlertManager() {
-  if (alert_file_stream.is_open()) {
-    alert_file_stream.flush();
-    alert_file_stream.close();
-  }
-}
+AlertManager::~AlertManager() { flush_all_alerts(); }
 
 void AlertManager::initialize(const Config::AppConfig &app_config) {
-  output_alerts_to_stdout = app_config.alerts_to_stdout;
-  output_alerts_to_file = app_config.alerts_to_file;
-  alert_file_output_path = app_config.alert_output_path;
-
-  throttle_duration_ms_ = app_config.alert_throttle_duration_seconds * 1000;
-  alert_throttle_max_intervening_alerts_ = app_config.alert_throttle_max_alerts;
-
-  if (alert_file_stream.is_open())
-    alert_file_stream.close();
-
-  // A very simple approach for file output if enabled
-  if (output_alerts_to_file && !alert_file_output_path.empty()) {
-    alert_file_stream.open(alert_file_output_path,
-                           std::ios::app); // Append mode
-    if (!alert_file_stream.is_open()) {
-      std::cerr << "Error: AlertManager could not open alert output file: "
-                << alert_file_output_path << std::endl;
-      output_alerts_to_file = false; // Disable file output if open failed
-    } else
-      std::cout << "Alerts will be logged to: " << alert_file_output_path
-                << std::endl;
-  }
-  std::cout << "AlertManager initialized. Stdout alerts: "
-            << (output_alerts_to_stdout ? "Enabled" : "Disabled") << std::endl;
+  reconfigure(app_config);
 }
 
 void AlertManager::reconfigure(const Config::AppConfig &new_config) {
@@ -103,32 +26,15 @@ void AlertManager::reconfigure(const Config::AppConfig &new_config) {
   throttle_duration_ms_ = new_config.alert_throttle_duration_seconds * 1000;
   alert_throttle_max_intervening_alerts_ = new_config.alert_throttle_max_alerts;
 
-  // Check if the output file path has changed or if file output was just
-  // enabled
-  if (output_alerts_to_file != new_config.alerts_to_file ||
-      alert_file_output_path != new_config.alert_output_path) {
-    output_alerts_to_file = new_config.alerts_to_file;
-    alert_file_output_path = new_config.alert_output_path;
+  dispatchers_.clear();
 
-    if (alert_file_stream.is_open()) {
-      alert_file_stream.flush();
-      alert_file_stream.close();
-    }
-
-    if (output_alerts_to_file && !alert_file_output_path.empty()) {
-      alert_file_stream.open(alert_file_output_path, std::ios::app);
-      if (!alert_file_stream.is_open()) {
-        std::cerr
-            << "Error: AlertManager could not open new alert output file: "
-            << alert_file_output_path << std::endl;
-        output_alerts_to_file = false;
-      } else {
-        std::cout << "Alerts will now be logged to: " << alert_file_output_path
-                  << std::endl;
-      }
-    }
+  if (new_config.alerts_to_file && !new_config.alert_output_path.empty()) {
+    dispatchers_.push_back(
+        std::make_unique<FileDispatcher>(new_config.alert_output_path));
   }
-  std::cout << "AlertManager has been reconfigured." << std::endl;
+
+  std::cout << "AlertManager has been reconfigured. Active dispatchers: "
+            << dispatchers_.size() << std::endl;
 }
 
 void AlertManager::record_alert(const Alert &new_alert) {
@@ -165,14 +71,11 @@ void AlertManager::record_alert(const Alert &new_alert) {
   if (output_alerts_to_stdout)
     std::cout << format_alert_to_human_readable(new_alert) << std::endl;
 
-  if (output_alerts_to_file && alert_file_stream.is_open())
-    alert_file_stream << format_alert_to_json(new_alert) << std::endl;
+  for (const auto &dispatcher : dispatchers_)
+    dispatcher->dispatch(new_alert);
 }
 
-void AlertManager::flush_all_alerts() {
-  if (output_alerts_to_file && alert_file_stream.is_open())
-    alert_file_stream.flush();
-}
+void AlertManager::flush_all_alerts() {}
 
 std::string
 AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
@@ -236,139 +139,4 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
 
   formatted_alert += "----------------------------------------";
   return formatted_alert;
-}
-
-std::string AlertManager::format_alert_to_json(const Alert &alert_data) const {
-  const auto &log_context = alert_data.event_context->raw_log;
-  const auto &analysis_context = *alert_data.event_context;
-
-  std::ostringstream ss;
-  ss << "{ ";
-  ss << "\"timestamp_ms\": " << alert_data.event_timestamp_ms << ", ";
-
-  // ISO 8601 timestamp for human readability in other tools
-  auto time_in_seconds =
-      static_cast<std::time_t>(alert_data.event_timestamp_ms / 1000);
-  char time_buffer[100];
-
-  std::tm tm_buf;
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
-  std::tm *tm_info = gmtime_r(&time_in_seconds, &tm_buf);
-#elif defined(_MSC_VER)
-  errno_t err = gmtime_s(&tm_buf, &time_in_seconds);
-  std::tm *tm_info = (err == 0) ? &tm_buf : nullptr;
-#else
-  std::tm *tm_info = std::gmtime(&time_in_seconds);
-#endif
-
-  if (tm_info) {
-    std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%dT%H:%M:%S",
-                  tm_info);
-    ss << "\"timestamp_utc\":\"" << time_buffer << "." << std::setw(3)
-       << std::setfill('0') << (alert_data.event_timestamp_ms % 1000) << "Z\",";
-  }
-
-  // Core Alert Info
-  ss << "\"alert_reason\":\"" << escape_json_value(alert_data.alert_reason)
-     << "\",";
-  ss << "\"detection_tier\":\""
-     << alert_tier_to_string_representation(alert_data.detection_tier) << "\",";
-  ss << "\"suggested_action\":\""
-     << escape_json_value(alert_data.suggested_action) << "\",";
-  ss << "\"action\":\""
-     << escape_json_value(alert_action_to_string(alert_data.action_code));
-  ss << "\"anomaly_score\":" << alert_data.normalized_score << ",";
-  ss << "\"offending_key\":\""
-     << escape_json_value(alert_data.offending_key_identifier) << "\",";
-  ss << "\"ml_contributing_factors\":\""
-     << escape_json_value(alert_data.ml_feature_contribution) << "\",";
-
-  // Log Context (all the important fields from the log that triggered the
-  // alert)
-  ss << "\"log_context\":{";
-  ss << "\"source_ip\":\"" << escape_json_value(alert_data.source_ip) << "\",";
-  ss << "\"log_line_number\":" << alert_data.associated_log_line << ",";
-  ss << "\"host\":\"" << escape_json_value(log_context.host) << "\",";
-  ss << "\"request_method\":\"" << escape_json_value(log_context.request_method)
-     << "\",";
-  ss << "\"request_path\":\"" << escape_json_value(log_context.request_path)
-     << "\",";
-  ss << "\"status_code\":" << log_context.http_status_code.value_or(0) << ",";
-  ss << "\"bytes_sent\":" << log_context.bytes_sent.value_or(0) << ",";
-  ss << "\"request_time_s\":" << log_context.request_time_s.value_or(0.0)
-     << ",";
-  ss << "\"user_agent\":\"" << escape_json_value(log_context.user_agent)
-     << "\",";
-  ss << "\"referer\":\"" << escape_json_value(log_context.referer) << "\",";
-  ss << "\"country_code\":\"" << escape_json_value(log_context.country_code)
-     << "\"";
-  ss << "}";
-
-  // Analysis Context (all the rich data from AnalyzedEvent)
-  ss << ",\"analysis_context\":{";
-  // Tier 1 flags
-  ss << "\"is_ua_missing\":"
-     << (analysis_context.is_ua_missing ? "true" : "false") << ",";
-  ss << "\"is_ua_outdated\":"
-     << (analysis_context.is_ua_outdated ? "true" : "false") << ",";
-  ss << "\"is_ua_headless\":"
-     << (analysis_context.is_ua_headless ? "true" : "false") << ",";
-  ss << "\"is_ua_cycling\":"
-     << (analysis_context.is_ua_cycling ? "true" : "false") << ",";
-  ss << "\"found_suspicious_path_str\":"
-     << (analysis_context.found_suspicious_path_str ? "true" : "false") << ",";
-  ss << "\"found_suspicious_ua_str\":"
-     << (analysis_context.found_suspicious_ua_str ? "true" : "false") << ",";
-  // Tier 2 Z-scores
-  ss << "\"ip_req_time_zscore\":"
-     << analysis_context.ip_req_time_zscore.value_or(0.0) << ",";
-  ss << "\"ip_bytes_sent_zscore\":"
-     << analysis_context.ip_bytes_sent_zscore.value_or(0.0) << ",";
-  ss << "\"ip_error_event_zscore\":"
-     << analysis_context.ip_error_event_zscore.value_or(0.0) << ",";
-  ss << "\"ip_req_vol_zscore\":"
-     << analysis_context.ip_req_vol_zscore.value_or(0.0);
-  // Add more analysis fields here as they are created
-  ss << "}";
-
-  ss << ",\"raw_log\":\""
-     << escape_json_value(alert_data.raw_log_trigger_sample) << "\"";
-
-  ss << "}";
-  return ss.str();
-}
-
-std::string AlertManager::escape_json_value(const std::string &input) const {
-  std::ostringstream o;
-  for (char c : input)
-    switch (c) {
-    case '"':
-      o << "\\\"";
-      break;
-    case '\\':
-      o << "\\\\";
-      break;
-    case '\b':
-      o << "\\b";
-      break;
-    case '\f':
-      o << "\\f";
-      break;
-    case '\n':
-      o << "\\n";
-      break;
-    case '\r':
-      o << "\\r";
-      break;
-    case '\t':
-      o << "\\t";
-      break;
-    default:
-      if ('\x00' <= c && c <= '\x1f')
-        o << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-          << static_cast<int>(static_cast<unsigned char>(c));
-      else
-        o << c;
-    }
-  return o.str();
 }
