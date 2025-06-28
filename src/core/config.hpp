@@ -11,9 +11,8 @@
 
 namespace Config {
 
-// Define all config keys as constants to prevent typos and improve
-// maintainability.
 namespace Keys {
+
 // General Settings
 constexpr const char *LOG_INPUT_PATH = "log_input_path";
 constexpr const char *ALLOWLIST_PATH = "allowlist_path";
@@ -82,6 +81,17 @@ constexpr const char *T2_HISTORICAL_DEVIATION_FACTOR =
 constexpr const char *T3_ENABLED = "enabled";
 constexpr const char *T3_MODEL_PATH = "model_path";
 constexpr const char *T3_ANOMALY_SCORE_THRESHOLD = "anomaly_score_threshold";
+
+// Alerting Settings
+constexpr const char *AL_FILE_ENABLED = "file_enabled";
+constexpr const char *AL_SYSLOG_ENABLED = "syslog_enabled";
+constexpr const char *AL_HTTP_ENABLED = "http_enabled";
+constexpr const char *AL_HTTP_WEBHOOK_URL = "http_webhook_url";
+
+// Threat Intel Settings
+constexpr const char *TI_ENABLED = "enabled";
+constexpr const char *TI_FEED_URLS = "feed_urls";
+constexpr const char *TI_UPDATE_INTERVAL_SECONDS = "update_interval_seconds";
 } // namespace Keys
 
 struct Tier1Config {
@@ -131,6 +141,19 @@ struct Tier3Config {
   double anomaly_score_threshold = 0.6;
 };
 
+struct AlertingConfig {
+  bool file_enabled = false;
+  bool syslog_enabled = false;
+  bool http_enabled = false;
+  std::string http_webhook_url;
+};
+
+struct ThreatIntelConfig {
+  bool enabled = false;
+  std::vector<std::string> feed_urls;
+  uint32_t update_interval_seconds = 3600; // Default: 1 hour
+};
+
 struct AppConfig {
   std::string log_input_path = "data/sample_log.txt";
   std::string allowlist_path = "data/allowlist.txt";
@@ -154,6 +177,8 @@ struct AppConfig {
   Tier1Config tier1;
   Tier2Config tier2;
   Tier3Config tier3;
+  AlertingConfig alerting;
+  ThreatIntelConfig threat_intel;
 
   std::unordered_map<std::string, std::string> custom_settings;
 

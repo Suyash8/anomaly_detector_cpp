@@ -261,6 +261,30 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.tier3.anomaly_score_threshold =
               Utils::string_to_number<double>(value).value_or(
                   config.tier3.anomaly_score_threshold);
+
+        // Alerting Settings
+      } else if (current_section == "Alerting") {
+        if (key == Keys::AL_FILE_ENABLED)
+          config.alerting.file_enabled = string_to_bool(value);
+        else if (key == Keys::AL_SYSLOG_ENABLED)
+          config.alerting.syslog_enabled = string_to_bool(value);
+        else if (key == Keys::AL_HTTP_ENABLED)
+          config.alerting.http_enabled = string_to_bool(value);
+        else if (key == Keys::AL_HTTP_WEBHOOK_URL)
+          config.alerting.http_webhook_url = value;
+
+        // Threat Intel Settings
+      } else if (current_section == "ThreatIntel") {
+        if (key == Keys::TI_ENABLED)
+          config.threat_intel.enabled = string_to_bool(value);
+        else if (key == Keys::TI_FEED_URLS) {
+          std::vector<std::string> feed_urls = Utils::split_string(value, ',');
+          if (!feed_urls.empty())
+            config.threat_intel.feed_urls = feed_urls;
+        } else if (key == Keys::TI_UPDATE_INTERVAL_SECONDS)
+          config.threat_intel.update_interval_seconds =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.threat_intel.update_interval_seconds);
       }
     } catch (const std::invalid_argument &e) {
       std::cerr << "Warning (Config Line " << line_num
