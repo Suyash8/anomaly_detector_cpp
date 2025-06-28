@@ -4,6 +4,7 @@
 #include "analysis/analyzed_event.hpp"
 #include "core/alert_manager.hpp"
 #include "core/config.hpp"
+#include "io/threat_intel/intel_manager.hpp"
 #include "models/base_model.hpp"
 #include "utils/aho_corasick.hpp"
 #include "utils/utils.hpp"
@@ -24,6 +25,7 @@ private:
   AlertManager &alert_mgr;
   Config::AppConfig app_config;
 
+  std::shared_ptr<IntelManager> intel_manager_;
   std::vector<Utils::CIDRBlock> cidr_allowlist_cache_;
   std::unique_ptr<IAnomalyModel> anomaly_model_;
 
