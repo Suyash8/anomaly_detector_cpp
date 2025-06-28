@@ -2,6 +2,8 @@
 #include "alert.hpp"
 #include "config.hpp"
 #include "io/alert_dispatch/file_dispatcher.hpp"
+#include "io/alert_dispatch/http_dispatcher.hpp"
+#include "io/alert_dispatch/syslog_dispatcher.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -27,10 +29,25 @@ void AlertManager::reconfigure(const Config::AppConfig &new_config) {
   alert_throttle_max_intervening_alerts_ = new_config.alert_throttle_max_alerts;
 
   dispatchers_.clear();
+  const auto &alert_cfg = new_config.alerting;
 
-  if (new_config.alerts_to_file && !new_config.alert_output_path.empty()) {
+  if (alert_cfg.file_enabled && !new_config.alert_output_path.empty()) {
     dispatchers_.push_back(
         std::make_unique<FileDispatcher>(new_config.alert_output_path));
+    std::cout << "AlertManager: FileDispatcher enabled, outputting to "
+              << new_config.alert_output_path << std::endl;
+  }
+
+  if (alert_cfg.syslog_enabled) {
+    dispatchers_.push_back(std::make_unique<SyslogDispatcher>());
+    std::cout << "AlertManager: SyslogDispatcher enabled." << std::endl;
+  }
+
+  if (alert_cfg.http_enabled && !alert_cfg.http_webhook_url.empty()) {
+    dispatchers_.push_back(
+        std::make_unique<HttpDispatcher>(alert_cfg.http_webhook_url));
+    std::cout << "AlertManager: HttpDispatcher enabled for URL: "
+              << alert_cfg.http_webhook_url << std::endl;
   }
 
   std::cout << "AlertManager has been reconfigured. Active dispatchers: "
