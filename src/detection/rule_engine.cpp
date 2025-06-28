@@ -1,8 +1,10 @@
 #include "rule_engine.hpp"
 #include "analysis/analyzed_event.hpp"
+#include "core/alert.hpp"
 #include "core/alert_manager.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
+#include "io/threat_intel/intel_manager.hpp"
 #include "models/random_forest_model.hpp"
 #include "rules/scoring.hpp"
 #include "utils/aho_corasick.hpp"
@@ -47,16 +49,31 @@ RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg)
               << std::endl;
     anomaly_model_ = std::make_unique<RandomForestModel>(10);
   }
+
+  if (app_config.threat_intel.enabled)
+    intel_manager_ = std::make_shared<IntelManager>(
+        app_config.threat_intel.feed_urls,
+        app_config.threat_intel.update_interval_seconds);
 }
 
 RuleEngine::~RuleEngine() {}
 
 void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
-  uint32_t event_ip = Utils::ip_string_to_uint32(event_ref.raw_log.ip_address);
-  if (event_ip != 0)
-    for (const auto &block : cidr_allowlist_cache_)
-      if (block.contains(event_ip))
-        return;
+  uint32_t event_ip_u32 =
+      Utils::ip_string_to_uint32(event_ref.raw_log.ip_address);
+  if (event_ip_u32 != 0)
+    if (intel_manager_ && intel_manager_->is_blacklisted(event_ip_u32)) {
+      create_and_record_alert(
+          event_ref, "IP is on external threat intelligence blacklist",
+          AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
+          "Block IP immediately; listed on external threat feed.", 100.0,
+          event_ref.raw_log.ip_address);
+      return;
+    }
+
+  for (const auto &block : cidr_allowlist_cache_)
+    if (block.contains(event_ip_u32))
+      return;
 
   const auto event = std::make_shared<const AnalyzedEvent>(event_ref);
 
@@ -117,6 +134,13 @@ void RuleEngine::reconfigure(const Config::AppConfig &new_config) {
         app_config.tier1.suspicious_ua_substrings);
   else
     suspicious_ua_matcher_.reset();
+
+  if (new_config.threat_intel.enabled)
+    intel_manager_ = std::make_shared<IntelManager>(
+        new_config.threat_intel.feed_urls,
+        new_config.threat_intel.update_interval_seconds);
+  else
+    intel_manager_.reset();
 
   std::cout << "RuleEngine has been reconfigured." << std::endl;
 }
