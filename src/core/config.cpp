@@ -12,6 +12,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace Config {
 
@@ -116,6 +117,14 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.state_file_magic =
               Utils::string_to_number<uint32_t>(value).value_or(
                   config.state_file_magic);
+        else if (key == Keys::ALERT_THROTTLE_DURATION_SECONDS)
+          config.alert_throttle_duration_seconds =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.alert_throttle_duration_seconds);
+        else if (key == Keys::ALERT_THROTTLE_MAX_ALERTS)
+          config.alert_throttle_max_alerts =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.alert_throttle_max_alerts);
         else
           config.custom_settings[key] = value;
 
@@ -148,10 +157,11 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
             config.tier1.failed_login_status_codes = codes;
         } else if (key == Keys::T1_CHECK_UA_ANOMALIES)
           config.tier1.check_user_agent_anomalies = string_to_bool(value);
-        else if (key == Keys::T1_HEADLESS_BROWSER_STRINGS)
-          config.tier1.headless_browser_substrings =
-              Utils::split_string(value, ',');
-        else if (key == Keys::T1_MIN_CHROME_VERSION)
+        else if (key == Keys::T1_HEADLESS_BROWSER_STRINGS) {
+          std::vector<std::string> substrings = Utils::split_string(value, ',');
+          if (!substrings.empty())
+            config.tier1.headless_browser_substrings = substrings;
+        } else if (key == Keys::T1_MIN_CHROME_VERSION)
           config.tier1.min_chrome_version =
               Utils::string_to_number<int>(value).value_or(
                   config.tier1.min_chrome_version);
@@ -163,15 +173,24 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.tier1.max_unique_uas_per_ip_in_window =
               Utils::string_to_number<size_t>(value).value_or(
                   config.tier1.max_unique_uas_per_ip_in_window);
-        else if (key == Keys::T1_HTML_PATH_SUFFIXES)
-          config.tier1.html_path_suffixes = Utils::split_string(value, ',');
-        else if (key == Keys::T1_HTML_EXACT_PATHS)
-          config.tier1.html_exact_paths = Utils::split_string(value, ',');
-        else if (key == Keys::T1_ASSET_PATH_PREFIXES)
-          config.tier1.asset_path_prefixes = Utils::split_string(value, ',');
-        else if (key == Keys::T1_ASSET_PATH_SUFFIXES)
-          config.tier1.asset_path_suffixes = Utils::split_string(value, ',');
-        else if (key == Keys::T1_MIN_HTML_REQUESTS_FOR_RATIO)
+        else if (key == Keys::T1_HTML_PATH_SUFFIXES) {
+          std::vector<std::string> suffixes = Utils::split_string(value, ',');
+          if (!suffixes.empty())
+            config.tier1.html_path_suffixes = suffixes;
+        } else if (key == Keys::T1_HTML_EXACT_PATHS) {
+          std::vector<std::string> exact_paths =
+              Utils::split_string(value, ',');
+          if (!exact_paths.empty())
+            config.tier1.html_exact_paths = exact_paths;
+        } else if (key == Keys::T1_ASSET_PATH_PREFIXES) {
+          std::vector<std::string> prefixes = Utils::split_string(value, ',');
+          if (!prefixes.empty())
+            config.tier1.asset_path_prefixes = prefixes;
+        } else if (key == Keys::T1_ASSET_PATH_SUFFIXES) {
+          std::vector<std::string> suffixes = Utils::split_string(value, ',');
+          if (!suffixes.empty())
+            config.tier1.asset_path_suffixes = suffixes;
+        } else if (key == Keys::T1_MIN_HTML_REQUESTS_FOR_RATIO)
           config.tier1.min_html_requests_for_ratio_check =
               Utils::string_to_number<size_t>(value).value_or(
                   config.tier1.min_html_requests_for_ratio_check);
@@ -205,7 +224,17 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
             if (!trimmed_substr.empty())
               config.tier1.sensitive_path_substrings.push_back(trimmed_substr);
           }
-        } else if (key == Keys::T1_SCORE_MISSING_UA)
+        } else if (key == Keys::T1_SESSION_TRACKING_ENABLED)
+          config.tier1.session_tracking_enabled = string_to_bool(value);
+        else if (key == Keys::T1_SESSION_KEY_COMPONENTS) {
+          std::vector<std::string> components = Utils::split_string(value, ',');
+          if (!components.empty())
+            config.tier1.session_key_components = components;
+        } else if (key == Keys::T1_SESSION_INACTIVITY_TTL_SECONDS)
+          config.tier1.session_inactivity_ttl_seconds =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.tier1.session_inactivity_ttl_seconds);
+        else if (key == Keys::T1_SCORE_MISSING_UA)
           config.tier1.score_missing_ua =
               Utils::string_to_number<double>(value).value_or(
                   config.tier1.score_missing_ua);

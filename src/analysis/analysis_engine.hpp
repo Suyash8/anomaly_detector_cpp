@@ -1,6 +1,7 @@
 #ifndef ANALYSIS_ENGINE_HPP
 #define ANALYSIS_ENGINE_HPP
 
+#include "analysis/per_session_state.hpp"
 #include "analyzed_event.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
@@ -31,11 +32,12 @@ private:
   Config::AppConfig app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
   std::unordered_map<std::string, PerPathState> path_activity_trackers;
+  std::unordered_map<std::string, PerSessionState> session_trackers;
 
   FeatureManager feature_manager_;
-
-  // Track the highest seen timestamp to correctly handle out-of-order logs
   uint64_t max_timestamp_seen_ = 0;
+
+  std::string build_session_key(const LogEntry &raw_log) const;
 
   PerIpState &get_or_create_ip_state(const std::string &ip,
                                      uint64_t current_timestamp_ms);
