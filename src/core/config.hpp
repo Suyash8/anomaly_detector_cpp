@@ -65,6 +65,12 @@ constexpr const char *T1_SESSION_TRACKING_ENABLED = "session_tracking_enabled";
 constexpr const char *T1_SESSION_KEY_COMPONENTS = "session_key_components";
 constexpr const char *T1_SESSION_INACTIVITY_TTL_SECONDS =
     "session_inactivity_ttl_seconds";
+constexpr const char *T1_MAX_FAILED_LOGINS_PER_SESSION =
+    "max_failed_logins_per_session";
+constexpr const char *T1_MAX_REQUESTS_PER_SESSION_IN_WINDOW =
+    "max_requests_per_session_in_window";
+constexpr const char *T1_MAX_UA_CHANGES_PER_SESSION =
+    "max_ua_changes_per_session";
 constexpr const char *T1_SCORE_MISSING_UA = "score_missing_ua";
 constexpr const char *T1_SCORE_OUTDATED_BROWSER = "score_outdated_browser";
 constexpr const char *T1_SCORE_KNOWN_BAD_UA = "score_known_bad_ua";
@@ -120,6 +126,10 @@ struct Tier1Config {
   // Defines what makes a session unique. Can be a combination of "ip", "ua"
   std::vector<std::string> session_key_components = {"ip", "ua"};
   uint64_t session_inactivity_ttl_seconds = 1800; // 30 minutes
+
+  uint32_t max_failed_logins_per_session = 10;
+  uint32_t max_requests_per_session_in_window = 30;
+  uint32_t max_ua_changes_per_session = 2;
 
   std::vector<std::string> html_path_suffixes;
   std::vector<std::string> html_exact_paths;
