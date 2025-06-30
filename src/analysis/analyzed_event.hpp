@@ -1,6 +1,8 @@
 #ifndef ANALYZED_EVENT_HPP
 #define ANALYZED_EVENT_HPP
 
+#include "analysis/per_session_state.hpp"
+#include "analysis/session_features.hpp"
 #include "core/log_entry.hpp"
 
 #include <cstddef>
@@ -89,6 +91,13 @@ struct AnalyzedEvent {
   int ip_html_requests_in_window = 0;
   int ip_asset_requests_in_window = 0;
   std::optional<double> ip_assets_per_html_ratio;
+
+  // ------------------
+  // Session context
+  // ------------------
+
+  std::optional<PerSessionState> raw_session_state;
+  std::optional<SessionFeatures> derived_session_features;
 
   // ----------------------
   // Machine learning input

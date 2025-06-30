@@ -435,6 +435,11 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
         if (std::find(codes.begin(), codes.end(), status) != codes.end())
           session.failed_login_attempts++;
       }
+
+      // Populate AnalyzedEvent
+      event.raw_session_state = it->second;
+      event.derived_session_features =
+          SessionFeatureExtractor::extract(it->second);
     }
   }
 
