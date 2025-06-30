@@ -1,4 +1,5 @@
 #include "analysis_engine.hpp"
+#include "analysis/per_session_state.hpp"
 #include "analyzed_event.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
@@ -97,6 +98,21 @@ AnalysisEngine::get_or_create_path_state(const std::string &path,
     it->second.last_seen_timestamp_ms = current_timestamp_ms;
     return it->second;
   }
+}
+
+std::string AnalysisEngine::build_session_key(const LogEntry &raw_log) const {
+  std::string session_key;
+
+  for (const auto &component : app_config.tier1.session_key_components) {
+    if (component == "ip")
+      session_key += raw_log.ip_address;
+    else if (component == "ua")
+      session_key += raw_log.user_agent;
+
+    session_key += '|';
+  }
+
+  return session_key;
 }
 
 void perform_advanced_ua_analysis(const std::string &ua,
@@ -369,6 +385,58 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     event.ip_assets_per_html_ratio =
         static_cast<double>(event.ip_asset_requests_in_window) /
         static_cast<double>(event.ip_html_requests_in_window);
+
+  if (app_config.tier1.session_tracking_enabled) {
+    std::string session_key = build_session_key(raw_log);
+
+    if (!session_key.empty()) {
+      auto it = session_trackers.find(session_key);
+
+      if (it == session_trackers.end() ||
+          (current_event_ts - it->second.last_seen_timestamp_ms) >
+              (app_config.tier1.session_inactivity_ttl_seconds * 1000)) {
+        if (it != session_trackers.end())
+          session_trackers.erase(it);
+
+        uint64_t window_duration_ms =
+            app_config.tier1.sliding_window_duration_seconds * 1000;
+        auto result = session_trackers.emplace(
+            session_key, PerSessionState(current_event_ts, window_duration_ms));
+        it = result.first;
+      }
+
+      // Update the session state with the current event's data
+      PerSessionState &session = it->second;
+      session.last_seen_timestamp_ms = current_event_ts;
+      session.request_count++;
+      session.unique_paths_visited.insert(raw_log.request_path);
+      session.unique_user_agents.insert(raw_log.user_agent);
+
+      session.request_history.emplace_back(current_event_ts,
+                                           raw_log.request_path);
+      if (session.request_history.size() > 50)
+        session.request_history.pop_front();
+
+      session.http_method_counts[raw_log.request_method]++;
+      session.request_timestamps_window.add_event(current_event_ts, 1);
+
+      if (raw_log.request_time_s)
+        session.request_time_tracker.update(*raw_log.request_time_s);
+      if (raw_log.bytes_sent)
+        session.bytes_sent_tracker.update(*raw_log.bytes_sent);
+
+      if (raw_log.http_status_code) {
+        int status = *raw_log.http_status_code;
+        if (status >= 400 && status < 500)
+          session.error_4xx_count++;
+        if (status >= 500)
+          session.error_5xx_count++;
+        const auto &codes = app_config.tier1.failed_login_status_codes;
+        if (std::find(codes.begin(), codes.end(), status) != codes.end())
+          session.failed_login_attempts++;
+      }
+    }
+  }
 
   // --- Tier 2 historical stats updates ---
   if (raw_log.request_time_s) {
