@@ -62,6 +62,13 @@ RequestType get_request_type(const std::string &raw_path,
 AnalysisEngine::AnalysisEngine(const Config::AppConfig &cfg)
     : app_config(cfg), feature_manager_() {
   std::cout << "AnalysisEngine created." << std::endl;
+
+  if (app_config.ml_data_collection_enabled) {
+    data_collector_ = std::make_unique<ModelDataCollector>(
+        app_config.ml_data_collection_path);
+    std::cout << "ML data collection enabled. Outputting features to: "
+              << app_config.ml_data_collection_path << std::endl;
+  }
 }
 
 AnalysisEngine::~AnalysisEngine() {}
@@ -604,8 +611,11 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
                                max_timestamp_seen_);
 
   // --- Feature extraction for ML ---
-  if (app_config.tier3.enabled)
+  if (app_config.tier3.enabled || app_config.ml_data_collection_enabled)
     event.feature_vector = feature_manager_.extract_and_normalize(event);
+
+  if (data_collector_ && !event.feature_vector.empty())
+    data_collector_->collect_features(event.feature_vector);
 
   return event;
 }

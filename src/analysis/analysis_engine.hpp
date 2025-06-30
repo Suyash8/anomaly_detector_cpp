@@ -6,6 +6,7 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "models/feature_manager.hpp"
+#include "models/model_data_collector.hpp"
 #include "per_ip_state.hpp"
 #include "per_path_state.hpp"
 
@@ -33,6 +34,8 @@ private:
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
   std::unordered_map<std::string, PerPathState> path_activity_trackers;
   std::unordered_map<std::string, PerSessionState> session_trackers;
+
+  std::unique_ptr<ModelDataCollector> data_collector_;
 
   FeatureManager feature_manager_;
   uint64_t max_timestamp_seen_ = 0;
