@@ -33,6 +33,8 @@ constexpr const char *LIVE_MONITORING_ENABLED = "live_monitoring_enabled";
 constexpr const char *LIVE_MONITORING_SLEEP_SECONDS =
     "live_monitoring_sleep_seconds";
 constexpr const char *STATE_FILE_MAGIC = "state_file_magic";
+constexpr const char *ML_DATA_COLLECTION_ENABLED = "ml_data_collection_enabled";
+constexpr const char *ML_DATA_COLLECTION_PATH = "ml_data_collection_path";
 
 // Tier1 Settings
 constexpr const char *T1_ENABLED = "enabled";
@@ -198,6 +200,9 @@ struct AppConfig {
   Tier3Config tier3;
   AlertingConfig alerting;
   ThreatIntelConfig threat_intel;
+
+  bool ml_data_collection_enabled = false;
+  std::string ml_data_collection_path = "data/training_features.csv";
 
   std::unordered_map<std::string, std::string> custom_settings;
 

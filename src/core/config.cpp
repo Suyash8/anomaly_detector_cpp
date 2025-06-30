@@ -125,6 +125,10 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.alert_throttle_max_alerts =
               Utils::string_to_number<uint64_t>(value).value_or(
                   config.alert_throttle_max_alerts);
+        else if (key == Keys::ML_DATA_COLLECTION_ENABLED)
+          config.ml_data_collection_enabled = string_to_bool(value);
+        else if (key == Keys::ML_DATA_COLLECTION_PATH)
+          config.ml_data_collection_path = value;
         else
           config.custom_settings[key] = value;
 
