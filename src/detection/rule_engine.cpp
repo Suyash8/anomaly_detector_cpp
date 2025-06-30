@@ -8,6 +8,7 @@
 #include "models/random_forest_model.hpp"
 #include "rules/scoring.hpp"
 #include "utils/aho_corasick.hpp"
+#include "utils/sliding_window.hpp"
 #include "utils/utils.hpp"
 
 #include <cstddef>
@@ -84,6 +85,7 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
     check_suspicious_string_rules(*event);
     check_asset_ratio_rule(*event);
     check_new_seen_rules(*event);
+    check_session_rules(*event);
   }
 
   if (app_config.tier2.enabled) {
@@ -301,6 +303,47 @@ void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
                             AlertAction::CHALLENGE, action_str, score,
                             event.raw_log.ip_address);
   }
+}
+
+void RuleEngine::check_session_rules(const AnalyzedEvent &event) {
+  if (!event.raw_session_state)
+    return;
+
+  const auto &session = *event.raw_session_state;
+
+  // Rule: High number of failed logins in a single session
+  if (session.failed_login_attempts >
+      app_config.tier1.max_failed_logins_per_session)
+    create_and_record_alert(
+        event,
+        "High number of failed logins within a single session: " +
+            std::to_string(session.failed_login_attempts),
+        AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
+        "Block session/IP; high confidence of credential stuffing.", 85.0);
+
+  // Rule: Impossibly fast navigation within the sliding window
+  auto &temp_window =
+      const_cast<SlidingWindow<uint64_t> &>(session.request_timestamps_window);
+  temp_window.prune_old_events(session.last_seen_timestamp_ms);
+  if (temp_window.get_event_count() >
+      app_config.tier1.max_requests_per_session_in_window)
+    create_and_record_alert(
+        event,
+        "Anomalously high request rate within a single session: " +
+            std::to_string(temp_window.get_event_count()) + " reqs in window.",
+        AlertTier::TIER1_HEURISTIC, AlertAction::CHALLENGE,
+        "High confidence of bot activity (scraping/probing).", 70.0);
+
+  // Rule: User-Agent cycling within a session
+  if (session.unique_user_agents.size() >
+      app_config.tier1.max_ua_changes_per_session)
+    create_and_record_alert(
+        event,
+        "User-Agent changed " +
+            std::to_string(session.unique_user_agents.size()) +
+            " times within a single session.",
+        AlertTier::TIER1_HEURISTIC, AlertAction::BLOCK,
+        "Very high confidence of sophisticated bot or attacker.", 90.0);
 }
 
 // =================================================================================

@@ -125,6 +125,10 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.alert_throttle_max_alerts =
               Utils::string_to_number<uint64_t>(value).value_or(
                   config.alert_throttle_max_alerts);
+        else if (key == Keys::ML_DATA_COLLECTION_ENABLED)
+          config.ml_data_collection_enabled = string_to_bool(value);
+        else if (key == Keys::ML_DATA_COLLECTION_PATH)
+          config.ml_data_collection_path = value;
         else
           config.custom_settings[key] = value;
 
@@ -234,6 +238,18 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.tier1.session_inactivity_ttl_seconds =
               Utils::string_to_number<uint64_t>(value).value_or(
                   config.tier1.session_inactivity_ttl_seconds);
+        else if (key == Keys::T1_MAX_FAILED_LOGINS_PER_SESSION)
+          config.tier1.max_failed_logins_per_session =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.tier1.max_failed_logins_per_session);
+        else if (key == Keys::T1_MAX_REQUESTS_PER_SESSION_IN_WINDOW)
+          config.tier1.max_requests_per_session_in_window =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.tier1.max_requests_per_session_in_window);
+        else if (key == Keys::T1_MAX_UA_CHANGES_PER_SESSION)
+          config.tier1.max_ua_changes_per_session =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.tier1.max_ua_changes_per_session);
         else if (key == Keys::T1_SCORE_MISSING_UA)
           config.tier1.score_missing_ua =
               Utils::string_to_number<double>(value).value_or(

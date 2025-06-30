@@ -4,61 +4,9 @@
 #include <cstddef>
 #include <vector>
 
-FeatureManager::FeatureManager() {
-  // Initialize min-max scaling parameters for each feature
-  // These are educated guesses for now
-  min_max_params_.resize(static_cast<size_t>(Feature::FEATURE_COUNT));
-
-  // Format: {min_val, max_val}
-  min_max_params_[static_cast<int>(Feature::REQUEST_TIME_S)] = {
-      0.0, 10.0}; // 0-10 seconds
-  min_max_params_[static_cast<int>(Feature::BYTES_SENT)] = {0.0,
-                                                            20000.0}; // 0-20KB
-  min_max_params_[static_cast<int>(Feature::HTTP_STATUS_4XX)] = {0.0,
-                                                                 1.0}; // Binary
-  min_max_params_[static_cast<int>(Feature::HTTP_STATUS_5XX)] = {0.0,
-                                                                 1.0}; // Binary
-  min_max_params_[static_cast<int>(Feature::IS_UA_MISSING)] = {0.0,
-                                                               1.0}; // Binary
-  min_max_params_[static_cast<int>(Feature::IS_UA_HEADLESS)] = {0.0,
-                                                                1.0}; // Binary
-  min_max_params_[static_cast<int>(Feature::IS_UA_KNOWN_BAD)] = {0.0,
-                                                                 1.0}; // Binary
-  min_max_params_[static_cast<int>(Feature::IS_UA_CYCLING)] = {0.0,
-                                                               1.0}; // Binary
-  min_max_params_[static_cast<int>(Feature::IS_PATH_NEW_FOR_IP)] = {
-      0.0, 1.0}; // Binary
-  min_max_params_[static_cast<int>(Feature::IP_REQ_TIME_ZSCORE)] = {
-      -5.0, 5.0}; // Z-scores typically in this range
-  min_max_params_[static_cast<int>(Feature::IP_BYTES_SENT_ZSCORE)] = {-5.0,
-                                                                      5.0};
-  min_max_params_[static_cast<int>(Feature::IP_ERROR_EVENT_ZSCORE)] = {-5.0,
-                                                                       5.0};
-  min_max_params_[static_cast<int>(Feature::IP_REQ_VOL_ZSCORE)] = {-5.0, 5.0};
-  min_max_params_[static_cast<int>(Feature::PATH_REQ_TIME_ZSCORE)] = {-5.0,
-                                                                      5.0};
-  min_max_params_[static_cast<int>(Feature::PATH_BYTES_SENT_ZSCORE)] = {-5.0,
-                                                                        5.0};
-  min_max_params_[static_cast<int>(Feature::PATH_ERROR_EVENT_ZSCORE)] = {-5.0,
-                                                                         5.0};
-}
-
-double FeatureManager::normalize(double value, Feature f) {
-  const auto &param = min_max_params_[static_cast<int>(f)];
-  double min_value = param.first;
-  double max_value = param.second;
-
-  if ((max_value - min_value) == 0)
-    return 0.5; // Avoid div by zero, reutrn neutral value
-
-  double normalized = (value - min_value) / (max_value - min_value);
-
-  // Clamp the result to the [0.0, 1.0] range
-  return std::max(0.0, std::min(1.0, normalized));
-}
-
 std::vector<double>
 FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
+  // Initialize a vector of the correct size with all zeros
   std::vector<double> features(static_cast<size_t>(Feature::FEATURE_COUNT),
                                0.0);
 
@@ -67,7 +15,7 @@ FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
     return opt.value_or(0.0);
   };
 
-  // --- Extraction ---
+  // --- Raw Request Features ---
   features[static_cast<int>(Feature::REQUEST_TIME_S)] =
       event.raw_log.request_time_s.value_or(0.0);
   features[static_cast<int>(Feature::BYTES_SENT)] =
@@ -77,6 +25,8 @@ FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
       (status >= 400 && status < 500) ? 1.0 : 0.0;
   features[static_cast<int>(Feature::HTTP_STATUS_5XX)] =
       (status >= 500 && status < 600) ? 1.0 : 0.0;
+
+  // --- IP-Centric Binary Flags ---
   features[static_cast<int>(Feature::IS_UA_MISSING)] =
       event.is_ua_missing ? 1.0 : 0.0;
   features[static_cast<int>(Feature::IS_UA_HEADLESS)] =
@@ -87,6 +37,8 @@ FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
       event.is_ua_cycling ? 1.0 : 0.0;
   features[static_cast<int>(Feature::IS_PATH_NEW_FOR_IP)] =
       event.is_path_new_for_ip ? 1.0 : 0.0;
+
+  // --- IP-Centric Statistical Features (Z-Scores) ---
   features[static_cast<int>(Feature::IP_REQ_TIME_ZSCORE)] =
       get_val(event.ip_req_time_zscore);
   features[static_cast<int>(Feature::IP_BYTES_SENT_ZSCORE)] =
@@ -95,6 +47,8 @@ FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
       get_val(event.ip_error_event_zscore);
   features[static_cast<int>(Feature::IP_REQ_VOL_ZSCORE)] =
       get_val(event.ip_req_vol_zscore);
+
+  // --- Path-Centric Statistical Features (Z-Scores) ---
   features[static_cast<int>(Feature::PATH_REQ_TIME_ZSCORE)] =
       get_val(event.path_req_time_zscore);
   features[static_cast<int>(Feature::PATH_BYTES_SENT_ZSCORE)] =
@@ -102,10 +56,48 @@ FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
   features[static_cast<int>(Feature::PATH_ERROR_EVENT_ZSCORE)] =
       get_val(event.path_error_event_zscore);
 
-  // --- Normalization ---
-  for (size_t i = 0; i < features.size(); ++i) {
-    features[i] = normalize(features[i], static_cast<Feature>(i));
+  // --- Session Features ---
+  // Safely check if session context exists before trying to access it
+  if (event.raw_session_state) {
+    const auto &session_raw = *event.raw_session_state;
+
+    // --- Session-Centric Raw Features ---
+    if (session_raw.session_start_timestamp_ms > 0) {
+      features[static_cast<int>(Feature::SESSION_DURATION_S)] =
+          (session_raw.last_seen_timestamp_ms -
+           session_raw.session_start_timestamp_ms) /
+          1000.0;
+    }
+    features[static_cast<int>(Feature::SESSION_REQ_COUNT)] =
+        static_cast<double>(session_raw.request_count);
+    features[static_cast<int>(Feature::SESSION_UNIQUE_PATH_COUNT)] =
+        static_cast<double>(session_raw.unique_paths_visited.size());
+    features[static_cast<int>(Feature::SESSION_ERROR_4XX_COUNT)] =
+        static_cast<double>(session_raw.error_4xx_count);
+    features[static_cast<int>(Feature::SESSION_ERROR_5XX_COUNT)] =
+        static_cast<double>(session_raw.error_5xx_count);
+    features[static_cast<int>(Feature::SESSION_FAILED_LOGIN_COUNT)] =
+        static_cast<double>(session_raw.failed_login_attempts);
+    features[static_cast<int>(Feature::SESSION_BYTES_SENT_MEAN)] =
+        session_raw.bytes_sent_tracker.get_mean();
+    features[static_cast<int>(Feature::SESSION_REQ_TIME_MEAN)] =
+        session_raw.request_time_tracker.get_mean();
+
+    // --- Session-Centric Derived Features ---
+    if (event.derived_session_features) {
+      const auto &session_derived = *event.derived_session_features;
+      features[static_cast<int>(Feature::SESSION_AVG_TIME_BETWEEN_REQS_S)] =
+          session_derived.avg_time_between_request_s;
+      features[static_cast<int>(Feature::SESSION_POST_TO_GET_RATIO)] =
+          session_derived.post_to_get_ratio;
+      features[static_cast<int>(Feature::SESSION_UA_CHANGE_COUNT)] =
+          static_cast<double>(session_derived.ua_changes_in_session);
+    }
   }
+
+  // --- Final Normalization Step ---
+  for (double &feature : features)
+    feature = normalize(feature);
 
   return features;
 }
