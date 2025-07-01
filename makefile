@@ -4,8 +4,8 @@ CXX = g++
 # -Isrc allows #include "header.hpp" from .cpp files in src/
 # -Wall -Wextra -pedantic for more warnings
 # -O3 for optimization
-CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -Isrc -Ithird_party/cpp-httplib -DCPPHTTPLIB_OPENSSL_SUPPORT -O3
-LDFLAGS = -lssl -lcrypto -lpthread
+CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -Isrc -Ithird_party/cpp-httplib -Ithird_party/nlohmann -Ithird_party/onnxruntime/include -DCPPHTTPLIB_OPENSSL_SUPPORT -O3
+LDFLAGS = -Lthird_party/onnxruntime/lib -lssl -lcrypto -lpthread -lonnxruntime
 
 # Directories
 SRCDIR = src
