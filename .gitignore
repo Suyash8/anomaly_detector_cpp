@@ -9,6 +9,13 @@ bin/
 anomaly_detector
 # anomaly_detector.exe # If on Windows
 
+# Python extras
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+
 # Build files (if any specific to your IDE/environment)
 .cache/
 *.swp
