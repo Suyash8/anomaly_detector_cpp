@@ -73,6 +73,27 @@ void ONNXModel::load_metadata(const std::string &metadata_path) {
 
 std::pair<double, std::vector<std::string>>
 ONNXModel::score_with_explanation(const std::vector<double> &features) {
-  // Placeholder
-  return {0.0, {"Inference not yet implemented."}};
+  if (!ready_ || (features.size() != static_cast<size_t>(input_node_dims_[1])))
+    return {0.0, {"Model not ready or feature vector size mismatch"}};
+
+  std::vector<float> float_features(features.begin(), features.end());
+
+  Ort::MemoryInfo memory_info =
+      Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+  Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+      memory_info, float_features.data(), float_features.size(),
+      input_node_dims_.data(), input_node_dims_.size());
+
+  auto output_tensors = session_.Run(
+      Ort::RunOptions{nullptr}, input_node_names_.data(), &input_tensor, 1,
+      output_node_names_.data(), output_node_names_.size());
+
+  const float *score_data = output_tensors[1].GetTensorData<float>();
+  double raw_score = static_cast<double>(score_data[0]);
+  double normalized_score = 0.5 - raw_score;
+
+  // For now, return a generic explanation inside a vector.
+  std::vector<std::string> explanation = {"High ML Anomaly Score"};
+
+  return {normalized_score, explanation};
 }
