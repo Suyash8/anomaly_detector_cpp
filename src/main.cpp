@@ -154,13 +154,15 @@ int main(int argc, char *argv[]) {
   config_manager.load_configuration(config_file_to_load);
 
   auto current_config = config_manager.get_config();
+  auto model_manager = std::make_shared<ModelManager>(*current_config);
 
   // --- Initialize Core Components ---
   AlertManager alert_manager_instance;
   alert_manager_instance.initialize(*current_config);
 
   AnalysisEngine analysis_engine_instance(*current_config);
-  RuleEngine rule_engine_instance(alert_manager_instance, *current_config);
+  RuleEngine rule_engine_instance(alert_manager_instance, *current_config,
+                                  model_manager);
 
   // --- Log Processing ---
   std::istream *p_log_stream = nullptr;

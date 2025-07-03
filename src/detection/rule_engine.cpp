@@ -5,7 +5,7 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "io/threat_intel/intel_manager.hpp"
-#include "models/random_forest_model.hpp"
+#include "models/model_manager.hpp"
 #include "rules/scoring.hpp"
 #include "utils/aho_corasick.hpp"
 #include "utils/sliding_window.hpp"
@@ -25,8 +25,9 @@
 // Public Interface & Constructor
 // =================================================================================
 
-RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg)
-    : alert_mgr(manager), app_config(cfg) {
+RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg,
+                       std::shared_ptr<ModelManager> model_manager)
+    : alert_mgr(manager), app_config(cfg), model_manager_(model_manager) {
   std::cout << "\nRuleEngine created and initialised" << std::endl;
 
   if (!app_config.allowlist_path.empty()) {
@@ -44,12 +45,6 @@ RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg)
   if (!app_config.tier1.suspicious_ua_substrings.empty())
     suspicious_ua_matcher_ = std::make_unique<Utils::AhoCorasick>(
         app_config.tier1.suspicious_ua_substrings);
-
-  if (app_config.tier3.enabled) {
-    std::cout << "Tier 3 ML detection is enabled (using RandomForestModel)."
-              << std::endl;
-    anomaly_model_ = std::make_unique<RandomForestModel>(10);
-  }
 
   if (app_config.threat_intel.enabled)
     intel_manager_ = std::make_shared<IntelManager>(
@@ -464,8 +459,14 @@ void RuleEngine::check_ml_rules(const AnalyzedEvent &event) {
   if (event.feature_vector.empty())
     return;
 
-  auto [score, explanation] =
-      anomaly_model_->score_with_explanation(event.feature_vector);
+  auto model = model_manager_->get_active_model();
+  if (!model)
+    return;
+  if (event.feature_vector.empty())
+    return;
+
+  auto [score, explanation_vec] =
+      model->score_with_explanation(event.feature_vector);
 
   if (score > app_config.tier3.anomaly_score_threshold) {
     std::string reason =
@@ -477,10 +478,10 @@ void RuleEngine::check_ml_rules(const AnalyzedEvent &event) {
               AlertTier::TIER3_ML, AlertAction::BLOCK, action_str, score);
 
     std::string contrib_str;
-    for (const auto &factor : explanation) {
-      if (!contrib_str.empty())
+    for (size_t i = 0; i < explanation_vec.size(); ++i) {
+      contrib_str += explanation_vec[i];
+      if (i < explanation_vec.size() - 1)
         contrib_str += ", ";
-      contrib_str += factor;
     }
     ml_alert.ml_feature_contribution = contrib_str;
 

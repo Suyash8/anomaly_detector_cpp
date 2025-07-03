@@ -6,6 +6,7 @@
 #include "core/config.hpp"
 #include "io/threat_intel/intel_manager.hpp"
 #include "models/base_model.hpp"
+#include "models/model_manager.hpp"
 #include "utils/aho_corasick.hpp"
 #include "utils/utils.hpp"
 
@@ -14,7 +15,8 @@
 
 class RuleEngine {
 public:
-  RuleEngine(AlertManager &manager, const Config::AppConfig &cfg);
+  RuleEngine(AlertManager &manager, const Config::AppConfig &cfg,
+             std::shared_ptr<ModelManager> model_manager);
   ~RuleEngine();
   void evaluate_rules(const AnalyzedEvent &event);
   bool load_ip_allowlist(const std::string &filepath);
@@ -27,7 +29,7 @@ private:
 
   std::shared_ptr<IntelManager> intel_manager_;
   std::vector<Utils::CIDRBlock> cidr_allowlist_cache_;
-  std::unique_ptr<IAnomalyModel> anomaly_model_;
+  std::shared_ptr<ModelManager> model_manager_;
 
   std::unique_ptr<Utils::AhoCorasick> suspicious_path_matcher_;
   std::unique_ptr<Utils::AhoCorasick> suspicious_ua_matcher_;
