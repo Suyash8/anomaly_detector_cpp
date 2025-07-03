@@ -306,6 +306,16 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.tier3.anomaly_score_threshold =
               Utils::string_to_number<double>(value).value_or(
                   config.tier3.anomaly_score_threshold);
+        else if (key == Keys::T3_MODEL_METADATA_PATH)
+          config.tier3.model_metadata_path = value;
+        else if (key == Keys::T3_AUTO_RETRAINING_ENABLED)
+          config.tier3.automated_retraining_enabled = string_to_bool(value);
+        else if (key == Keys::T3_RETRAINING_INTERVAL_S)
+          config.tier3.retraining_interval_seconds =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.tier3.retraining_interval_seconds);
+        else if (key == Keys::T3_TRAINING_SCRIPT_PATH)
+          config.tier3.training_script_path = value;
 
         // Alerting Settings
       } else if (current_section == "Alerting") {

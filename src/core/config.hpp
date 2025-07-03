@@ -93,6 +93,11 @@ constexpr const char *T2_HISTORICAL_DEVIATION_FACTOR =
 constexpr const char *T3_ENABLED = "enabled";
 constexpr const char *T3_MODEL_PATH = "model_path";
 constexpr const char *T3_ANOMALY_SCORE_THRESHOLD = "anomaly_score_threshold";
+constexpr const char *T3_MODEL_METADATA_PATH = "model_metadata_path";
+constexpr const char *T3_AUTO_RETRAINING_ENABLED =
+    "automated_retraining_enabled";
+constexpr const char *T3_RETRAINING_INTERVAL_S = "retraining_interval_seconds";
+constexpr const char *T3_TRAINING_SCRIPT_PATH = "training_script_path";
 
 // Alerting Settings
 constexpr const char *AL_FILE_ENABLED = "file_enabled";
@@ -160,6 +165,11 @@ struct Tier3Config {
   bool enabled = true;
   std::string model_path = "models/isolation_forest.onnx";
   double anomaly_score_threshold = 0.6;
+
+  std::string model_metadata_path = "src/models/isolation_forest.json";
+  bool automated_retraining_enabled = false;
+  uint32_t retraining_interval_seconds = 86400; // Default: 24 hours
+  std::string training_script_path = "ml/train.py";
 };
 
 struct AlertingConfig {
