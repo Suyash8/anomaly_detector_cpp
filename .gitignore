@@ -4,6 +4,11 @@ obj/
 *.slo
 *.lo
 
+# CMake/vcpkg build artifacts
+build/
+vcpkg/
+vcpkg_installed/
+
 # Compiled Executables
 bin/
 anomaly_detector
@@ -35,4 +40,3 @@ data/*.log*
 # Alert output files (if you don't want to track them)
 alerts_log.json
 alerts_output.json 
-# Add any other generated output files you don't want in git
