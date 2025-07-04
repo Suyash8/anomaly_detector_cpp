@@ -9,5 +9,35 @@ project(AnomalyDetector VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Placeholder for future steps
-message(STATUS "Initial CMake configuration complete.")
+# --- Find Dependencies (handled by vcpkg) ---
+# These commands instruct CMake to find the libraries that vcpkg has installed.
+# The `REQUIRED` keyword will cause CMake to fail if a library is not found.
+find_package(nlohmann_json 3.2.0 REQUIRED)
+find_package(onnxruntime 1.10.0 REQUIRED)
+find_package(httplib 0.11.3 REQUIRED)
+find_package(Threads REQUIRED) # For pthread, which was a linker flag in the makefile
+
+# --- Source File Discovery ---
+# Automatically find all .cpp files in the 'src' directory and its subdirectories.
+# This is more maintainable than listing each file manually.
+file(GLOB_RECURSE SOURCES "src/*.cpp")
+
+# --- Define the Executable Target ---
+# This command creates the `anomaly_detector` executable from the discovered source files.
+add_executable(anomaly_detector ${SOURCES})
+
+# --- Set Include Directories ---
+# Tell the compiler to look for headers in the 'src' directory.
+target_include_directories(anomaly_detector PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+# --- Link Libraries to the Target ---
+# This is the modern way to link dependencies. It automatically handles include paths,
+# library paths, and any necessary linker flags for each dependency.
+target_link_libraries(anomaly_detector PUBLIC
+    nlohmann_json::nlohmann_json
+    onnxruntime::onnxruntime
+    httplib::httplib
+    Threads::Threads
+)
