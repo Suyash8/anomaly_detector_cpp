@@ -41,3 +41,21 @@ target_link_libraries(anomaly_detector PUBLIC
     httplib::httplib
     Threads::Threads
 )
+
+# --- Set Compile Definitions ---
+# This is the portable equivalent of the -D flag in the Makefile.
+target_compile_definitions(anomaly_detector PRIVATE
+    CPPHTTPLIB_OPENSSL_SUPPORT
+)
+
+# --- Set Compiler-Specific Flags for Warnings ---
+# This is a portable way to add warning flags for specific compilers.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(anomaly_detector PRIVATE -Wall -Wextra -pedantic)
+endif()
+
+# --- Utility Target for Log Generator ---
+# This creates a separate, simple build target for the log generator utility,
+# which is not part of the main application logic. It can be built with
+# `cmake --build build --target log_generator`.
+add_executable(log_generator log_generator.cpp)
