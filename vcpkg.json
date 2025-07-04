@@ -4,7 +4,7 @@
   "version-string": "1.0.0",
   "dependencies": [
     "nlohmann-json",
-    "onnxruntime",
+    
     {
       "name": "cpp-httplib",
       "features": ["openssl"]
