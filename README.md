@@ -58,3 +58,72 @@ The engine processes each log entry through a well-defined pipeline:
 4.  **Rule Engine:** The `AnalyzedEvent` is passed here for judgment. It checks the event against the configured rules in order of computational cost: Allow/Deny lists first, then Tier 1, Tier 2, and finally Tier 3.
 
 5.  **Alert Manager:** If any rule is triggered, the `AlertManager` formats a detailed alert, handles throttling to prevent alert fatigue, and sends it to all enabled dispatchers (File, Syslog, HTTP, etc.).
+
+### **Building from Source**
+
+This project uses CMake and the `vcpkg` package manager for a portable and maintainable build process.
+
+#### **1. Prerequisites**
+
+- A C++17 compliant compiler (GCC, Clang, or MSVC).
+- [CMake](https://cmake.org/download/) (version 3.16 or higher).
+- [Git](https://git-scm.com/downloads).
+
+#### **2. Install vcpkg**
+
+This project uses `vcpkg` to automatically manage its dependencies (`nlohmann-json`, `onnxruntime`, `cpp-httplib`).
+
+```bash
+# Clone the vcpkg repository
+git clone https://github.com/microsoft/vcpkg.git
+
+# Run the bootstrap script
+./vcpkg/bootstrap-vcpkg.sh
+# On Windows, use: .\vcpkg\bootstrap-vcpkg.bat
+```
+
+Take note of the absolute path to your `vcpkg` directory.
+
+#### **3. Configure and Build**
+
+From the root of the `anomaly-detector` project directory, run the following commands.
+
+```bash
+# 1. Configure the project with CMake.
+#    Replace <path-to-vcpkg> with the actual path on your system.
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=<path-to-vcpkg>/scripts/buildsystems/vcpkg.cmake
+
+# 2. Build the project in Release mode (optimized).
+cmake --build build --config Release
+
+#    Alternatively, build in Debug mode (with debug symbols).
+#    cmake --build build --config Debug
+```
+
+The compiled executable `anomaly_detector` will be located in the `build/` directory.
+
+### **Running the Engine**
+
+You can run the engine by passing the path to a configuration file.
+
+```bash
+./build/anomaly_detector config.ini
+```
+
+To process logs from standard input, set `log_input_path = "stdin"` in your `config.ini` and pipe logs to the executable:
+
+```bash
+cat /var/log/nginx/access.log | ./build/anomaly_detector config.ini
+```
+
+#### **Live Interactive Controls**
+
+The engine can be controlled while it's running (on POSIX systems):
+
+| Shortcut | Signal    | Action                              |
+| :------- | :-------- | :---------------------------------- |
+| `Ctrl+C` | `SIGINT`  | Gracefully shut down (saves state). |
+| `Ctrl+R` | `SIGHUP`  | Reload `config.ini` on the fly.     |
+| `Ctrl+E` | `SIGUSR1` | Reset engine state (clears memory). |
+| `Ctrl+P` | `SIGUSR2` | Pause log processing.               |
+| `Ctrl+Q` | `SIGCONT` | Resume log processing.              |
