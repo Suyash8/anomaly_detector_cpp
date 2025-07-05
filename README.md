@@ -1,193 +1,201 @@
-# 🐺 Anomaly Detector (Anomaly-Wolf): Real-Time Log Anomaly Detection Engine
+# 🐺 Anomaly Detection Engine
 
-_A high-performance C++ engine that sniffs out suspicious activity from your web server logs before the bad guys get too comfortable._
+_A high-performance C++ engine designed to analyze web server logs, build behavioral baselines, and detect anomalous activity in real-time._
 
-This project was born from the idea that sifting through millions of log lines manually is a terrible way to spend your time. Instead, let's build a C++-powered bloodhound that can stream logs in real-time, pick up the scent of anomalies, and bark when it finds something fishy.
+This engine transforms the reactive, manual task of log review into a proactive, automated hunt for threats. It's built in modern C++ for one reason: **performance**. It is designed to process a high volume of logs efficiently, applying layers of increasingly sophisticated detection logic to find the needles in your digital haystack.
+
+![Language](https://img.shields.io/badge/language-C%2B%2B17-blue.svg)
+![Build System](https://img.shields.io/badge/build-CMake-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ---
 
 ### **Table of Contents**
 
-- [So, What's the Big Idea? (Why?)](#so-whats-the-big-idea-why)
-- [The Arsenal: What It Can Do](#the-arsenal-what-it-can-do)
-- [Under the Hood: How It Works](#under-the-hood-how-it-works)
-- [Expected Log Format (The Important Bit!)](#expected-log-format-the-important-bit)
-  - [What If My Logs Are Different?](#what-if-my-logs-are-different)
-- [Getting Started: Firing Up the Engine](#getting-started-firing-up-the-engine)
-- [Tuning the Beast: The `config.ini` File](#tuning-the-beast-the-configini-file)
-- [The Bark: Understanding Alerts](#the-bark-understanding-alerts)
-- [The Roadmap: Where We're Going Next](#the-roadmap-where-were-going-next)
+- [Core Philosophy](#core-philosophy)
+- [Key Features](#key-features)
+- [How It Works: The Detection Pipeline](#how-it-works-the-detection-pipeline)
+- [Building from Source](#building-from-source)
+  - [Prerequisites](#1-prerequisites)
+  - [Install vcpkg](#2-install-vcpkg)
+  - [Configure and Build](#3-configure-and-build)
+- [Running the Engine](#running-the-engine)
+  - [Live Interactive Controls](#live-interactive-controls)
+- [Configuration: `config.ini`](#configuration-configini)
+- [Understanding Alerts](#understanding-alerts)
 - [License](#license)
 
 ---
 
-### **So, What's the Big Idea? (Why?)**
+### **Core Philosophy**
 
-Web servers are chatty. They log _everything_. Hidden in that flood of text are the digital footprints of attackers, bots, and broken scripts. Finding them is like finding a needle in a haystack the size of a planet.
+This engine transforms the reactive, manual task of log review into a proactive, automated hunt for threats. It's built on three core principles:
 
-**Anomaly-Wolf** is designed to be that super-powered magnet. It automates the hunt by applying layers of detection logic in real-time, letting you know about potential threats as they happen, not after you read a post-mortem report. It's built in modern C++ for one reason: **speed**. We want to keep up with a torrent of logs on machines with as little as 1-2GB of RAM.
+1.  **Layered Defense:** By combining fast heuristics, statistical analysis, and machine learning, we can catch a much wider range of threats.
+2.  **Context is King:** The engine provides context by building historical baselines for every IP, URL path, and user session, allowing it to ask: _"Is this behavior normal for **you**?"_
+3.  **Performance is a Feature:** Security tools should not cripple the systems they protect. By using modern C++, we ensure high throughput and a low resource footprint.
 
-### **The Arsenal: What It Can Do**
+### **Key Features**
 
-This isn't just a simple script; it's a tiered detection system.
+- **Multi-Tiered Detection Engine:**
+  - **Tier 1 (Heuristics):** Blazing-fast checks for obvious red flags.
+    - Rate-limiting violations (e.g., brute-force, content scraping).
+    - Suspicious string matching (`sqlmap`, `../../`, `nmap`) using the efficient Aho-Corasick algorithm.
+    - Advanced User-Agent Analysis: Detects missing/headless UAs, known bad bots, outdated browsers, and UA cycling.
+    - Threat Intelligence integration for blocking known-malicious IPs.
+  - **Tier 2 (Statistical Analysis):** Builds profiles of "normal" behavior and flags significant deviations.
+    - **Live Z-Score Calculation:** Measures how far a given request's metrics (latency, size, errors) deviate from the historical average for that specific IP or path.
+    - **Behavioral Change Detection:** Catches when a trusted IP suddenly changes its activity pattern.
+  - **Tier 3 (Machine Learning):** Uses a pre-trained model to find complex, multi-variate anomalies that simpler rules would miss.
+    - **ONNX Runtime:** Executes ML models trained in Python (e.g., Scikit-learn) directly within the C++ application for maximum performance.
+    - **Automated Retraining:** Can be configured to periodically retrain its model on new data and hot-swap it without a restart.
+- **Stateful and Persistent:** The engine's learned baselines can be saved to disk, allowing it to survive restarts without losing valuable historical context.
+- **Flexible Alerting:** Dispatches detailed alerts to multiple destinations simultaneously.
+  - Human-readable format for the console.
+  - Structured JSON for file logging or sending to a SIEM.
+  - Syslog support.
+  - Generic HTTP Webhooks for easy integration with tools like Slack or custom dashboards.
+- **Operationally Mature:** Designed for real-world use with features like:
+  - Centralized configuration via `config.ini`.
+  - Graceful shutdown and signal handling.
+  - Live configuration reloading and state resets without downtime.
 
-- **Blazing Fast Log Parsing:** Streams and parses `|`-delimited logs without breaking a sweat.
-- **Tier 1: Heuristic "Gut Feeling" Rules:** These are the quick, common-sense checks for obviously shady stuff.
-  - **High Request Rate:** Catches IPs that are a little too eager (e.g., brute-force, DoS probing).
-  - **Failed Login Spam:** Detects IPs trying to guess passwords by hammering your login endpoints.
-  - **Suspicious String Matching:** Flags requests containing classic "hacker words" (`sqlmap`, `../../`, `<script>`).
-  - **Advanced User-Agent Analysis:** This is our pride and joy. It sniffs out:
-    - Missing or empty User-Agents.
-    - Known malicious bot/scanner signatures (`Nmap`, `Nikto`).
-    * Ridiculously old browser versions (like someone running Chrome from 2015).
-    * Headless browsers (`HeadlessChrome`, `Puppeteer`).
-    * IPs that rapidly change their User-Agent identity (a classic bot move).
-- **Tier 2: Statistical "Something's Not Right" Detection:** This tier builds a profile of "normal" and flags weird deviations.
-  - **Welford's Algorithm:** We use this slick, single-pass algorithm to calculate mean and standard deviation on the fly for various metrics.
-  - **Z-Score Outliers:** We check the Z-score for...
-    - **Request Time:** Is this request taking way longer than usual for this IP/path?
-    - **Bytes Sent:** Did this endpoint suddenly start sending gigabytes of data?
-    - **Error Rate:** Is this usually-stable IP suddenly causing a cascade of 500 errors?
-    - **Request Volume:** Is the traffic to this path suddenly way above its normal baseline?
-  - **IP & Path Profiling:** All statistical checks are done on both a per-IP and per-path basis for granular detection.
-- **Tier 3: Machine Learning Framework (Stubbed):**
-  - The hooks are in place! We have a basic feature extractor and interfaces ready to plug in a real ML model (like Isolation Forest) when it's ready.
+### **How It Works: The Detection Pipeline**
 
-### **Under the Hood: How It Works**
+The engine processes each log entry through a well-defined pipeline:
 
-We didn't just throw code at the wall. There's a method to the madness.
+`Log Ingestion -> Parsing -> Analysis & Enrichment -> Rule Evaluation -> Alerting`
 
-**Architecture: `Log -> Analysis Engine -> Rule Engine -> Alert Manager`**
+1.  **Ingestion & Parsing:** `main.cpp` reads logs from a file or `stdin`. The log is passed to a **pluggable parser** (selected in `config.ini`) which converts the raw text into a structured `LogEntry`. This allows the engine to support various formats like Nginx, Apache, or custom JSON.
 
-1.  **Log Processor:** The `main` loop reads logs line-by-line.
-2.  **Analysis Engine:** This is the brains of the data-gathering operation. It takes a raw log, enriches it with context, and creates an `AnalyzedEvent`. It asks questions like:
-    - "What's the current request rate for this IP?"
-    - "What's the historical average error rate for this path?"
-    - "Is this User-Agent new for this IP?"
-    - It does **not** decide if something is "bad." It just gathers the evidence.
-3.  **Rule Engine:** This is the judge. It takes the `AnalyzedEvent` full of evidence and compares it against a set of configured rules. If a rule is broken, it convicts.
-4.  **Alert Manager:** The town crier. When the `RuleEngine` convicts, the `AlertManager` shouts it from the rooftops (or, you know, prints it to your console and a JSON file).
+2.  **Analysis Engine:** This is the stateful core. It takes the `LogEntry` and enriches it with historical context, producing a comprehensive `AnalyzedEvent`. It tracks statistics and sliding windows for every IP, path, and session it has ever seen.
 
-This separation means we can add super complex analysis features without making the rule-checking logic a tangled mess.
+3.  **Feature Manager:** If Tier 3 is active, this component converts the rich `AnalyzedEvent` into a simple, normalized vector of numbers—the exact format the machine learning model expects.
 
-### **Expected Log Format (The Important Bit!)**
+4.  **Rule Engine:** The `AnalyzedEvent` is passed here for judgment. It checks the event against the configured rules in order of computational cost: Allow/Deny lists first, then Tier 1, Tier 2, and finally Tier 3.
 
-We're opinionated about logs for now. The engine expects a `|`-delimited string with **15 fields** in this exact order:
+5.  **Alert Manager:** If any rule is triggered, the `AlertManager` formats a detailed alert, handles throttling to prevent alert fatigue, and sends it to all enabled dispatchers (File, Syslog, HTTP, etc.).
 
-`ip|remote_user|time_local|request_time|upstream_response_time|request|status|body_bytes_sent|referer|user_agent|host|country_code|upstream_addr|x_request_id|accept_encoding`
+### **Building from Source**
 
-**Example:**
+This project uses CMake and the `vcpkg` package manager for a portable and maintainable build process.
 
-```
-51.8.102.142|-|23/May/2025:00:00:35 +0530|0.005|-|GET /global/sarees.html HTTP/1.1|403|555|-|Mozilla/5.0...|www.somewebsite.com|US|-|34a0...|gzip,deflate
-```
+#### **1. Prerequisites**
 
-#### **What If My Logs Are Different?**
+- A C++17 compliant compiler (GCC, Clang, or MSVC).
+- [CMake](https://cmake.org/download/) (version 3.16 or higher).
+- [Git](https://git-scm.com/downloads).
 
-Good question! Right now, you'd have to roll up your sleeves and get your hands dirty in the code.
+#### **2. Install vcpkg**
 
-To adapt the parser, head over to `src/log_entry.cpp` and modify the `LogEntry::parse_from_string` function. You'll need to change the expected field count and the mapping of `fields[index]` to the members of the `LogEntry` struct. It's a rite of passage.
-
-### **Getting Started: Firing Up the Engine**
-
-You'll need a C++ compiler that supports C++17 (like a modern `g++`) and the `make` build tool. If you're on a Linux or macOS system, you probably already have these installed.
-
-**1. Build the Executable:**
-
-To compile the engine, navigate to the project's root directory in your terminal and simply run:
+This project uses `vcpkg` to automatically manage its dependencies (`nlohmann-json`, `onnxruntime`, `cpp-httplib`).
 
 ```bash
-make
+# Clone the vcpkg repository
+git clone https://github.com/microsoft/vcpkg.git
+
+# Run the bootstrap script
+./vcpkg/bootstrap-vcpkg.sh
+# On Windows, use: .\vcpkg\bootstrap-vcpkg.bat
 ```
 
-This will automatically find all the source files, compile them with performance optimizations (`-O3 -march=native`), and place the final executable at `bin/anomaly_detector`. The `make build` command does the exact same thing.
+Take note of the absolute path to your `vcpkg` directory.
 
-**2. Run the Engine:**
+#### **3. Configure and Build**
 
-The Makefile includes a convenient `run` command that builds the project (if needed) and then immediately runs it using the default `config.ini` file.
+From the root of the `anomaly-detector` project directory, run the following commands.
 
 ```bash
-make run
+# 1. Configure the project with CMake.
+#    Replace <path-to-vcpkg> with the actual path on your system.
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=<path-to-vcpkg>/scripts/buildsystems/vcpkg.cmake
+
+# 2. Build the project in Release mode (optimized).
+cmake --build build --config Release
+
+#    Alternatively, build in Debug mode (with debug symbols).
+#    cmake --build build --config Debug
 ```
 
-This is the easiest way to get started and see it in action!
+The compiled executable `anomaly_detector` will be located in the `build/` directory.
 
-Of course, you can also run the executable directly after building it. This is useful if you want to specify a different configuration file:
+### **Running the Engine**
+
+You can run the engine by passing the path to a configuration file.
 
 ```bash
-# First, build it
-make
-
-# Then run it manually
-./bin/anomaly_detector /path/to/your/custom_config.ini
+./build/anomaly_detector config.ini
 ```
 
-**3. Clean Up the Build Files:**
-
-If you want to remove all the compiled files (the intermediate `.o` objects in `obj/` and the executable in `bin/`) to start fresh, use the `clean` command.
+To process logs from standard input, set `log_input_path = "stdin"` in your `config.ini` and pipe logs to the executable:
 
 ```bash
-make clean
+cat /var/log/nginx/access.log | ./build/anomaly_detector config.ini
 ```
 
----
+#### **Live Interactive Controls**
 
-### **Tuning the Beast: The `config.ini` File**
+The engine can be controlled while it's running (on POSIX systems):
 
-All the knobs and levers are in `config.ini`. It's heavily commented, so it should be self-explanatory. You can toggle entire tiers of detection, change thresholds, set file paths, and define what you consider "suspicious."
+| Shortcut | Signal    | Action                              |
+| :------- | :-------- | :---------------------------------- |
+| `Ctrl+C` | `SIGINT`  | Gracefully shut down (saves state). |
+| `Ctrl+R` | `SIGHUP`  | Reload `config.ini` on the fly.     |
+| `Ctrl+E` | `SIGUSR1` | Reset engine state (clears memory). |
+| `Ctrl+P` | `SIGUSR2` | Pause log processing.               |
+| `Ctrl+Q` | `SIGCONT` | Resume log processing.              |
 
-A snippet to whet your appetite:
+### **Configuration: `config.ini`**
 
-```ini
-# --- Tier 2: Statistical Detection ---
-[Tier2]
-enabled = true
-# Z-score absolute value above which an event is considered an outlier.
-z_score_threshold = 3.5
-# Minimum number of data samples required before Z-score calcs are performed.
-min_samples_for_z_score = 30
-```
+Nearly every aspect of the engine is controlled via `config.ini`. The file is heavily commented and allows you to:
 
-### **The Bark: Understanding Alerts**
+- Set file paths for logs, state files, and alerts.
+- Enable or disable entire detection tiers (`Tier1`, `Tier2`, `Tier3`).
+- Fine-tune thresholds for rules (e.g., `max_requests_per_ip_in_window`, `z_score_threshold`).
+- Configure alert dispatchers (Syslog, HTTP webhook URL, etc.).
+- Enable ML data collection to generate training sets.
 
-When Anomaly-Wolf finds something, it'll tell you.
+### **Understanding Alerts**
 
-**Console Output:**
+Alerts are designed to be rich with context to aid investigation.
+
+**Console Output:** A human-readable summary.
 
 ```
 ALERT DETECTED:
-  Timestamp: 2025-06-11 14:30:05.123
+  Timestamp: 2023-01-01 12:02:00.0
   Tier:      TIER1_HEURISTIC
-  Source IP: 192.168.1.100
-  Reason:    IP rapidly cycling through different User-Agents
-  Action:    Very high likelihood of bot; consider blocking
-  Score:     20.00
+  Source IP: 192.168.0.3
+  Reason:    Multiple failed login attempts from IP. Count: 3 in last 60s.
+  Score:     78.00
+  Action:    Investigate IP for brute-force/credential stuffing; consider blocking.
+  Log Line:  7
+  Sample:    192.168.0.3|-|01/Jan/2023:12:02:00 +0000|0.200|0.150|POST /login HTTP/1.1|401|100|https://exam...
 ----------------------------------------
 ```
 
-**JSON Output (`alerts_log.json`):**
-A machine-readable version of the same alert, perfect for piping into other tools.
+**JSON Output:** A machine-readable format sent to files and webhooks, containing the full log and analysis context.
 
 ```json
-{"timestamp_ms":1718101805123, "ip":"192.168.1.100", "reason":"IP rapidly cycling through different User-Agents", ...}
+{
+  "timestamp_ms": 1672574520000,
+  "alert_reason": "Multiple failed login attempts from IP. Count: 3 in last 60s.",
+  "detection_tier": "TIER1_HEURISTIC",
+  "anomaly_score": 78.0,
+  "log_context": {
+    "source_ip": "192.168.0.3",
+    "request_path": "/login",
+    "status_code": 401,
+    "user_agent": "Mozilla/5.0"
+  },
+  "analysis_context": {
+    "ip_error_event_zscore": 3.1,
+    "is_ua_missing": false
+  },
+  "raw_log": "..."
+}
 ```
-
-### **The Roadmap: Where We're Going Next**
-
-This is just the beginning. The foundation is solid, but there's a whole world of awesome features to add.
-
-- [ ] **Full ML Model Integration (Tier 3):** Replace the stubs with a real, lightweight model using `ONNX Runtime` or `dlib`.
-- [ ] **Geo-Velocity Detection:** Flag impossible travel (e.g., an IP logging in from New York and then 5 minutes later from Tokyo).
-- [x] **Advanced User-Agent Analysis:** _Done!_
-- [x] **Historical vs. Current Behavior Rules:** _Done!_
-- [ ] **Live Configuration Reloading:** Tweak the `config.ini` and have the engine update without a restart (SIGHUP).
-- [ ] **Prometheus Metrics Endpoint:** Expose internal stats (`/metrics`) for proper monitoring and dashboards.
-- [ ] **Unit Testing Framework:** Add Google Test or Catch2 for robust testing.
-- [ ] **Performance Enhancements:**
-  - [ ] True LRU cache for state management to strictly bound memory.
-  - [ ] Multithreaded log ingestion pipeline.
-- [ ] **Sessionization:** Track users across multiple requests to detect anomalies at the session level.
 
 ### **License**
 
-This project is licensed under the MIT License. Go nuts.
+This project is licensed under the **MIT License**. See the `LICENSE` file for details.
