@@ -127,3 +127,58 @@ The engine can be controlled while it's running (on POSIX systems):
 | `Ctrl+E` | `SIGUSR1` | Reset engine state (clears memory). |
 | `Ctrl+P` | `SIGUSR2` | Pause log processing.               |
 | `Ctrl+Q` | `SIGCONT` | Resume log processing.              |
+
+### **Configuration: `config.ini`**
+
+Nearly every aspect of the engine is controlled via `config.ini`. The file is heavily commented and allows you to:
+
+- Set file paths for logs, state files, and alerts.
+- Enable or disable entire detection tiers (`Tier1`, `Tier2`, `Tier3`).
+- Fine-tune thresholds for rules (e.g., `max_requests_per_ip_in_window`, `z_score_threshold`).
+- Configure alert dispatchers (Syslog, HTTP webhook URL, etc.).
+- Enable ML data collection to generate training sets.
+
+### **Understanding Alerts**
+
+Alerts are designed to be rich with context to aid investigation.
+
+**Console Output:** A human-readable summary.
+
+```
+ALERT DETECTED:
+  Timestamp: 2023-01-01 12:02:00.0
+  Tier:      TIER1_HEURISTIC
+  Source IP: 192.168.0.3
+  Reason:    Multiple failed login attempts from IP. Count: 3 in last 60s.
+  Score:     78.00
+  Action:    Investigate IP for brute-force/credential stuffing; consider blocking.
+  Log Line:  7
+  Sample:    192.168.0.3|-|01/Jan/2023:12:02:00 +0000|0.200|0.150|POST /login HTTP/1.1|401|100|https://exam...
+----------------------------------------
+```
+
+**JSON Output:** A machine-readable format sent to files and webhooks, containing the full log and analysis context.
+
+```json
+{
+  "timestamp_ms": 1672574520000,
+  "alert_reason": "Multiple failed login attempts from IP. Count: 3 in last 60s.",
+  "detection_tier": "TIER1_HEURISTIC",
+  "anomaly_score": 78.0,
+  "log_context": {
+    "source_ip": "192.168.0.3",
+    "request_path": "/login",
+    "status_code": 401,
+    "user_agent": "Mozilla/5.0"
+  },
+  "analysis_context": {
+    "ip_error_event_zscore": 3.1,
+    "is_ua_missing": false
+  },
+  "raw_log": "..."
+}
+```
+
+### **License**
+
+This project is licensed under the **MIT License**. See the `LICENSE` file for details.
