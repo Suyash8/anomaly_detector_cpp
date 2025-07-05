@@ -10,6 +10,23 @@ This engine transforms the reactive, manual task of log review into a proactive,
 
 ---
 
+### **Table of Contents**
+
+- [Core Philosophy](#core-philosophy)
+- [Key Features](#key-features)
+- [How It Works: The Detection Pipeline](#how-it-works-the-detection-pipeline)
+- [Building from Source](#building-from-source)
+  - [Prerequisites](#1-prerequisites)
+  - [Install vcpkg](#2-install-vcpkg)
+  - [Configure and Build](#3-configure-and-build)
+- [Running the Engine](#running-the-engine)
+  - [Live Interactive Controls](#live-interactive-controls)
+- [Configuration: `config.ini`](#configuration-configini)
+- [Understanding Alerts](#understanding-alerts)
+- [License](#license)
+
+---
+
 ### **Core Philosophy**
 
 This engine transforms the reactive, manual task of log review into a proactive, automated hunt for threats. It's built on three core principles:
