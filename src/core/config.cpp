@@ -340,6 +340,17 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.threat_intel.update_interval_seconds =
               Utils::string_to_number<uint32_t>(value).value_or(
                   config.threat_intel.update_interval_seconds);
+
+        // Mongo Settings
+      } else if (current_section == "MongoLogSource") {
+        if (key == Keys::MO_URI)
+          config.mongo_log_source.uri = value;
+        else if (key == Keys::MO_DATABASE)
+          config.mongo_log_source.database = value;
+        else if (key == Keys::MO_COLLECTION)
+          config.mongo_log_source.collection = value;
+        else if (key == Keys::MO_TIMESTAMP_FIELD_NAME)
+          config.mongo_log_source.timestamp_field_name = value;
       }
     } catch (const std::invalid_argument &e) {
       std::cerr << "Warning (Config Line " << line_num
