@@ -4,10 +4,10 @@
   "version-string": "1.0.0",
   "dependencies": [
     "nlohmann-json",
-    
     {
       "name": "cpp-httplib",
       "features": ["openssl"]
-    }
+    },
+    "mongo-cxx-driver"
   ]
 }
