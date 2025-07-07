@@ -79,7 +79,9 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
     try {
       // Global (non-section) keys
       if (current_section.empty()) {
-        if (key == Keys::LOG_INPUT_PATH)
+        if (key == Keys::LOG_SOURCE_TYPE)
+          config.log_source_type = value;
+        else if (key == Keys::LOG_INPUT_PATH)
           config.log_input_path = value;
         else if (key == Keys::ALLOWLIST_PATH)
           config.allowlist_path = value;

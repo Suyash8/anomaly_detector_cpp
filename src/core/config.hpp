@@ -14,6 +14,7 @@ namespace Config {
 namespace Keys {
 
 // General Settings
+constexpr const char *LOG_SOURCE_TYPE = "log_source_type";
 constexpr const char *LOG_INPUT_PATH = "log_input_path";
 constexpr const char *ALLOWLIST_PATH = "allowlist_path";
 constexpr const char *ALERTS_TO_STDOUT = "alerts_to_stdout";
@@ -199,6 +200,7 @@ struct MongoLogSourceConfig {
 };
 
 struct AppConfig {
+  std::string log_source_type = "mongodb";
   std::string log_input_path = "data/sample_log.txt";
   std::string allowlist_path = "data/allowlist.txt";
   bool alerts_to_stdout = true;
