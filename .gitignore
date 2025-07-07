@@ -40,3 +40,5 @@ data/*.log*
 # Alert output files (if you don't want to track them)
 alerts_log.json
 alerts_output.json 
+
+config.ini

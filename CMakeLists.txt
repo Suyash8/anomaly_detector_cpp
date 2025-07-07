@@ -12,10 +12,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # --- Find Dependencies (handled by vcpkg) ---
 # These commands instruct CMake to find the libraries that vcpkg has installed.
 # The `REQUIRED` keyword will cause CMake to fail if a library is not found.
-
-
-find_package(nlohmann_json 3.2.0 REQUIRED)
-find_package(httplib 0.22.0 REQUIRED)
+find_package(nlohmann_json REQUIRED)
+find_package(onnxruntime REQUIRED)
+find_package(httplib REQUIRED)
+find_package(mongocxx REQUIRED)
 find_package(Threads REQUIRED) # For pthread, which was a linker flag in the makefile
 
 # --- Source File Discovery ---
@@ -31,11 +31,6 @@ add_executable(anomaly_detector ${SOURCES})
 # Tell the compiler to look for headers in the 'src' directory.
 target_include_directories(anomaly_detector PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/include"
-)
-
-target_link_directories(anomaly_detector PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/lib"
 )
 
 # --- Link Libraries to the Target ---
@@ -43,8 +38,10 @@ target_link_directories(anomaly_detector PUBLIC
 # library paths, and any necessary linker flags for each dependency.
 target_link_libraries(anomaly_detector PUBLIC
     nlohmann_json::nlohmann_json
-    onnxruntime
+    onnxruntime::onnxruntime
     httplib::httplib
+    mongo::mongocxx_static
+    mongo::bsoncxx_static
     Threads::Threads
 )
 
