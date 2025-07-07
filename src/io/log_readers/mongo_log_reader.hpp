@@ -5,7 +5,7 @@
 #include "core/config.hpp"
 #include "io/db/mongo_manager.hpp"
 
-#include <bsoncxx/document/view-fwd.hpp>
+#include <bsoncxx/document/view.hpp>
 #include <cstdint>
 
 class MongoLogReader : public ILogReader {
