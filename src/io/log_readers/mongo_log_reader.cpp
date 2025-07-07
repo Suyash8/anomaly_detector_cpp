@@ -5,15 +5,21 @@
 #include "utils/utils.hpp"
 
 #include <bsoncxx/builder/stream/document.hpp>
+#include <bsoncxx/builder/stream/helpers.hpp>
 #include <bsoncxx/document/view.hpp>
 #include <bsoncxx/json.hpp>
+#include <bsoncxx/types-fwd.hpp>
 #include <bsoncxx/types.hpp>
+#include <cstdint>
+#include <mongocxx/cursor-fwd.hpp>
 #include <mongocxx/exception/query_exception.hpp>
 
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <thread>
+#include <vector>
 
 // --- Helper Functions specific to this reader ---
 
@@ -159,4 +165,49 @@ LogEntry MongoLogReader::bson_to_log_entry(const bsoncxx::document::view &doc) {
   return entry;
 }
 
-std::vector<LogEntry> MongoLogReader::get_next_batch() { return {}; }
+std::vector<LogEntry> MongoLogReader::get_next_batch() {
+  std::vector<LogEntry> batch;
+  try {
+    auto client = mongo_manager_->get_client();
+    auto collection = (*client)[config_.database][config_.collection];
+
+    using bsoncxx::builder::stream::close_document;
+    using bsoncxx::builder::stream::document;
+    using bsoncxx::builder::stream::finalize;
+    using bsoncxx::builder::stream::open_document;
+
+    auto query_filter =
+        document{} << config_.timestamp_field_name << open_document << "$gt"
+                   << bsoncxx::types::b_date{std::chrono::milliseconds{
+                          last_processed_timestamp_ms_}}
+                   << close_document << finalize;
+
+    mongocxx::options::find opts{};
+    opts.sort(document{} << config_.timestamp_field_name << 1 << finalize);
+    opts.limit(BATCH_SIZE);
+
+    mongocxx::cursor cursor = collection.find(query_filter.view(), opts);
+
+    uint64_t latest_ts_in_batch = last_processed_timestamp_ms_;
+    for (const auto &doc : cursor) {
+      LogEntry entry = bson_to_log_entry(doc);
+      if (entry.parsed_timestamp_ms) {
+        batch.push_back(entry);
+        if (*entry.parsed_timestamp_ms > latest_ts_in_batch)
+          latest_ts_in_batch = *entry.parsed_timestamp_ms;
+      }
+    }
+
+    if (latest_ts_in_batch > last_processed_timestamp_ms_) {
+      last_processed_timestamp_ms_ = latest_ts_in_batch;
+      save_state(); // Persist the new state immediately
+    }
+  } catch (const mongocxx::query_exception &e) {
+    std::cerr << "MongoDB query failed: " << e.what() << std::endl;
+    // Back off for a bit before retrying to avoid spamming a down DB
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+  } catch (const std::exception &e) {
+    std::cerr << "An error occurred in MongoLogReader: " << e.what()
+              << std::endl;
+  }
+}
