@@ -210,4 +210,6 @@ std::vector<LogEntry> MongoLogReader::get_next_batch() {
     std::cerr << "An error occurred in MongoLogReader: " << e.what()
               << std::endl;
   }
+
+  return batch;
 }

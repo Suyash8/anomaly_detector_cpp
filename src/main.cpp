@@ -3,20 +3,20 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "detection/rule_engine.hpp"
+#include "io/db/mongo_manager.hpp"
 #include "io/log_readers/base_log_reader.hpp"
 #include "io/log_readers/file_log_reader.hpp"
+#include "io/log_readers/mongo_log_reader.hpp"
+#include "models/model_manager.hpp"
 
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
-#include <fstream>
-#include <ios>
 #include <iostream>
 #include <istream>
 #include <memory>
-#include <optional>
 #include <string>
 #include <sys/types.h>
 #include <thread>
@@ -170,6 +170,8 @@ int main(int argc, char *argv[]) {
 
   // --- Log Reader Factory ---
   std::unique_ptr<ILogReader> log_reader;
+  std::shared_ptr<MongoManager> mongo_manager;
+
   if (current_config->log_source_type == "file") {
     auto reader =
         std::make_unique<FileLogReader>(current_config->log_input_path);
@@ -179,10 +181,12 @@ int main(int argc, char *argv[]) {
     }
     log_reader = std::move(reader);
   } else if (current_config->log_source_type == "mongodb") {
-    std::cerr << "MongoDB log source is not yet implemented. Exiting."
-              << std::endl;
-    // MongoLogReader to be implemented
-    return 1;
+    mongo_manager =
+        std::make_shared<MongoManager>(current_config->mongo_log_source.uri);
+    log_reader = std::make_unique<MongoLogReader>(
+        mongo_manager, current_config->mongo_log_source,
+        current_config->reader_state_path);
+    std::cout << "Initialized MongoDB log reader." << std::endl;
   } else {
     std::cerr << "Invalid log_source_type configured: "
               << current_config->log_source_type << ". Exiting." << std::endl;
@@ -253,12 +257,16 @@ int main(int argc, char *argv[]) {
       std::vector<LogEntry> log_batch = log_reader->get_next_batch();
 
       if (!log_batch.empty()) {
-        total_processed_count++;
 
         for (auto log_entry : log_batch) {
-          auto analyzed_event =
-              analysis_engine_instance.process_and_analyze(log_entry);
-          rule_engine_instance.evaluate_rules(analyzed_event);
+          total_processed_count++;
+
+          if (log_entry.successfully_parsed_structure) {
+            auto analyzed_event =
+                analysis_engine_instance.process_and_analyze(log_entry);
+            rule_engine_instance.evaluate_rules(analyzed_event);
+          }
+          // TODO: Count skipped entries from the DB if parsing fails
 
           // --- Periodic Tasks ---
           if (current_config->state_pruning_enabled &&
