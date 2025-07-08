@@ -14,7 +14,9 @@ namespace Config {
 namespace Keys {
 
 // General Settings
+constexpr const char *LOG_SOURCE_TYPE = "log_source_type";
 constexpr const char *LOG_INPUT_PATH = "log_input_path";
+constexpr const char *READER_STATE_PATH = "reader_state_path";
 constexpr const char *ALLOWLIST_PATH = "allowlist_path";
 constexpr const char *ALERTS_TO_STDOUT = "alerts_to_stdout";
 constexpr const char *ALERTS_TO_FILE = "alerts_to_file";
@@ -109,6 +111,12 @@ constexpr const char *AL_HTTP_WEBHOOK_URL = "http_webhook_url";
 constexpr const char *TI_ENABLED = "enabled";
 constexpr const char *TI_FEED_URLS = "feed_urls";
 constexpr const char *TI_UPDATE_INTERVAL_SECONDS = "update_interval_seconds";
+
+// Mongo Settings
+constexpr const char *MO_URI = "uri";
+constexpr const char *MO_DATABASE = "database";
+constexpr const char *MO_COLLECTION = "collection";
+constexpr const char *MO_TIMESTAMP_FIELD_NAME = "timestamp_field_name";
 } // namespace Keys
 
 struct Tier1Config {
@@ -185,8 +193,17 @@ struct ThreatIntelConfig {
   uint32_t update_interval_seconds = 3600; // Default: 1 hour
 };
 
+struct MongoLogSourceConfig {
+  std::string uri = "mongodb://localhost:27017";
+  std::string database = "logs";
+  std::string collection = "access";
+  std::string timestamp_field_name = "timestamp";
+};
+
 struct AppConfig {
+  std::string log_source_type = "mongodb";
   std::string log_input_path = "data/sample_log.txt";
+  std::string reader_state_path = "data/reader_state.dat";
   std::string allowlist_path = "data/allowlist.txt";
   bool alerts_to_stdout = true;
   bool alerts_to_file = false;
@@ -210,6 +227,7 @@ struct AppConfig {
   Tier3Config tier3;
   AlertingConfig alerting;
   ThreatIntelConfig threat_intel;
+  MongoLogSourceConfig mongo_log_source;
 
   bool ml_data_collection_enabled = false;
   std::string ml_data_collection_path = "data/training_features.csv";

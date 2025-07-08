@@ -3,20 +3,24 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "detection/rule_engine.hpp"
+#include "io/db/mongo_manager.hpp"
+#include "io/log_readers/base_log_reader.hpp"
+#include "io/log_readers/file_log_reader.hpp"
+#include "io/log_readers/mongo_log_reader.hpp"
+#include "models/model_manager.hpp"
 
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
-#include <fstream>
-#include <ios>
 #include <iostream>
 #include <istream>
-#include <optional>
+#include <memory>
 #include <string>
 #include <sys/types.h>
 #include <thread>
+#include <vector>
 
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
 #include <termios.h>
@@ -164,33 +168,30 @@ int main(int argc, char *argv[]) {
   RuleEngine rule_engine_instance(alert_manager_instance, *current_config,
                                   model_manager);
 
-  // --- Log Processing ---
-  std::istream *p_log_stream = nullptr;
-  std::ifstream log_file_stream;
+  // --- Log Reader Factory ---
+  std::unique_ptr<ILogReader> log_reader;
+  std::shared_ptr<MongoManager> mongo_manager;
 
-  if (current_config->log_input_path == "stdin") {
-    p_log_stream = &std::cin;
-    std::cout << "Reading logs from stdin. Type logs and press Enter. Ctrl+D "
-                 "(Linux/macOS) or Ctrl+Z then enter (Windows) to end."
-              << std::endl;
-  } else {
-    log_file_stream.open(current_config->log_input_path);
-
-    if (!log_file_stream.is_open()) {
-      std::cerr << "Error: Could not open log file: "
-                << current_config->log_input_path << std::endl;
-      g_shutdown_requested = true;
-      if (keyboard_thread.joinable())
-        keyboard_thread.join();
+  if (current_config->log_source_type == "file") {
+    auto reader =
+        std::make_unique<FileLogReader>(current_config->log_input_path);
+    if (!reader->is_open()) {
+      std::cerr << "Failed to open log source file. Exiting." << std::endl;
       return 1;
     }
-
-    p_log_stream = &log_file_stream;
-    std::cout << "Successfully opened log file: "
-              << current_config->log_input_path << std::endl;
+    log_reader = std::move(reader);
+  } else if (current_config->log_source_type == "mongodb") {
+    mongo_manager =
+        std::make_shared<MongoManager>(current_config->mongo_log_source.uri);
+    log_reader = std::make_unique<MongoLogReader>(
+        mongo_manager, current_config->mongo_log_source,
+        current_config->reader_state_path);
+    std::cout << "Initialized MongoDB log reader." << std::endl;
+  } else {
+    std::cerr << "Invalid log_source_type configured: "
+              << current_config->log_source_type << ". Exiting." << std::endl;
+    return 1;
   }
-
-  std::istream &log_input = *p_log_stream;
 
   // Load state on startup
   if (current_config->state_persistence_enabled) {
@@ -202,10 +203,7 @@ int main(int argc, char *argv[]) {
                 << std::endl;
   }
 
-  std::string current_line;
-  uint64_t line_counter = 0;
-  int successfully_parsed_count = 0;
-  int skipped_line_count = 0;
+  uint64_t total_processed_count = 0;
   auto time_start = std::chrono::high_resolution_clock::now();
   ServiceState current_state = ServiceState::RUNNING;
   bool first_pause_message = true;
@@ -256,65 +254,65 @@ int main(int argc, char *argv[]) {
 
     // --- State-Specific Action Block ---
     if (current_state == ServiceState::RUNNING) {
-      if (std::getline(log_input, current_line)) {
-        line_counter++;
+      std::vector<LogEntry> log_batch = log_reader->get_next_batch();
 
-        // --- Standard Log Processing ---
-        std::optional<LogEntry> entry_opt =
-            LogEntry::parse_from_string(current_line, line_counter, false);
+      if (!log_batch.empty()) {
 
-        if (entry_opt) {
-          successfully_parsed_count++;
-          const auto &current_log_entry = *entry_opt;
-          auto analyzed_event =
-              analysis_engine_instance.process_and_analyze(current_log_entry);
-          rule_engine_instance.evaluate_rules(analyzed_event);
+        for (auto log_entry : log_batch) {
+          total_processed_count++;
 
-        } else {
-          skipped_line_count++;
+          if (log_entry.successfully_parsed_structure) {
+            auto analyzed_event =
+                analysis_engine_instance.process_and_analyze(log_entry);
+            rule_engine_instance.evaluate_rules(analyzed_event);
+          }
+          // TODO: Count skipped entries from the DB if parsing fails
+
+          // --- Periodic Tasks ---
+          if (current_config->state_pruning_enabled &&
+              current_config->state_prune_interval_events > 0 &&
+              total_processed_count %
+                      current_config->state_prune_interval_events ==
+                  0) {
+            analysis_engine_instance.run_pruning(
+                analysis_engine_instance.get_max_timestamp_seen());
+          }
+
+          if (current_config->state_persistence_enabled &&
+              current_config->state_save_interval_events > 0 &&
+              total_processed_count %
+                      current_config->state_save_interval_events ==
+                  0) {
+            analysis_engine_instance.save_state(
+                current_config->state_file_path);
+          }
+
+          // Progress update for file processing
+          // if (current_config->log_input_path != "stdin" &&
+          //     line_counter % 200000 == 0) { // Print every 200k lines for
+          //     files
+          //   auto now = std::chrono::high_resolution_clock::now();
+          //   auto elapsed_ms =
+          //       std::chrono::duration_cast<std::chrono::milliseconds>(now -
+          //                                                             time_start)
+          //           .count();
+
+          //   if (elapsed_ms > 0)
+          //     std::cout << "Progress: Read " << line_counter << " lines ("
+          //               << (line_counter * 1000 / elapsed_ms) << "
+          //               lines/sec)."
+          //               << std::endl;
+          //   else
+          //     std::cout << "Progress: Read " << line_counter << " lines."
+          //               << std::endl;
+          // }
         }
-
-        // --- Periodic Tasks ---
-        if (current_config->state_pruning_enabled &&
-            current_config->state_prune_interval_events > 0 &&
-            line_counter % current_config->state_prune_interval_events == 0) {
-          analysis_engine_instance.run_pruning(
-              analysis_engine_instance.get_max_timestamp_seen());
-        }
-
-        if (current_config->state_persistence_enabled &&
-            current_config->state_save_interval_events > 0 &&
-            line_counter % current_config->state_save_interval_events == 0) {
-          analysis_engine_instance.save_state(current_config->state_file_path);
-        }
-
-        // Progress update for file processing
-        // if (current_config->log_input_path != "stdin" &&
-        //     line_counter % 200000 == 0) { // Print every 200k lines for files
-        //   auto now = std::chrono::high_resolution_clock::now();
-        //   auto elapsed_ms =
-        //       std::chrono::duration_cast<std::chrono::milliseconds>(now -
-        //                                                             time_start)
-        //           .count();
-
-        //   if (elapsed_ms > 0)
-        //     std::cout << "Progress: Read " << line_counter << " lines ("
-        //               << (line_counter * 1000 / elapsed_ms) << " lines/sec)."
-        //               << std::endl;
-        //   else
-        //     std::cout << "Progress: Read " << line_counter << " lines."
-        //               << std::endl;
-        // }
-
       } else {
         // End of File (or closed stdin) reached
-        if (current_config->live_monitoring_enabled) {
+        if (current_config->live_monitoring_enabled)
           current_state = ServiceState::PAUSED;
-          if (log_input.eof())
-            log_input.clear();
-        } else {
+        else
           g_shutdown_requested = true;
-        }
       }
     } else if (current_state == ServiceState::PAUSED) {
       // --- Efficient Sleep State ---
@@ -325,8 +323,8 @@ int main(int argc, char *argv[]) {
       }
 
       std::this_thread::sleep_for(
-          // std::chrono::seconds(current_config->live_monitoring_sleep_seconds));
-          std::chrono::milliseconds(100));
+          std::chrono::seconds(current_config->live_monitoring_sleep_seconds));
+      // std::chrono::milliseconds(100));
     }
   }
 
@@ -344,9 +342,6 @@ int main(int argc, char *argv[]) {
     analysis_engine_instance.save_state(current_config->state_file_path);
   }
 
-  if (log_file_stream.is_open())
-    log_file_stream.close();
-
   alert_manager_instance.flush_all_alerts();
 
   auto time_end = std::chrono::high_resolution_clock::now();
@@ -354,15 +349,13 @@ int main(int argc, char *argv[]) {
                          time_end - time_start)
                          .count();
   std::cout << "\n---Processing Summary---" << std::endl;
-  std::cout << "Total lines read: " << line_counter << std::endl;
-  std::cout << "Successfully parsed entries: " << successfully_parsed_count
-            << std::endl;
-  std::cout << "Skipped entries (parsing failed): " << skipped_line_count
+  std::cout << "Total entries processed: " << total_processed_count
             << std::endl;
   std::cout << "Total processing time: " << duration_ms << " ms" << std::endl;
-  if (duration_ms > 0 && line_counter > 0)
-    std::cout << "Processing rate: " << (line_counter * 1000 / duration_ms)
-              << " lines/sec" << std::endl;
+  if (duration_ms > 0 && total_processed_count > 0)
+    std::cout << "Processing rate: "
+              << (total_processed_count * 1000 / duration_ms) << " lines/sec"
+              << std::endl;
 
   std::cout << "Anomaly Detection Engine finished" << std::endl;
 }
