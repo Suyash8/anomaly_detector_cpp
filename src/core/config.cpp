@@ -83,6 +83,8 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.log_source_type = value;
         else if (key == Keys::LOG_INPUT_PATH)
           config.log_input_path = value;
+        else if (key == Keys::READER_STATE_PATH)
+          config.reader_state_path = value;
         else if (key == Keys::ALLOWLIST_PATH)
           config.allowlist_path = value;
         else if (key == Keys::ALERTS_TO_STDOUT)

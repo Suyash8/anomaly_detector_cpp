@@ -28,9 +28,17 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable(anomaly_detector ${SOURCES})
 
 # --- Set Include Directories ---
+set(ONNX_RUNTIME_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime)
+
 # Tell the compiler to look for headers in the 'src' directory.
 target_include_directories(anomaly_detector PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${ONNX_RUNTIME_ROOT}/include"
+)
+
+# --- Set Link Directories ---
+target_link_directories(anomaly_detector PUBLIC
+    "${ONNX_RUNTIME_ROOT}/lib"
 )
 
 # --- Link Libraries to the Target ---
@@ -38,7 +46,7 @@ target_include_directories(anomaly_detector PUBLIC
 # library paths, and any necessary linker flags for each dependency.
 target_link_libraries(anomaly_detector PUBLIC
     nlohmann_json::nlohmann_json
-    onnxruntime::onnxruntime
+    onnxruntime
     httplib::httplib
     mongo::mongocxx_static
     mongo::bsoncxx_static
