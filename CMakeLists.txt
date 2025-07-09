@@ -96,7 +96,9 @@ install(FILES data/allowlist.txt DESTINATION share/anomaly_detector/data)
 option(BUILD_TESTING "Build the unit and integration tests" ON)
 if(BUILD_TESTING)
     message(STATUS "Building with tests enabled.")
+
     find_package(GTest CONFIG REQUIRED)
+    include(GoogleTest)
 
     # Create a directory for test source files
     file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
@@ -128,15 +130,7 @@ if(BUILD_TESTING)
         "${ONNX_RUNTIME_ROOT}/lib"
     )
 
-    # get_target_property(VCPKG_LIB_DIR onnxruntime INTERFACE_LINK_DIRECTORIES)
     include(CTest)
 
-    add_test(
-        NAME AnomalyDetectorTests
-        COMMAND run_tests
-    )
-
-    set_tests_properties(AnomalyDetectorTests PROPERTIES
-        ENVIRONMENT "LD_LIBRARY_PATH=${VCPKG_LIB_DIR}"
-    )
+    gtest_discover_tests(run_tests)
 endif()
