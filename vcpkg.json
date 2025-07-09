@@ -8,6 +8,7 @@
       "name": "cpp-httplib",
       "features": ["openssl"]
     },
-    "mongo-cxx-driver"
+    "mongo-cxx-driver",
+    "gtest"
   ]
 }

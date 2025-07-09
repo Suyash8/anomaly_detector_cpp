@@ -13,7 +13,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # These commands instruct CMake to find the libraries that vcpkg has installed.
 # The `REQUIRED` keyword will cause CMake to fail if a library is not found.
 find_package(nlohmann_json REQUIRED)
-find_package(onnxruntime REQUIRED)
 find_package(httplib REQUIRED)
 find_package(mongocxx REQUIRED)
 find_package(Threads REQUIRED) # For pthread, which was a linker flag in the makefile
@@ -91,3 +90,53 @@ install(DIRECTORY src/models/ DESTINATION share/anomaly_detector/models
 )
 
 install(FILES data/allowlist.txt DESTINATION share/anomaly_detector/data)
+
+# --- Testing Setup ---
+# This block is only enabled when -DBUILD_TESTING=ON is passed to CMake.
+option(BUILD_TESTING "Build the unit and integration tests" ON)
+if(BUILD_TESTING)
+    message(STATUS "Building with tests enabled.")
+    find_package(GTest CONFIG REQUIRED)
+
+    # Create a directory for test source files
+    file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
+
+    # Define the test executable
+    add_executable(run_tests ${TEST_SOURCES})
+
+    # Link the test executable to GTest and all the project's dependencies
+    # so that our tests can use them.
+    target_link_libraries(run_tests PRIVATE
+        GTest::gtest
+        GTest::gmock
+        GTest::gtest_main
+        nlohmann_json::nlohmann_json
+        onnxruntime
+        httplib::httplib
+        mongo::mongocxx_static
+        mongo::bsoncxx_static
+        Threads::Threads
+    )
+
+    # Ensure the test executable can find headers from the 'src' directory
+    target_include_directories(run_tests PRIVATE 
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${ONNX_RUNTIME_ROOT}/include"
+    )
+
+    target_link_directories(run_tests PRIVATE
+        "${ONNX_RUNTIME_ROOT}/lib"
+    )
+
+    # get_target_property(VCPKG_LIB_DIR onnxruntime INTERFACE_LINK_DIRECTORIES)
+    include(CTest)
+
+    add_test(
+        NAME AnomalyDetectorTests
+        COMMAND run_tests
+    )
+
+    set_tests_properties(AnomalyDetectorTests PROPERTIES
+        ENVIRONMENT "LD_LIBRARY_PATH=${VCPKG_LIB_DIR}"
+    )
+endif()
