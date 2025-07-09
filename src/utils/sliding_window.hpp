@@ -3,6 +3,7 @@
 
 #include "utils.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -11,6 +12,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
 template <typename ValueType> class SlidingWindow {
 public:
   SlidingWindow(uint64_t duration_ms, size_t max_elements_limit = 0)
@@ -27,14 +29,19 @@ public:
 
   void prune_old_events(uint64_t current_time_ms) {
     // 1. Time based pruning
-    if (configured_duration_ms > 0) {
+    if (configured_duration_ms > 0 && !window_data.empty()) {
       uint64_t cutoff_timestamp = 0;
-      if (current_time_ms >= configured_duration_ms) // Avoid underflow
+      // Avoid underflow if current_time_ms is less than the duration
+      if (current_time_ms >= configured_duration_ms)
         cutoff_timestamp = current_time_ms - configured_duration_ms;
 
-      while (!window_data.empty() &&
-             window_data.front().first < cutoff_timestamp)
-        window_data.pop_front();
+      auto first_to_keep = std::lower_bound(
+          window_data.begin(), window_data.end(), cutoff_timestamp,
+          [](const std::pair<uint64_t, ValueType> &element, uint64_t time) {
+            return element.first < time;
+          });
+
+      window_data.erase(window_data.begin(), first_to_keep);
     }
 
     // 2. Size based pruning
