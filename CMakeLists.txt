@@ -104,7 +104,7 @@ if(BUILD_TESTING)
     file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
 
     # Define the test executable
-    add_executable(run_tests ${TEST_SOURCES})
+    add_executable(run_tests ${TEST_SOURCES} ${SOURCES})
 
     # Link the test executable to GTest and all the project's dependencies
     # so that our tests can use them.
