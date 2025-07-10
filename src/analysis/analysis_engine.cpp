@@ -357,7 +357,11 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   if (current_ip_state.paths_seen_by_ip.find(raw_log.request_path) ==
       current_ip_state.paths_seen_by_ip.end()) {
     event.is_path_new_for_ip = true;
-    current_ip_state.paths_seen_by_ip.insert(raw_log.request_path);
+
+    // Enforce the cap from the configuration to prevent unbounded memory growth
+    const size_t path_cap = app_config.tier1.max_unique_paths_stored_per_ip;
+    if (path_cap == 0 || current_ip_state.paths_seen_by_ip.size() < path_cap)
+      current_ip_state.paths_seen_by_ip.insert(raw_log.request_path);
   }
 
   // --- Tier 1 window updates ---
