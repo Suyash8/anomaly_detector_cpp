@@ -75,6 +75,8 @@ constexpr const char *T1_MAX_REQUESTS_PER_SESSION_IN_WINDOW =
     "max_requests_per_session_in_window";
 constexpr const char *T1_MAX_UA_CHANGES_PER_SESSION =
     "max_ua_changes_per_session";
+constexpr const char *T1_MAX_UNIQUE_PATHS_STORED_PER_IP =
+    "max_unique_paths_stored_per_ip";
 constexpr const char *T1_SCORE_MISSING_UA = "score_missing_ua";
 constexpr const char *T1_SCORE_OUTDATED_BROWSER = "score_outdated_browser";
 constexpr const char *T1_SCORE_KNOWN_BAD_UA = "score_known_bad_ua";
@@ -145,6 +147,7 @@ struct Tier1Config {
   uint32_t max_failed_logins_per_session = 10;
   uint32_t max_requests_per_session_in_window = 30;
   uint32_t max_ua_changes_per_session = 2;
+  size_t max_unique_paths_stored_per_ip = 2000;
 
   std::vector<std::string> html_path_suffixes;
   std::vector<std::string> html_exact_paths;
