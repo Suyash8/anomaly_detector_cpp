@@ -13,6 +13,7 @@ public:
   explicit MongoManager(const std::string &uri);
 
   mongocxx::pool::entry get_client();
+  bool ping();
 
 private:
   static mongocxx::instance instance_;

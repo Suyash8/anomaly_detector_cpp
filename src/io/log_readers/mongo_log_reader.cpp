@@ -4,17 +4,18 @@
 #include "io/db/mongo_manager.hpp"
 #include "utils/utils.hpp"
 
+#include <bsoncxx/builder/basic/kvp.hpp>
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/builder/stream/helpers.hpp>
 #include <bsoncxx/document/view.hpp>
 #include <bsoncxx/json.hpp>
 #include <bsoncxx/types-fwd.hpp>
 #include <bsoncxx/types.hpp>
-#include <cstdint>
 #include <mongocxx/cursor-fwd.hpp>
 #include <mongocxx/exception/query_exception.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -171,22 +172,40 @@ std::vector<LogEntry> MongoLogReader::get_next_batch() {
     auto client = mongo_manager_->get_client();
     auto collection = (*client)[config_.database][config_.collection];
 
-    using bsoncxx::builder::stream::close_document;
-    using bsoncxx::builder::stream::document;
-    using bsoncxx::builder::stream::finalize;
-    using bsoncxx::builder::stream::open_document;
+    bsoncxx::builder::basic::document filter_builder{};
 
-    auto query_filter =
-        document{} << config_.timestamp_field_name << open_document << "$gt"
-                   << bsoncxx::types::b_date{std::chrono::milliseconds{
-                          last_processed_timestamp_ms_}}
-                   << close_document << finalize;
+    // Build the sub-document for the $gt (greater than) operator
+    bsoncxx::builder::basic::document gt_builder{};
+    gt_builder.append(bsoncxx::builder::basic::kvp(
+        "$gt", bsoncxx::types::b_date(
+                   std::chrono::milliseconds(last_processed_timestamp_ms_))));
+
+    // Add the { timestamp_field: { $gt: ... } } sub-document to the main filter
+    filter_builder.append(bsoncxx::builder::basic::kvp(
+        config_.timestamp_field_name, gt_builder.view()));
+
+    // using bsoncxx::builder::stream::close_document;
+    // using bsoncxx::builder::stream::document;
+    // using bsoncxx::builder::stream::finalize;
+    // using bsoncxx::builder::stream::open_document;
+
+    // auto query_filter =
+    //     document{} << config_.timestamp_field_name << open_document << "$gt"
+    //                << bsoncxx::types::b_date{std::chrono::milliseconds{
+    //                       last_processed_timestamp_ms_}}
+    //                << close_document << finalize;
 
     mongocxx::options::find opts{};
-    opts.sort(document{} << config_.timestamp_field_name << 1 << finalize);
+
+    // Build the sort document using the core builder
+    bsoncxx::builder::basic::document sort_builder{};
+    sort_builder.append(
+        bsoncxx::builder::basic::kvp(config_.timestamp_field_name, 1));
+    opts.sort(sort_builder.view());
+
     opts.limit(BATCH_SIZE);
 
-    mongocxx::cursor cursor = collection.find(query_filter.view(), opts);
+    mongocxx::cursor cursor = collection.find(filter_builder.view(), opts);
 
     uint64_t latest_ts_in_batch = last_processed_timestamp_ms_;
     for (const auto &doc : cursor) {
