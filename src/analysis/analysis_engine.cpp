@@ -293,6 +293,19 @@ void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
     else
       ++it;
   }
+
+  if (app_config.tier1.session_tracking_enabled) {
+    const uint64_t session_ttl_ms =
+        app_config.tier1.session_inactivity_ttl_seconds * 1000;
+    if (session_ttl_ms > 0)
+      for (auto it = session_trackers.begin(); it != session_trackers.end();) {
+        if ((current_timestamp_ms - it->second.last_seen_timestamp_ms) >
+            session_ttl_ms)
+          it = session_trackers.erase(it);
+        else
+          ++it;
+      }
+  }
 }
 
 void AnalysisEngine::reset_in_memory_state() {
