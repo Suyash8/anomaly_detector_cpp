@@ -4,38 +4,34 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 
 struct LogEntry {
   std::string raw_log_line;
   uint64_t original_line_number;
 
   // Most essential data
-  std::string ip_address;
-  std::string timestamp_str;
+  std::string_view ip_address;
+  std::string_view timestamp_str;
   std::optional<uint64_t> parsed_timestamp_ms;
 
-  std::string request_method;
+  std::string_view request_method;
   std::string request_path;
-  std::string request_protocol;
+  std::string_view request_protocol;
 
   std::optional<int> http_status_code;
-
   std::optional<double> request_time_s;
   std::optional<double> upstream_response_time_s;
-
   std::optional<uint64_t> bytes_sent;
 
-  std::string remote_user;
-  std::string referer;
-  std::string user_agent;
-  std::string host;
-  std::string country_code;
-  std::string upstream_addr;
-  std::string x_request_id;
-  std::string accept_encoding;
-
-  // A simple flag to indicate if parsing was successful
-  // bool successfully_parsed;
+  std::string_view remote_user;
+  std::string_view referer;
+  std::string_view user_agent;
+  std::string_view host;
+  std::string_view country_code;
+  std::string_view upstream_addr;
+  std::string_view x_request_id;
+  std::string_view accept_encoding;
 
   bool successfully_parsed_structure; // Indicates if field count was okay and
                                       // basic string assignments happened
@@ -45,16 +41,16 @@ struct LogEntry {
 
   // Static function to create LogEntry from raw string
   static std::optional<LogEntry>
-  parse_from_string(const std::string &log_line, uint64_t line_num,
+  parse_from_string(std::string &&log_line, uint64_t line_num,
                     bool verbose_warnings = true);
 
 private:
   // Helper function to parse "request" field (into request_method,
   // request_path, request_protocol)
-  static void parse_request_details(const std::string &full_request_field,
-                                    std::string &out_method,
+  static void parse_request_details(std::string_view full_request_field,
+                                    std::string_view &out_method,
                                     std::string &out_path,
-                                    std::string &out_protocol);
+                                    std::string_view &out_protocol);
 };
 
 #endif // LOG_ENTRY_HPP
