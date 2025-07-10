@@ -254,6 +254,10 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.tier1.max_ua_changes_per_session =
               Utils::string_to_number<uint32_t>(value).value_or(
                   config.tier1.max_ua_changes_per_session);
+        else if (key == Keys::T1_MAX_UNIQUE_PATHS_STORED_PER_IP)
+          config.tier1.max_unique_paths_stored_per_ip =
+              Utils::string_to_number<size_t>(value).value_or(
+                  config.tier1.max_unique_paths_stored_per_ip);
         else if (key == Keys::T1_SCORE_MISSING_UA)
           config.tier1.score_missing_ua =
               Utils::string_to_number<double>(value).value_or(

@@ -293,6 +293,19 @@ void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
     else
       ++it;
   }
+
+  if (app_config.tier1.session_tracking_enabled) {
+    const uint64_t session_ttl_ms =
+        app_config.tier1.session_inactivity_ttl_seconds * 1000;
+    if (session_ttl_ms > 0)
+      for (auto it = session_trackers.begin(); it != session_trackers.end();) {
+        if ((current_timestamp_ms - it->second.last_seen_timestamp_ms) >
+            session_ttl_ms)
+          it = session_trackers.erase(it);
+        else
+          ++it;
+      }
+  }
 }
 
 void AnalysisEngine::reset_in_memory_state() {
@@ -344,7 +357,11 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   if (current_ip_state.paths_seen_by_ip.find(raw_log.request_path) ==
       current_ip_state.paths_seen_by_ip.end()) {
     event.is_path_new_for_ip = true;
-    current_ip_state.paths_seen_by_ip.insert(raw_log.request_path);
+
+    // Enforce the cap from the configuration to prevent unbounded memory growth
+    const size_t path_cap = app_config.tier1.max_unique_paths_stored_per_ip;
+    if (path_cap == 0 || current_ip_state.paths_seen_by_ip.size() < path_cap)
+      current_ip_state.paths_seen_by_ip.insert(raw_log.request_path);
   }
 
   // --- Tier 1 window updates ---
