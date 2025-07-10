@@ -22,9 +22,16 @@ std::string url_decode(const std::string &encoded_string) {
     if (encoded_string[i] == '%' && i + 2 < encoded_string.length()) {
       std::string hex = encoded_string.substr(i + 1, 2);
       try {
-        char decoded_char = static_cast<char>(std::stoi(hex, nullptr, 16));
-        decoded_stream << decoded_char;
-        i += 2;
+        // Check if both characters are hex digits before trying to convert
+        if (std::isxdigit(static_cast<unsigned char>(hex[0])) &&
+            std::isxdigit(static_cast<unsigned char>(hex[1]))) {
+
+          char decoded_char = static_cast<char>(std::stoi(hex, nullptr, 16));
+          decoded_stream << decoded_char;
+          i += 2;
+        } else {
+          decoded_stream << "%";
+        }
       } catch (const std::exception &) {
         decoded_stream << '%';
       }
@@ -175,7 +182,10 @@ uint32_t ip_string_to_uint32(const std::string &ip_str) {
       return 0;
 
     try {
-      ip_uint |= (std::stoi(segment) & 0xFF) << (i * 8);
+      int octet = std::stoi(segment);
+      if (octet < 0 || octet > 255)
+        return 0;
+      ip_uint |= (octet & 0xFF) << (i * 8);
     } catch (...) {
       return 0;
     }

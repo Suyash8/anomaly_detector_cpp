@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Clean previous build artifacts
-rm -rf build
-
 # Default mode
 MODE="release"
 BUILD_TESTS=OFF
