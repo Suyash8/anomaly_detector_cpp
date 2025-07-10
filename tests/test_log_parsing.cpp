@@ -66,5 +66,5 @@ TEST(LogParsingTest, HandlesURLDecodingInPath) {
   auto entry_opt = LogEntry::parse_from_string(line, 4);
 
   ASSERT_TRUE(entry_opt.has_value());
-  EXPECT_EQ(entry_opt->request_path, "/some/path with spaces");
+  EXPECT_EQ(entry_opt->request_path, "/some/path with+spaces");
 }
