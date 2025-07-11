@@ -5,6 +5,7 @@
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
 #include "models/feature_manager.hpp"
+#include "utils/scoped_timer.hpp"
 #include "utils/ua_parser.hpp"
 #include "utils/utils.hpp"
 
@@ -424,6 +425,13 @@ void AnalysisEngine::reconfigure(const Config::AppConfig &new_config) {
 }
 
 AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
+  static Histogram *processing_timer =
+      MetricsManager::instance().register_histogram(
+          "ad_analysis_engine_process_duration_seconds",
+          "Latency of the entire AnalysisEngine::process_and_analyze "
+          "function.");
+  ScopedTimer timer(*processing_timer);
+
   LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
       "Entering process_and_analyze for IP: " << raw_log.ip_address << " Path: "
                                               << raw_log.request_path);
