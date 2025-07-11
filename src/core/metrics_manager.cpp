@@ -4,19 +4,29 @@
 #include <sstream>
 #include <stdexcept>
 
+void LabeledCounter::increment(const MetricLabels &labels, uint64_t value) {
+  std::lock_guard<std::mutex> lock(series_mutex_);
+  if (series_.find(labels) == series_.end()) {
+    series_[labels] = std::make_unique<Series>();
+  }
+  series_[labels]->val.fetch_add(value, std::memory_order_relaxed);
+}
+
 MetricsManager &MetricsManager::instance() {
   static MetricsManager instance;
   return instance;
 }
 
-Counter *MetricsManager::register_counter(const std::string &name,
-                                          const std::string &help_text) {
+LabeledCounter *
+MetricsManager::register_labeled_counter(const std::string &name,
+                                         const std::string &help_text) {
   std::lock_guard<std::mutex> lock(registry_mutex_);
-  if (counters_.count(name)) {
+  if (labeled_counters_.count(name)) {
     throw std::runtime_error("Metric already registered: " + name);
   }
-  counters_[name] = std::unique_ptr<Counter>(new Counter(name, help_text));
-  return counters_[name].get();
+  labeled_counters_[name] =
+      std::unique_ptr<LabeledCounter>(new LabeledCounter(name, help_text));
+  return labeled_counters_[name].get();
 }
 
 Gauge *MetricsManager::register_gauge(const std::string &name,
@@ -44,10 +54,22 @@ std::string MetricsManager::expose_as_prometheus_text() {
   std::lock_guard<std::mutex> lock(registry_mutex_);
   std::stringstream ss;
 
-  for (const auto &[name, counter_ptr] : counters_) {
+  for (const auto &[name, counter_ptr] : labeled_counters_) {
     ss << "# HELP " << name << " " << counter_ptr->help << "\n";
     ss << "# TYPE " << name << " counter\n";
-    ss << name << " " << counter_ptr->get_value() << "\n";
+
+    std::lock_guard<std::mutex> series_lock(counter_ptr->series_mutex_);
+    for (const auto &[labels, series_ptr] : counter_ptr->series_) {
+      ss << name << "{";
+      bool first = true;
+      for (const auto &[key, val] : labels) {
+        if (!first)
+          ss << ",";
+        ss << key << "=\"" << val << "\"";
+        first = false;
+      }
+      ss << "} " << series_ptr->val.load(std::memory_order_relaxed) << "\n";
+    }
   }
 
   for (const auto &[name, gauge_ptr] : gauges_) {

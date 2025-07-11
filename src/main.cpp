@@ -157,9 +157,10 @@ int main(int argc, char *argv[]) {
   web_server.start();
 
   // --- Metrics Registration ---
-  auto *logs_processed_counter = MetricsManager::instance().register_counter(
-      "ad_logs_processed_total",
-      "Total number of log entries processed since startup.");
+  auto *logs_processed_counter =
+      MetricsManager::instance().register_labeled_counter(
+          "ad_logs_processed_total",
+          "Total number of log entries processed since startup.");
   auto *batch_processing_timer = MetricsManager::instance().register_histogram(
       "ad_batch_processing_duration_seconds",
       "Latency of processing a batch of logs.");
@@ -294,7 +295,7 @@ int main(int argc, char *argv[]) {
         ScopedTimer timer(*batch_processing_timer);
         for (auto log_entry : log_batch) {
           total_processed_count++;
-          logs_processed_counter->increment();
+          logs_processed_counter->increment({});
 
           if (log_entry.successfully_parsed_structure) {
             auto analyzed_event =

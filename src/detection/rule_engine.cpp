@@ -214,6 +214,15 @@ void RuleEngine::create_and_record_alert(const AnalyzedEvent &event,
                                          std::string_view action_str,
                                          double score,
                                          std::string_view key_id) {
+  static LabeledCounter *alerts_counter =
+      MetricsManager::instance().register_labeled_counter(
+          "ad_alerts_generated_total",
+          "Total number of alerts generated, partitioned by tier and reason.");
+
+  alerts_counter->increment(
+      {{"tier", alert_tier_to_string_representation(tier)},
+       {"reason", std::string(reason)}});
+
   if (score <= 0.0) {
     LOG(LogLevel::TRACE, LogComponent::RULES_EVAL,
         "Score is <= 0.0, not creating alert for reason: " << reason);
