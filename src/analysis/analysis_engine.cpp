@@ -3,6 +3,7 @@
 #include "analyzed_event.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
+#include "core/logger.hpp"
 #include "models/feature_manager.hpp"
 #include "utils/ua_parser.hpp"
 #include "utils/utils.hpp"
@@ -12,7 +13,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -199,8 +199,9 @@ bool AnalysisEngine::save_state(const std::string &path) const {
   Utils::create_directory_for_file(path);
   std::ofstream out(temp_path, std::ios::binary);
   if (!out) {
-    std::cerr << "Error: Could not open temporary state file for writing: "
-              << temp_path << std::endl;
+    LOG(LogLevel::ERROR, LogComponent::STATE_PERSIST,
+        "AnalysisEngine: Could not open temporary state file for writing: "
+            << temp_path);
     return false;
   }
 
@@ -221,28 +222,34 @@ bool AnalysisEngine::save_state(const std::string &path) const {
   out.close();
 
   if (std::rename(temp_path.c_str(), path.c_str()) != 0) {
-    std::cerr << "Error: Could not rename temporary state file." << std::endl;
+    LOG(LogLevel::ERROR, LogComponent::STATE_PERSIST,
+        "AnalysisEngine: Could not rename temporary state file to final path: "
+            << path);
     std::remove(temp_path.c_str());
     return false;
   }
+
+  LOG(LogLevel::TRACE, LogComponent::STATE_PERSIST,
+      "AnalysisEngine: State successfully saved to " << path);
 
   return true;
 }
 
 bool AnalysisEngine::load_state(const std::string &path) {
   std::ifstream in(path, std::ios::binary);
-  if (!in)
+  if (!in) {
+    LOG(LogLevel::ERROR, LogComponent::STATE_PERSIST,
+        "AnalysisEngine: Could not open state file for reading: " << path);
     return false;
-
+  }
   // Read and validate header
   uint32_t magic = 0, version = 0;
   in.read(reinterpret_cast<char *>(&magic), sizeof(magic));
   in.read(reinterpret_cast<char *>(&version), sizeof(version));
 
   if (magic != app_config.state_file_magic || version != STATE_FILE_VERSION) {
-    std::cerr
-        << "Warning: State file is incompatible or corrupt. Starting fresh."
-        << std::endl;
+    LOG(LogLevel::WARN, LogComponent::STATE_PERSIST,
+        "Warning: State file is incompatible or corrupt. Starting fresh.");
     return false;
   }
 
@@ -268,6 +275,9 @@ bool AnalysisEngine::load_state(const std::string &path) {
     path_activity_trackers.emplace(path_str, std::move(state));
   }
 
+  LOG(LogLevel::TRACE, LogComponent::STATE_PERSIST,
+      "AnalysisEngine: State successfully loaded from " << path);
+
   return true;
 }
 
@@ -277,8 +287,11 @@ uint64_t AnalysisEngine::get_max_timestamp_seen() const {
 
 void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
   const uint64_t ttl_ms = app_config.state_ttl_seconds * 1000;
-  if (ttl_ms == 0 || !app_config.state_pruning_enabled)
+  if (ttl_ms == 0 || !app_config.state_pruning_enabled) {
+    LOG(LogLevel::TRACE, LogComponent::STATE_PRUNE,
+        "AnalysisEngine: State pruning is disabled or TTL is 0, skipping.");
     return;
+  }
 
   for (auto it = ip_activity_trackers.begin();
        it != ip_activity_trackers.end();) {
@@ -308,13 +321,20 @@ void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
           ++it;
       }
   }
+
+  LOG(LogLevel::TRACE, LogComponent::STATE_PRUNE,
+      "AnalysisEngine: State pruning completed. Current IP count: "
+          << ip_activity_trackers.size()
+          << ", Path count: " << path_activity_trackers.size()
+          << ", Session count: " << session_trackers.size());
 }
 
 void AnalysisEngine::reset_in_memory_state() {
   ip_activity_trackers.clear();
   path_activity_trackers.clear();
   max_timestamp_seen_ = 0;
-  std::cout << "AnalysisEngine in-memory state has been reset." << std::endl;
+  LOG(LogLevel::TRACE, LogComponent::STATE_PERSIST,
+      "AnalysisEngine: In-memory state has been reset.");
 }
 
 void AnalysisEngine::reconfigure(const Config::AppConfig &new_config) {
