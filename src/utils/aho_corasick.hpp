@@ -2,6 +2,7 @@
 #define AHO_CORASICK_HPP
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -10,7 +11,7 @@ namespace Utils {
 class AhoCorasick {
 public:
   AhoCorasick(const std::vector<std::string> &patterns);
-  std::vector<std::string> find_all(const std::string &text) const;
+  std::vector<std::string> find_all(std::string_view text) const;
 
 private:
   struct TrieNode {

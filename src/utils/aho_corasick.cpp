@@ -53,7 +53,7 @@ AhoCorasick::AhoCorasick(const std::vector<std::string> &patterns)
   }
 }
 
-std::vector<std::string> AhoCorasick::find_all(const std::string &text) const {
+std::vector<std::string> AhoCorasick::find_all(std::string_view text) const {
   std::vector<std::string> found_patterns;
   int current_node = 0;
 
