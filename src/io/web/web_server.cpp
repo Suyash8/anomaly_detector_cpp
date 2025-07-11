@@ -32,6 +32,27 @@ WebServer::WebServer(const std::string &host, int port,
                  res.set_content(j.dump(2), "application/json");
                });
 
+  server_->Get("/api/v1/operations/state", [this](const httplib::Request &,
+                                                  httplib::Response &res) {
+    nlohmann::json j_state;
+
+    auto top_active = analysis_engine_.get_top_n_by_metric(10, "request_rate");
+    nlohmann::json j_top_active = nlohmann::json::array();
+    for (const auto &info : top_active) {
+      j_top_active.push_back({{"ip", info.ip}, {"value", info.value}});
+    }
+    j_state["top_active_ips"] = j_top_active;
+
+    auto top_error = analysis_engine_.get_top_n_by_metric(10, "error_rate");
+    nlohmann::json j_top_error = nlohmann::json::array();
+    for (const auto &info : top_error) {
+      j_top_error.push_back({{"ip", info.ip}, {"value", info.value}});
+    }
+    j_state["top_error_ips"] = j_top_error;
+
+    res.set_content(j_state.dump(2), "application/json");
+  });
+
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Web server initialized for " << host_ << ":" << port_);
 }

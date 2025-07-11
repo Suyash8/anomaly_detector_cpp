@@ -923,3 +923,43 @@ void PerIpState::load(std::ifstream &in) {
   error_rate_tracker.load(in);
   requests_in_window_count_tracker.load(in);
 }
+
+std::vector<TopIpInfo>
+AnalysisEngine::get_top_n_by_metric(size_t n, const std::string &metric_name) {
+  std::vector<TopIpInfo> all_ips;
+  {
+    // Must lock to safely read from the map
+    // This is a simplified example. In a real high-throughput system,
+    // you might copy the data or use more advanced concurrent structures.
+    // For now, a lock is sufficient and safe.
+    // NOTE: This lock can introduce latency on the main processing thread if
+    // held for long.
+    all_ips.reserve(ip_activity_trackers.size());
+    for (const auto &[ip, state] : ip_activity_trackers) {
+      double value = 0.0;
+      if (metric_name == "request_rate") {
+        value = state.request_timestamps_window.get_event_count();
+      } else if (metric_name == "error_rate") {
+        value = state.error_rate_tracker.get_mean();
+      }
+      // More metrics can be added here
+
+      all_ips.push_back({ip, value, metric_name});
+    }
+  }
+
+  std::vector<TopIpInfo> top_n;
+  top_n.reserve(n);
+
+  // Sort all IPs and take the top n
+  std::sort(all_ips.begin(), all_ips.end(),
+            [](const TopIpInfo &a, const TopIpInfo &b) {
+              return a.value > b.value; // Sort descending
+            });
+
+  // Take only the top n elements
+  size_t limit = std::min(n, all_ips.size());
+  top_n.assign(all_ips.begin(), all_ips.begin() + limit);
+
+  return top_n;
+}
