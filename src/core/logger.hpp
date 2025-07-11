@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 
+#include <iomanip>
 #include <map>
 
 // Enum for standard log severity levels
