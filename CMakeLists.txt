@@ -29,6 +29,7 @@ file(GLOB_RECURSE CORE_SOURCES
     "src/io/db/*.cpp"
     "src/io/log_readers/*.cpp"
     "src/io/threat_intel/*.cpp"
+    "src/io/web/*.cpp"
     "src/models/*.cpp"
     "src/utils/*.cpp"
 )

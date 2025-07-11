@@ -3,11 +3,13 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
+#include "core/metrics_manager.hpp"
 #include "detection/rule_engine.hpp"
 #include "io/db/mongo_manager.hpp"
 #include "io/log_readers/base_log_reader.hpp"
 #include "io/log_readers/file_log_reader.hpp"
 #include "io/log_readers/mongo_log_reader.hpp"
+#include "io/web/web_server.hpp"
 #include "models/model_manager.hpp"
 
 #include <atomic>
@@ -149,6 +151,9 @@ int main(int argc, char *argv[]) {
             << "  Ctrl+E:          Reset Engine State\n"
             << "  Ctrl+P:          Pause Processing\n"
             << "  Ctrl+Q:          Resume Processing\n\n";
+
+  WebServer web_server("0.0.0.0", 9090);
+  web_server.start();
 
   Config::ConfigManager config_manager;
   std::string config_file_to_load = "config.ini";
@@ -352,6 +357,8 @@ int main(int argc, char *argv[]) {
 #endif
     keyboard_thread.join();
   }
+
+  web_server.stop();
 
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Processing finished or shutdown signal received.");
