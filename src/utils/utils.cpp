@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <ctime>
 #include <exception>
+#include <filesystem>
+#include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -84,6 +86,19 @@ std::vector<std::string_view> split_string_view(std::string_view str,
   }
   result.push_back(str.substr(start));
   return result;
+}
+
+void create_directory_for_file(const std::string &filepath) {
+  try {
+    std::filesystem::path p(filepath);
+    if (p.has_parent_path()) {
+      std::filesystem::create_directories(p.parent_path());
+    }
+  } catch (const std::filesystem::filesystem_error &e) {
+    // This can fail due to permissions, etc.
+    std::cerr << "Warning: Could not create directory for path " << filepath
+              << ". Error: " << e.what() << std::endl;
+  }
 }
 
 std::optional<uint64_t> convert_log_time_to_ms(std::string_view log_time_str) {

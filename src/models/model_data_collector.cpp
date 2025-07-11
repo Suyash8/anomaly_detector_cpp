@@ -1,4 +1,5 @@
 #include "models/model_data_collector.hpp"
+#include "utils/utils.hpp"
 
 #include <iostream>
 #include <mutex>
@@ -7,6 +8,7 @@
 
 ModelDataCollector::ModelDataCollector(const std::string &output_path) {
   if (!output_path.empty()) {
+    Utils::create_directory_for_file(output_path);
     output_file_.open(output_path, std::ios::out | std::ios::app);
     if (!output_file_.is_open())
       std::cerr << "Error: Could not open ML data collection file: "

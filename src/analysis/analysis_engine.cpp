@@ -196,6 +196,7 @@ void perform_advanced_ua_analysis(const std::string &ua,
 
 bool AnalysisEngine::save_state(const std::string &path) const {
   std::string temp_path = path + ".tmp";
+  Utils::create_directory_for_file(path);
   std::ofstream out(temp_path, std::ios::binary);
   if (!out) {
     std::cerr << "Error: Could not open temporary state file for writing: "

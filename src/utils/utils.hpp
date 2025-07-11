@@ -24,6 +24,8 @@ std::string url_decode(std::string_view encoded_string);
 void save_string(std::ofstream &out, std::string_view s);
 std::string load_string(std::ifstream &in);
 
+void create_directory_for_file(const std::string &filepath);
+
 struct CIDRBlock {
   uint32_t network_address = 0;
   uint32_t netmask = 0;
