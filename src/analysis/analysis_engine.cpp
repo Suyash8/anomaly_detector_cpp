@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 enum class RequestType { HTML, ASSET, OTHER };
 
@@ -344,7 +345,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   PerIpState current_ip_state =
-      get_or_create_ip_state(raw_log.ip_address, current_event_ts);
+      get_or_create_ip_state(std::string(raw_log.ip_address), current_event_ts);
   PerPathState current_path_state =
       get_or_create_path_state(raw_log.request_path, current_event_ts);
 
@@ -434,14 +435,14 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       session.last_seen_timestamp_ms = current_event_ts;
       session.request_count++;
       session.unique_paths_visited.insert(raw_log.request_path);
-      session.unique_user_agents.insert(raw_log.user_agent);
+      session.unique_user_agents.insert(std::string(raw_log.user_agent));
 
       session.request_history.emplace_back(current_event_ts,
                                            raw_log.request_path);
       if (session.request_history.size() > 50)
         session.request_history.pop_front();
 
-      session.http_method_counts[raw_log.request_method]++;
+      session.http_method_counts[std::string(raw_log.request_method)]++;
       session.request_timestamps_window.add_event(current_event_ts, 1);
 
       if (raw_log.request_time_s)
@@ -623,9 +624,9 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   }
 
   // --- User-Agent analysis logic ---
-  perform_advanced_ua_analysis(raw_log.user_agent, app_config.tier1,
-                               current_ip_state, event, current_event_ts,
-                               max_timestamp_seen_);
+  perform_advanced_ua_analysis(std::string(raw_log.user_agent),
+                               app_config.tier1, current_ip_state, event,
+                               current_event_ts, max_timestamp_seen_);
 
   // --- Feature extraction for ML ---
   if (app_config.tier3.enabled || app_config.ml_data_collection_enabled)

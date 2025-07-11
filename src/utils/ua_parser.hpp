@@ -2,11 +2,11 @@
 #define UA_PARSER_HPP
 
 #include <optional>
-#include <string>
+#include <string_view>
 
 namespace UAParser {
-std::optional<int> get_major_version(const std::string &ua,
-                                     const std::string &browser_token);
+std::optional<int> get_major_version(std::string_view ua,
+                                     std::string_view browser_token);
 }
 
 #endif // UA_PARSER_HPP
