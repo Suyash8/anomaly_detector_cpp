@@ -40,6 +40,11 @@ private:
 };
 
 struct Histogram {
+public:
+  std::pair<std::vector<double>, std::mutex *> get_observations_for_read() {
+    return {observations, &mtx};
+  }
+
   friend class MetricsManager;
   void observe(double value) {
     std::lock_guard<std::mutex> lock(mtx);
@@ -68,6 +73,8 @@ public:
   Gauge *register_gauge(const std::string &name, const std::string &help_text);
   Histogram *register_histogram(const std::string &name,
                                 const std::string &help_text);
+
+  std::string expose_as_prometheus_text();
 
 private:
   MetricsManager() = default;

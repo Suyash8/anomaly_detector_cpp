@@ -1,9 +1,17 @@
 #include "web_server.hpp"
 #include "core/logger.hpp"
 
-WebServer::WebServer(const std::string &host, int port)
-    : host_(host), port_(port) {
+WebServer::WebServer(const std::string &host, int port,
+                     MetricsManager &metrics_manager)
+    : host_(host), port_(port), metrics_manager_(metrics_manager) {
   server_ = std::make_unique<httplib::Server>();
+
+  server_->Get(
+      "/metrics", [this](const httplib::Request &, httplib::Response &res) {
+        std::string metrics_data = metrics_manager_.expose_as_prometheus_text();
+        res.set_content(metrics_data, "text/plain; version=0.0.4");
+      });
+
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Web server initialized for " << host_ << ":" << port_);
 }

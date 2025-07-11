@@ -152,8 +152,12 @@ int main(int argc, char *argv[]) {
             << "  Ctrl+P:          Pause Processing\n"
             << "  Ctrl+Q:          Resume Processing\n\n";
 
-  WebServer web_server("0.0.0.0", 9090);
+  WebServer web_server("0.0.0.0", 9090, MetricsManager::instance());
   web_server.start();
+
+  auto *logs_processed_counter = MetricsManager::instance().register_counter(
+      "ad_logs_processed_total",
+      "Total number of log entries processed since startup.");
 
   Config::ConfigManager config_manager;
   std::string config_file_to_load = "config.ini";
@@ -282,6 +286,7 @@ int main(int argc, char *argv[]) {
       if (!log_batch.empty()) {
         for (auto log_entry : log_batch) {
           total_processed_count++;
+          logs_processed_counter->increment();
 
           if (log_entry.successfully_parsed_structure) {
             auto analyzed_event =
