@@ -1,8 +1,51 @@
 #include "metrics_manager.hpp"
 
+#include <algorithm>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+
+void Histogram::observe(double value) {
+  std::lock_guard<std::mutex> lock(mtx);
+  observations.push_back(value);
+}
+
+std::map<double, double>
+Histogram::get_quantiles(const std::vector<double> &quantiles) {
+  std::map<double, double> results;
+  if (observations.empty()) {
+    for (double q : quantiles)
+      results[q] = 0.0;
+    return results;
+  }
+
+  // Create a copy for sorting to not block for too long
+  std::vector<double> sorted_observations;
+  {
+    std::lock_guard<std::mutex> lock(mtx);
+    sorted_observations = observations;
+  }
+  std::sort(sorted_observations.begin(), sorted_observations.end());
+
+  for (double q : quantiles) {
+    if (q < 0.0 || q > 1.0)
+      continue;
+    size_t index =
+        static_cast<size_t>((double)(sorted_observations.size() - 1) * q);
+    results[q] = sorted_observations[index];
+  }
+  return results;
+}
+
+double Histogram::get_sum() {
+  std::lock_guard<std::mutex> lock(mtx);
+  return std::accumulate(observations.begin(), observations.end(), 0.0);
+}
+
+size_t Histogram::get_count() {
+  std::lock_guard<std::mutex> lock(mtx);
+  return observations.size();
+}
 
 void LabeledCounter::increment(const MetricLabels &labels, uint64_t value) {
   std::lock_guard<std::mutex> lock(series_mutex_);
