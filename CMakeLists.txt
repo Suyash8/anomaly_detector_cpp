@@ -20,7 +20,7 @@ find_package(Threads REQUIRED) # For pthread, which was a linker flag in the mak
 # --- Source File Discovery ---
 # Automatically find all .cpp files in the 'src' directory and its subdirectories.
 file(GLOB_RECURSE CORE_SOURCES 
-        "src/analysis/*.cpp"
+    "src/analysis/*.cpp"
     "src/core/*.cpp"
     "src/detection/*.cpp"
     "src/io/*.cpp"
