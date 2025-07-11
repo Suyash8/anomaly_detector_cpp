@@ -5,13 +5,13 @@
 #include "core/alert_manager.hpp"
 #include "core/config.hpp"
 #include "io/threat_intel/intel_manager.hpp"
-#include "models/base_model.hpp"
 #include "models/model_manager.hpp"
 #include "utils/aho_corasick.hpp"
 #include "utils/utils.hpp"
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 class RuleEngine {
 public:
@@ -36,10 +36,9 @@ private:
 
 private:
   void create_and_record_alert(const AnalyzedEvent &event,
-                               const std::string &reason, AlertTier tier,
-                               AlertAction action,
-                               const std::string &action_str, double score,
-                               const std::string &key_id = "");
+                               std::string_view reason, AlertTier tier,
+                               AlertAction action, std::string_view action_str,
+                               double score, std::string_view key_id = "");
 
   void check_requests_per_ip_rule(const AnalyzedEvent &event);
   void check_failed_logins_rule(const AnalyzedEvent &event);

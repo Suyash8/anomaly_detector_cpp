@@ -5,10 +5,11 @@
 #include <exception>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace UAParser {
-std::optional<int> get_major_version(const std::string &ua,
-                                     const std::string &browser_token) {
+std::optional<int> get_major_version(std::string_view ua,
+                                     std::string_view browser_token) {
   size_t pos = ua.find(browser_token);
   if (pos == std::string::npos)
     return std::nullopt;
@@ -18,7 +19,7 @@ std::optional<int> get_major_version(const std::string &ua,
     return std::nullopt;
 
   size_t version_end = ua.find_first_not_of("0123456789", version_start);
-  std::string major_version_string =
+  std::string_view major_version_string =
       ua.substr(version_start, version_end - version_start);
 
   if (major_version_string.empty())

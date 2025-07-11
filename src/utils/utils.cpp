@@ -15,18 +15,19 @@
 #include <vector>
 
 namespace Utils {
-std::string url_decode(const std::string &encoded_string) {
+std::string url_decode(std::string_view encoded_string) {
   std::ostringstream decoded_stream;
 
   for (size_t i = 0; i < encoded_string.length(); i++) {
     if (encoded_string[i] == '%' && i + 2 < encoded_string.length()) {
-      std::string hex = encoded_string.substr(i + 1, 2);
+      std::string hex(encoded_string.substr(i + 1, 2));
       try {
         // Check if both characters are hex digits before trying to convert
         if (std::isxdigit(static_cast<unsigned char>(hex[0])) &&
             std::isxdigit(static_cast<unsigned char>(hex[1]))) {
 
-          char decoded_char = static_cast<char>(std::stoi(hex, nullptr, 16));
+          char decoded_char =
+              static_cast<char>(std::stoi(std::string(hex), nullptr, 16));
           decoded_stream << decoded_char;
           i += 2;
         } else {
@@ -43,10 +44,10 @@ std::string url_decode(const std::string &encoded_string) {
   return decoded_stream.str();
 }
 
-void save_string(std::ofstream &out, const std::string &s) {
+void save_string(std::ofstream &out, std::string_view s) {
   size_t len = s.length();
   out.write(reinterpret_cast<const char *>(&len), sizeof(len));
-  out.write(s.c_str(), len);
+  out.write(s.data(), len);
 }
 
 std::string load_string(std::ifstream &in) {
@@ -85,15 +86,14 @@ std::vector<std::string_view> split_string_view(std::string_view str,
   return result;
 }
 
-std::optional<uint64_t>
-convert_log_time_to_ms(const std::string &log_time_str) {
+std::optional<uint64_t> convert_log_time_to_ms(std::string_view log_time_str) {
   if (log_time_str.empty() || log_time_str == "-") {
     return std::nullopt;
   }
 
   // Expected format: 23/May/2025:00:00:35 +0530
   std::tm t{};
-  const char *p = log_time_str.c_str();
+  const char *p = log_time_str.data();
 
   // Day
   char *end;
@@ -172,9 +172,9 @@ uint64_t get_current_time_ms() {
   return ms.count();
 }
 
-uint32_t ip_string_to_uint32(const std::string &ip_str) {
+uint32_t ip_string_to_uint32(std::string_view ip_str) {
   uint32_t ip_uint = 0;
-  std::istringstream ip_stream(ip_str);
+  std::istringstream ip_stream(ip_str.data());
   std::string segment;
   int i = 3;
   while (std::getline(ip_stream, segment, '.')) {
@@ -194,7 +194,7 @@ uint32_t ip_string_to_uint32(const std::string &ip_str) {
   return (i == -1) ? ip_uint : 0;
 }
 
-std::optional<CIDRBlock> parse_cidr(const std::string &cidr_string) {
+std::optional<CIDRBlock> parse_cidr(std::string_view cidr_string) {
   size_t slash_pos = cidr_string.find('/');
   if (slash_pos == std::string::npos) {
     uint32_t ip = ip_string_to_uint32(cidr_string);
@@ -203,8 +203,8 @@ std::optional<CIDRBlock> parse_cidr(const std::string &cidr_string) {
     return CIDRBlock{ip, 0xFFFFFFFF};
   }
 
-  std::string ip_part = cidr_string.substr(0, slash_pos);
-  std::string mask_part = cidr_string.substr(slash_pos + 1);
+  std::string_view ip_part = cidr_string.substr(0, slash_pos);
+  std::string mask_part(cidr_string.substr(slash_pos + 1));
 
   uint32_t ip = ip_string_to_uint32(ip_part);
   if (ip == 0)

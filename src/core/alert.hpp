@@ -37,9 +37,9 @@ struct Alert {
   std::string raw_log_trigger_sample;
   std::string ml_feature_contribution;
 
-  Alert(std::shared_ptr<const AnalyzedEvent> event, const std::string &reason,
-        AlertTier tier, AlertAction action, const std::string &action_str,
-        double score, const std::string &key_id = "");
+  Alert(std::shared_ptr<const AnalyzedEvent> event, std::string_view reason,
+        AlertTier tier, AlertAction action, std::string_view action_str,
+        double score, std::string_view key_id = "");
 };
 
 #endif // ALERT_HPP

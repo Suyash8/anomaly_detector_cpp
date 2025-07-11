@@ -17,11 +17,11 @@ namespace Utils {
 std::vector<std::string> split_string(const std::string &text, char delimiter);
 std::vector<std::string_view> split_string_view(std::string_view str,
                                                 char delimiter);
-std::optional<uint64_t> convert_log_time_to_ms(const std::string &log_time_str);
+std::optional<uint64_t> convert_log_time_to_ms(std::string_view log_time_str);
 uint64_t get_current_time_ms();
-std::string url_decode(const std::string &encoded_string);
+std::string url_decode(std::string_view encoded_string);
 
-void save_string(std::ofstream &out, const std::string &s);
+void save_string(std::ofstream &out, std::string_view s);
 std::string load_string(std::ifstream &in);
 
 struct CIDRBlock {
@@ -31,29 +31,11 @@ struct CIDRBlock {
   bool contains(uint32_t ip) const;
 };
 
-std::optional<CIDRBlock> parse_cidr(const std::string &cidr_string);
-uint32_t ip_string_to_uint32(const std::string &ip_str);
-
-template <typename T> std::optional<T> string_to_number(const std::string &s) {
-  if (s.empty() || s == "-") { // Ngnix often uses "-" for empty numeric fields
-    if constexpr (std::is_floating_point_v<T>)
-      return static_cast<T>(0.0);
-    else if constexpr (std::is_integral_v<T>)
-      return static_cast<T>(0);
-    return std::nullopt;
-  }
-
-  T value;
-  auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);
-
-  if (ec == std::errc() &&
-      ptr == s.data() + s.size()) // Successfully parsed the entire string
-    return value;
-  return std::nullopt;
-}
+std::optional<CIDRBlock> parse_cidr(std::string_view cidr_string);
+uint32_t ip_string_to_uint32(std::string_view ip_str);
 
 template <typename T> std::optional<T> string_to_number(std::string_view s) {
-  if (s.empty() || s == "") {
+  if (s.empty() || s == "-") {
     if constexpr (std::is_floating_point_v<T>)
       return static_cast<T>(0.0);
     if constexpr (std::is_integral_v<T>)
@@ -87,7 +69,8 @@ inline void trim_inplace(std::string &s) {
   rtrim_inplace(s);
 }
 
-inline std::string trim_copy(std::string s) {
+inline std::string trim_copy(std::string_view sv) {
+  std::string s{sv};
   trim_inplace(s);
   return s;
 }

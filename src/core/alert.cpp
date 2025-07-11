@@ -35,9 +35,8 @@ std::string alert_tier_to_string_representation(AlertTier tier) {
 }
 
 Alert::Alert(std::shared_ptr<const AnalyzedEvent> event,
-             const std::string &reason, AlertTier tier, AlertAction action,
-             const std::string &action_str, double score,
-             const std::string &key_id)
+             std::string_view reason, AlertTier tier, AlertAction action,
+             std::string_view action_str, double score, std::string_view key_id)
     : event_context(event),
       event_timestamp_ms(event->raw_log.parsed_timestamp_ms.value_or(0)),
       source_ip(event->raw_log.ip_address), alert_reason(reason),

@@ -2,7 +2,6 @@
 #include "core/log_entry.hpp"
 
 #include <iostream>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,7 +33,7 @@ std::vector<LogEntry> FileLogReader::get_next_batch() {
       line_number_++;
       // This reader is responsible for the initial parsing from string
       if (auto entry_opt =
-              LogEntry::parse_from_string(line, line_number_, false))
+              LogEntry::parse_from_string(std::move(line), line_number_, false))
         batch.push_back(*entry_opt);
     }
   }

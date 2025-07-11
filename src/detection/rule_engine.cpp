@@ -147,11 +147,11 @@ void RuleEngine::reconfigure(const Config::AppConfig &new_config) {
 // =================================================================================
 
 void RuleEngine::create_and_record_alert(const AnalyzedEvent &event,
-                                         const std::string &reason,
+                                         std::string_view reason,
                                          AlertTier tier, AlertAction action,
-                                         const std::string &action_str,
+                                         std::string_view action_str,
                                          double score,
-                                         const std::string &key_id) {
+                                         std::string_view key_id) {
   if (score <= 0.0)
     return;
 

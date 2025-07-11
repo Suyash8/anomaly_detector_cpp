@@ -7,6 +7,7 @@
 
 #include <bsoncxx/document/view.hpp>
 #include <cstdint>
+#include <optional>
 
 class MongoLogReader : public ILogReader {
 public:
@@ -21,7 +22,7 @@ public:
 private:
   void load_state();
   void save_state() const;
-  LogEntry bson_to_log_entry(const bsoncxx::document::view &doc);
+  std::optional<LogEntry> bson_to_log_entry(const bsoncxx::document::view &doc);
 
   std::shared_ptr<MongoManager> mongo_manager_;
   const Config::MongoLogSourceConfig &config_;
