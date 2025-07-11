@@ -4,6 +4,7 @@
 #include "io/alert_dispatch/base_dispatcher.hpp"
 
 #include <string>
+#include <string_view>
 
 class HttpDispatcher : public IAlertDispatcher {
 public:
@@ -18,7 +19,7 @@ private:
 
   // Re-use the JSON formatting from FileDispatcher
   std::string format_alert_to_json(const Alert &alert_data) const;
-  std::string escape_json_value(const std::string &input) const;
+  std::string escape_json_value(std::string_view input) const;
 };
 
 #endif // HTTP_DISPATCHER_HPP
