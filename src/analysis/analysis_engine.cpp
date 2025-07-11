@@ -3,6 +3,7 @@
 #include "analyzed_event.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
+#include "core/logger.hpp"
 #include "models/feature_manager.hpp"
 #include "utils/ua_parser.hpp"
 #include "utils/utils.hpp"
@@ -12,7 +13,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -62,13 +62,15 @@ RequestType get_request_type(const std::string &raw_path,
 
 AnalysisEngine::AnalysisEngine(const Config::AppConfig &cfg)
     : app_config(cfg), feature_manager_() {
-  std::cout << "AnalysisEngine created." << std::endl;
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "AnalysisEngine created.");
 
   if (app_config.ml_data_collection_enabled) {
     data_collector_ = std::make_unique<ModelDataCollector>(
         app_config.ml_data_collection_path);
-    std::cout << "ML data collection enabled. Outputting features to: "
-              << app_config.ml_data_collection_path << std::endl;
+    LOG(LogLevel::INFO, LogComponent::ML_FEATURES,
+        "ML data collection enabled. Outputting features to: "
+            << app_config.ml_data_collection_path);
   }
 }
 
@@ -79,6 +81,8 @@ AnalysisEngine::get_or_create_ip_state(const std::string &ip,
                                        uint64_t current_timestamp_ms) {
   auto it = ip_activity_trackers.find(ip);
   if (it == ip_activity_trackers.end()) {
+    LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_LIFECYCLE,
+        "Creating new PerIpState for IP: " << ip);
     uint64_t window_duration_ms =
         app_config.tier1.sliding_window_duration_seconds * 1000;
 
@@ -89,6 +93,9 @@ AnalysisEngine::get_or_create_ip_state(const std::string &ip,
 
     return inserted_it->second;
   } else {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "Found existing PerIpState for IP: "
+            << ip << ". Updating last_seen timestamp.");
     it->second.last_seen_timestamp_ms = current_timestamp_ms;
     return it->second;
   }
@@ -99,10 +106,15 @@ AnalysisEngine::get_or_create_path_state(const std::string &path,
                                          uint64_t current_timestamp_ms) {
   auto it = path_activity_trackers.find(path);
   if (it == path_activity_trackers.end()) {
+    LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_LIFECYCLE,
+        "Creating new PerPathState for Path: " << path);
     auto [inserted_it, success] = path_activity_trackers.emplace(
         path, PerPathState(current_timestamp_ms));
     return inserted_it->second;
   } else {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "Found existing PerPathState for Path: "
+            << path << ". Updating last_seen timestamp.");
     it->second.last_seen_timestamp_ms = current_timestamp_ms;
     return it->second;
   }
@@ -119,7 +131,8 @@ std::string AnalysisEngine::build_session_key(const LogEntry &raw_log) const {
 
     session_key += '|';
   }
-
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_SESSION,
+      "Built session key: " << session_key);
   return session_key;
 }
 
@@ -127,11 +140,17 @@ void perform_advanced_ua_analysis(const std::string &ua,
                                   const Config::Tier1Config &cfg,
                                   PerIpState &ip_state, AnalyzedEvent &event,
                                   uint64_t ts, uint64_t max_ts) {
-  if (!cfg.check_user_agent_anomalies)
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+      "Performing advanced UA analysis.");
+  if (!cfg.check_user_agent_anomalies) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "UA analysis is disabled in config, skipping.");
     return;
+  }
 
   // 1. Missing UA
   if (ua.empty() || ua == "-") {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE, "UA is missing.");
     event.is_ua_missing = true;
     return;
   }
@@ -139,20 +158,29 @@ void perform_advanced_ua_analysis(const std::string &ua,
   // 2. Headless/Known Bad Bot detection
   for (const auto &headless_str : cfg.headless_browser_substrings)
     if (ua.find(headless_str) != std::string::npos) {
+      LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+          "Found headless browser string '" << headless_str << "' in UA.");
       event.is_ua_headless = true;
       break;
     }
   if (ua.find("sqlmap") != std::string::npos ||
-      ua.find("Nmap") != std::string::npos)
+      ua.find("Nmap") != std::string::npos) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "Found known bad bot string in UA.");
     event.is_ua_known_bad = true;
+  }
 
   // 3. Version Check
   if (auto ver = UAParser::get_major_version(ua, "Chrome/");
       ver && *ver < cfg.min_chrome_version) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "Detected outdated Chrome version: " << *ver);
     event.is_ua_outdated = true;
     event.detected_browser_version = "Chrome/" + std::to_string(*ver);
   } else if (auto ver = UAParser::get_major_version(ua, "Firefox/");
              ver && *ver < cfg.min_firefox_version) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "Detected outdated Firefox version: " << *ver);
     event.is_ua_outdated = true;
     event.detected_browser_version = "Firefox/" + std::to_string(*ver);
   }
@@ -164,17 +192,25 @@ void perform_advanced_ua_analysis(const std::string &ua,
   bool has_mobile = ua.find("iPhone") != std::string::npos ||
                     ua.find("Android") != std::string::npos;
   if (has_desktop && has_mobile) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "Detected inconsistent UA platform (both mobile and desktop).");
     event.is_ua_inconsistent = true;
   }
 
   // 5. UA changed and cycling check
   // Prune the cycling window first
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_WINDOW,
+      "Pruning recent_unique_ua_window for UA cycling check.");
   ip_state.recent_unique_ua_window.prune_old_events(max_ts);
 
   // Check if UA changed since last request
   if (!ip_state.last_known_user_agent.empty() &&
-      ip_state.last_known_user_agent != ua)
+      ip_state.last_known_user_agent != ua) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "UA changed for IP. Old: '" << ip_state.last_known_user_agent
+                                    << "', New: '" << ua << "'");
     event.is_ua_changed_for_ip = true;
+  }
   ip_state.last_known_user_agent = ua;
 
   // Add to cycling window only if it is a new UA for the window
@@ -187,20 +223,30 @@ void perform_advanced_ua_analysis(const std::string &ua,
     }
   }
 
-  if (!found_in_window)
+  if (!found_in_window) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_WINDOW,
+        "Adding new unique UA to window: " << ua);
     ip_state.recent_unique_ua_window.add_event(ts, ua);
+  }
   if (ip_state.recent_unique_ua_window.get_event_count() >
-      static_cast<size_t>(cfg.max_unique_uas_per_ip_in_window))
+      static_cast<size_t>(cfg.max_unique_uas_per_ip_in_window)) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+        "UA cycling detected. Unique UAs in window: "
+            << ip_state.recent_unique_ua_window.get_event_count());
     event.is_ua_cycling = true;
+  }
 }
 
 bool AnalysisEngine::save_state(const std::string &path) const {
+  LOG(LogLevel::TRACE, LogComponent::STATE_PERSIST,
+      "Entering save_state to path: " << path);
   std::string temp_path = path + ".tmp";
   Utils::create_directory_for_file(path);
   std::ofstream out(temp_path, std::ios::binary);
   if (!out) {
-    std::cerr << "Error: Could not open temporary state file for writing: "
-              << temp_path << std::endl;
+    LOG(LogLevel::ERROR, LogComponent::STATE_PERSIST,
+        "AnalysisEngine: Could not open temporary state file for writing: "
+            << temp_path);
     return false;
   }
 
@@ -212,6 +258,8 @@ bool AnalysisEngine::save_state(const std::string &path) const {
 
   // Write IP trackers
   size_t ip_map_size = ip_activity_trackers.size();
+  LOG(LogLevel::DEBUG, LogComponent::STATE_PERSIST,
+      "Saving " << ip_map_size << " IP states.");
   out.write(reinterpret_cast<const char *>(&ip_map_size), sizeof(ip_map_size));
   for (const auto &pair : ip_activity_trackers) {
     Utils::save_string(out, pair.first);
@@ -221,18 +269,28 @@ bool AnalysisEngine::save_state(const std::string &path) const {
   out.close();
 
   if (std::rename(temp_path.c_str(), path.c_str()) != 0) {
-    std::cerr << "Error: Could not rename temporary state file." << std::endl;
+    LOG(LogLevel::ERROR, LogComponent::STATE_PERSIST,
+        "AnalysisEngine: Could not rename temporary state file to final path: "
+            << path);
     std::remove(temp_path.c_str());
     return false;
   }
 
+  LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
+      "AnalysisEngine state successfully saved to " << path);
   return true;
 }
 
 bool AnalysisEngine::load_state(const std::string &path) {
+  LOG(LogLevel::TRACE, LogComponent::STATE_PERSIST,
+      "Entering load_state from path: " << path);
   std::ifstream in(path, std::ios::binary);
-  if (!in)
+  if (!in) {
+    LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
+        "AnalysisEngine: No state file found at: " << path
+                                                   << ". Starting fresh.");
     return false;
+  }
 
   // Read and validate header
   uint32_t magic = 0, version = 0;
@@ -240,15 +298,18 @@ bool AnalysisEngine::load_state(const std::string &path) {
   in.read(reinterpret_cast<char *>(&version), sizeof(version));
 
   if (magic != app_config.state_file_magic || version != STATE_FILE_VERSION) {
-    std::cerr
-        << "Warning: State file is incompatible or corrupt. Starting fresh."
-        << std::endl;
+    LOG(LogLevel::WARN, LogComponent::STATE_PERSIST,
+        "Warning: State file is incompatible or corrupt. Starting fresh. File "
+        "magic/version: "
+            << magic << "/" << version);
     return false;
   }
 
   // Read IP trackers
   size_t ip_map_size = 0;
   in.read(reinterpret_cast<char *>(&ip_map_size), sizeof(ip_map_size));
+  LOG(LogLevel::DEBUG, LogComponent::STATE_PERSIST,
+      "Loading " << ip_map_size << " IP states.");
   ip_activity_trackers.clear();
   for (size_t i = 0; i < ip_map_size; ++i) {
     std::string ip = Utils::load_string(in);
@@ -260,6 +321,8 @@ bool AnalysisEngine::load_state(const std::string &path) {
   // Read Path trackers
   size_t path_map_size = 0;
   in.read(reinterpret_cast<char *>(&path_map_size), sizeof(path_map_size));
+  LOG(LogLevel::DEBUG, LogComponent::STATE_PERSIST,
+      "Loading " << path_map_size << " Path states.");
   path_activity_trackers.clear();
   for (size_t i = 0; i < path_map_size; ++i) {
     std::string path_str = Utils::load_string(in);
@@ -268,6 +331,8 @@ bool AnalysisEngine::load_state(const std::string &path) {
     path_activity_trackers.emplace(path_str, std::move(state));
   }
 
+  LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
+      "AnalysisEngine state successfully loaded from " << path);
   return true;
 }
 
@@ -276,10 +341,16 @@ uint64_t AnalysisEngine::get_max_timestamp_seen() const {
 }
 
 void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
+  LOG(LogLevel::TRACE, LogComponent::STATE_PRUNE,
+      "Entering run_pruning. Current time: " << current_timestamp_ms);
   const uint64_t ttl_ms = app_config.state_ttl_seconds * 1000;
-  if (ttl_ms == 0 || !app_config.state_pruning_enabled)
+  if (ttl_ms == 0 || !app_config.state_pruning_enabled) {
+    LOG(LogLevel::DEBUG, LogComponent::STATE_PRUNE,
+        "State pruning is disabled or TTL is 0, skipping.");
     return;
+  }
 
+  size_t ips_before = ip_activity_trackers.size();
   for (auto it = ip_activity_trackers.begin();
        it != ip_activity_trackers.end();) {
     if ((current_timestamp_ms - it->second.last_seen_timestamp_ms) > ttl_ms)
@@ -287,7 +358,10 @@ void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
     else
       ++it;
   }
+  LOG(LogLevel::DEBUG, LogComponent::STATE_PRUNE,
+      "Pruned " << (ips_before - ip_activity_trackers.size()) << " IP states.");
 
+  size_t paths_before = path_activity_trackers.size();
   for (auto it = path_activity_trackers.begin();
        it != path_activity_trackers.end();) {
     if ((current_timestamp_ms - it->second.last_seen_timestamp_ms) > ttl_ms)
@@ -295,8 +369,12 @@ void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
     else
       ++it;
   }
+  LOG(LogLevel::DEBUG, LogComponent::STATE_PRUNE,
+      "Pruned " << (paths_before - path_activity_trackers.size())
+                << " Path states.");
 
   if (app_config.tier1.session_tracking_enabled) {
+    size_t sessions_before = session_trackers.size();
     const uint64_t session_ttl_ms =
         app_config.tier1.session_inactivity_ttl_seconds * 1000;
     if (session_ttl_ms > 0)
@@ -307,14 +385,21 @@ void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
         else
           ++it;
       }
+    LOG(LogLevel::DEBUG, LogComponent::STATE_PRUNE,
+        "Pruned " << (sessions_before - session_trackers.size())
+                  << " Session states.");
   }
+
+  LOG(LogLevel::INFO, LogComponent::STATE_PRUNE, "State pruning completed.");
 }
 
 void AnalysisEngine::reset_in_memory_state() {
   ip_activity_trackers.clear();
   path_activity_trackers.clear();
+  session_trackers.clear();
   max_timestamp_seen_ = 0;
-  std::cout << "AnalysisEngine in-memory state has been reset." << std::endl;
+  LOG(LogLevel::WARN, LogComponent::STATE_PERSIST,
+      "AnalysisEngine: In-memory state has been reset.");
 }
 
 void AnalysisEngine::reconfigure(const Config::AppConfig &new_config) {
@@ -322,6 +407,9 @@ void AnalysisEngine::reconfigure(const Config::AppConfig &new_config) {
 
   uint64_t window_duration_ms =
       app_config.tier1.sliding_window_duration_seconds * 1000;
+  LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_LIFECYCLE,
+      "Reconfiguring all sliding windows to new duration: "
+          << window_duration_ms << "ms");
   for (auto &pair : ip_activity_trackers) {
     pair.second.request_timestamps_window.reconfigure(window_duration_ms, 0);
     pair.second.failed_login_timestamps_window.reconfigure(window_duration_ms,
@@ -331,43 +419,64 @@ void AnalysisEngine::reconfigure(const Config::AppConfig &new_config) {
     pair.second.recent_unique_ua_window.reconfigure(window_duration_ms, 0);
   }
 
-  std::cout << "AnalysisEngine has been reconfigured." << std::endl;
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "AnalysisEngine has been reconfigured with new settings.");
 }
 
 AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+      "Entering process_and_analyze for IP: " << raw_log.ip_address << " Path: "
+                                              << raw_log.request_path);
   AnalyzedEvent event(raw_log);
 
-  if (!raw_log.parsed_timestamp_ms)
+  if (!raw_log.parsed_timestamp_ms) {
+    LOG(LogLevel::WARN, LogComponent::ANALYSIS_LIFECYCLE,
+        "Skipping analysis for log line " << raw_log.original_line_number
+                                          << " due to missing timestamp.");
     return event;
+  }
   uint64_t current_event_ts = *raw_log.parsed_timestamp_ms;
 
   if (current_event_ts > max_timestamp_seen_) {
     max_timestamp_seen_ = current_event_ts;
   }
 
-  PerIpState current_ip_state =
+  PerIpState &current_ip_state =
       get_or_create_ip_state(std::string(raw_log.ip_address), current_event_ts);
-  PerPathState current_path_state =
+  PerPathState &current_path_state =
       get_or_create_path_state(raw_log.request_path, current_event_ts);
 
   // --- "New Seen" Tracking Logic ---
   if (current_ip_state.ip_first_seen_timestamp_ms == 0) {
     current_ip_state.ip_first_seen_timestamp_ms = current_event_ts;
     event.is_first_request_from_ip = true;
+    LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_LIFECYCLE,
+        "First request ever seen from IP: " << raw_log.ip_address);
   }
 
   if (current_ip_state.paths_seen_by_ip.find(raw_log.request_path) ==
       current_ip_state.paths_seen_by_ip.end()) {
     event.is_path_new_for_ip = true;
+    LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_LIFECYCLE,
+        "IP " << raw_log.ip_address
+              << " accessed a new path: " << raw_log.request_path);
 
     // Enforce the cap from the configuration to prevent unbounded memory growth
     const size_t path_cap = app_config.tier1.max_unique_paths_stored_per_ip;
-    if (path_cap == 0 || current_ip_state.paths_seen_by_ip.size() < path_cap)
+    if (path_cap == 0 || current_ip_state.paths_seen_by_ip.size() < path_cap) {
       current_ip_state.paths_seen_by_ip.insert(raw_log.request_path);
+    } else {
+      LOG(LogLevel::WARN, LogComponent::ANALYSIS_LIFECYCLE,
+          "Paths seen by IP " << raw_log.ip_address
+                              << " has reached its cap of " << path_cap
+                              << ". Not storing new path.");
+    }
   }
 
   // --- Tier 1 window updates ---
   // Update IP's request timestamp window
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_WINDOW,
+      "Updating request_timestamps_window for IP: " << raw_log.ip_address);
   current_ip_state.request_timestamps_window.add_event(current_event_ts,
                                                        current_event_ts);
   current_ip_state.request_timestamps_window.prune_old_events(
@@ -380,6 +489,10 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     int status = *raw_log.http_status_code;
     const auto &codes = app_config.tier1.failed_login_status_codes;
     if (std::find(codes.begin(), codes.end(), status) != codes.end()) {
+      LOG(LogLevel::TRACE, LogComponent::ANALYSIS_WINDOW,
+          "Detected failed login status "
+              << status << ". Updating failed_login_timestamps_window for IP: "
+              << raw_log.ip_address);
       current_ip_state.failed_login_timestamps_window.add_event(
           current_event_ts, static_cast<uint64_t>(status));
       current_ip_state.failed_login_timestamps_window.prune_old_events(
@@ -391,12 +504,17 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       current_ip_state.failed_login_timestamps_window.get_event_count();
 
   // HTML/Asset request tracking
+  // HTML/Asset request tracking
   RequestType type = get_request_type(raw_log.request_path, app_config.tier1);
   if (type == RequestType::HTML) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_WINDOW,
+        "Request identified as HTML. Updating html_request_timestamps.");
     current_ip_state.html_request_timestamps.add_event(current_event_ts, 1);
     current_ip_state.html_request_timestamps.prune_old_events(
         max_timestamp_seen_);
   } else if (type == RequestType::ASSET) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_WINDOW,
+        "Request identified as ASSET. Updating asset_request_timestamps.");
     current_ip_state.asset_request_timestamps.add_event(current_event_ts, 1);
     current_ip_state.asset_request_timestamps.prune_old_events(
         max_timestamp_seen_);
@@ -407,11 +525,15 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.ip_asset_requests_in_window =
       current_ip_state.asset_request_timestamps.get_event_count();
 
-  if (event.ip_html_requests_in_window > 0)
+  if (event.ip_html_requests_in_window > 0) {
     event.ip_assets_per_html_ratio =
         static_cast<double>(event.ip_asset_requests_in_window) /
         static_cast<double>(event.ip_html_requests_in_window);
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_WINDOW,
+        "Calculated asset/HTML ratio: " << *event.ip_assets_per_html_ratio);
+  }
 
+  // --- Session Tracking ---
   if (app_config.tier1.session_tracking_enabled) {
     std::string session_key = build_session_key(raw_log);
 
@@ -421,9 +543,13 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       if (it == session_trackers.end() ||
           (current_event_ts - it->second.last_seen_timestamp_ms) >
               (app_config.tier1.session_inactivity_ttl_seconds * 1000)) {
-        if (it != session_trackers.end())
+        if (it != session_trackers.end()) {
+          LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_SESSION,
+              "Session " << session_key << " expired. Erasing old state.");
           session_trackers.erase(it);
-
+        }
+        LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_SESSION,
+            "Creating new session for key: " << session_key);
         uint64_t window_duration_ms =
             app_config.tier1.sliding_window_duration_seconds * 1000;
         auto result = session_trackers.emplace(
@@ -435,6 +561,9 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       PerSessionState &session = it->second;
       session.last_seen_timestamp_ms = current_event_ts;
       session.request_count++;
+      LOG(LogLevel::TRACE, LogComponent::ANALYSIS_SESSION,
+          "Updating session " << session_key << ". Request count now "
+                              << session.request_count);
       session.unique_paths_visited.insert(raw_log.request_path);
       session.unique_user_agents.insert(std::string(raw_log.user_agent));
 
@@ -471,25 +600,50 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   // --- Tier 2 historical stats updates ---
   if (raw_log.request_time_s) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
+        "Updating request_time_tracker for IP "
+            << raw_log.ip_address << " with value " << *raw_log.request_time_s);
     current_ip_state.request_time_tracker.update(*raw_log.request_time_s);
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
+        "Updating request_time_tracker for Path " << raw_log.request_path
+                                                  << " with value "
+                                                  << *raw_log.request_time_s);
     current_path_state.request_time_tracker.update(*raw_log.request_time_s);
   }
   if (raw_log.bytes_sent) {
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
+        "Updating bytes_sent_tracker for IP "
+            << raw_log.ip_address << " with value " << *raw_log.bytes_sent);
     current_ip_state.bytes_sent_tracker.update(
         static_cast<double>(*raw_log.bytes_sent));
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
+        "Updating bytes_sent_tracker for Path "
+            << raw_log.request_path << " with value " << *raw_log.bytes_sent);
     current_path_state.bytes_sent_tracker.update(
         static_cast<double>(*raw_log.bytes_sent));
   }
   bool is_error =
       (raw_log.http_status_code && *raw_log.http_status_code >= 400 &&
        *raw_log.http_status_code < 600);
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
+      "Updating error_rate_tracker for IP "
+          << raw_log.ip_address << " with value " << (is_error ? 1.0 : 0.0));
   current_ip_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
+      "Updating error_rate_tracker for Path "
+          << raw_log.request_path << " with value " << (is_error ? 1.0 : 0.0));
   current_path_state.error_rate_tracker.update(is_error ? 1.0 : 0.0);
-
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
+      "Updating request_volume_tracker for Path " << raw_log.request_path
+                                                  << " with value 1.0");
   current_path_state.request_volume_tracker.update(1.0);
 
   double current_requests_in_gen_window = static_cast<double>(
       current_ip_state.request_timestamps_window.get_event_count());
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
+      "Updating requests_in_window_count_tracker for IP "
+          << raw_log.ip_address << " with value "
+          << current_requests_in_gen_window);
   current_ip_state.requests_in_window_count_tracker.update(
       current_requests_in_gen_window);
 
@@ -536,15 +690,22 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   // --- Z-Score calculation logic ---
   const auto &tier2_cfg = app_config.tier2;
   size_t min_samples = tier2_cfg.min_samples_for_z_score;
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_ZSCORE,
+      "Checking Z-score conditions with min_samples = " << min_samples);
 
   // Path Req Time Z-score
   if (raw_log.request_time_s &&
       static_cast<size_t>(
           current_path_state.request_time_tracker.get_count()) >= min_samples) {
     double stddev = *event.path_hist_req_time_stddev;
-    if (stddev > 1e-6)
+    if (stddev > 1e-6) {
       event.path_req_time_zscore =
           (*raw_log.request_time_s - *event.path_hist_req_time_mean) / stddev;
+      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+          "Calculated path_req_time_zscore: " << *event.path_req_time_zscore
+                                              << " for Path "
+                                              << raw_log.request_path);
+    }
   }
 
   // Path Bytes Sent Z-score
@@ -552,10 +713,15 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       static_cast<size_t>(current_path_state.bytes_sent_tracker.get_count()) >=
           min_samples) {
     double stddev = *event.path_hist_bytes_stddev;
-    if (stddev > 1.0)
+    if (stddev > 1.0) {
       event.path_bytes_sent_zscore = (static_cast<double>(*raw_log.bytes_sent) -
                                       *event.path_hist_bytes_mean) /
                                      stddev;
+      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+          "Calculated path_bytes_sent_zscore: " << *event.path_bytes_sent_zscore
+                                                << " for Path "
+                                                << raw_log.request_path);
+    }
   }
 
   // Path Error Event Z-score
@@ -565,9 +731,14 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
         (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
                                                                        : 0.0;
     double stddev = *event.path_hist_error_rate_stddev;
-    if (stddev > 0.01)
+    if (stddev > 0.01) {
       event.path_error_event_zscore =
           (current_error_val - *event.path_hist_error_rate_mean) / stddev;
+      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+          "Calculated path_error_event_zscore: "
+              << *event.path_error_event_zscore << " for Path "
+              << raw_log.request_path);
+    }
   }
 
   // Req Time Z-score
@@ -575,11 +746,15 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       static_cast<size_t>(current_ip_state.request_time_tracker.get_count()) >=
           min_samples) {
     double stddev = current_ip_state.request_time_tracker.get_stddev();
-    if (stddev > 1e-6) // Avoid division by zero
+    if (stddev > 1e-6) {
       event.ip_req_time_zscore =
           (*raw_log.request_time_s -
            current_ip_state.request_time_tracker.get_mean()) /
           stddev;
+      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+          "Calculated ip_req_time_zscore: "
+              << *event.ip_req_time_zscore << " for IP " << raw_log.ip_address);
+    }
   }
 
   // Bytes Sent Z-score
@@ -587,11 +762,16 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       static_cast<size_t>(current_ip_state.bytes_sent_tracker.get_count()) >=
           min_samples) {
     double stddev = current_ip_state.bytes_sent_tracker.get_stddev();
-    if (stddev > 1.0) // Require at least 1 byte of stddev to be meaningful
+    if (stddev > 1.0) {
       event.ip_bytes_sent_zscore =
           (static_cast<double>(*raw_log.bytes_sent) -
            current_ip_state.bytes_sent_tracker.get_mean()) /
           stddev;
+      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+          "Calculated ip_bytes_sent_zscore: " << *event.ip_bytes_sent_zscore
+                                              << " for IP "
+                                              << raw_log.ip_address);
+    }
   }
 
   // Error Event Z-score
@@ -602,10 +782,15 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
                                                                        : 0.0;
     double stddev = current_ip_state.error_rate_tracker.get_stddev();
 
-    if (stddev > 0.01) // Require some variability
+    if (stddev > 0.01) {
       event.ip_error_event_zscore =
           (current_error_val - current_ip_state.error_rate_tracker.get_mean()) /
           stddev;
+      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+          "Calculated ip_error_event_zscore: " << *event.ip_error_event_zscore
+                                               << " for IP "
+                                               << raw_log.ip_address);
+    }
   }
 
   // Request Volume Z-score
@@ -617,11 +802,15 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     double stddev =
         current_ip_state.requests_in_window_count_tracker.get_stddev();
 
-    if (stddev > 0.5) // Require some variabilitu
+    if (stddev > 0.5) {
       event.ip_req_vol_zscore =
           (current_req_vol -
            current_ip_state.requests_in_window_count_tracker.get_mean()) /
           stddev;
+      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+          "Calculated ip_req_vol_zscore: " << *event.ip_req_vol_zscore
+                                           << " for IP " << raw_log.ip_address);
+    }
   }
 
   // --- User-Agent analysis logic ---
@@ -630,12 +819,20 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
                                current_event_ts, max_timestamp_seen_);
 
   // --- Feature extraction for ML ---
-  if (app_config.tier3.enabled || app_config.ml_data_collection_enabled)
+  if (app_config.tier3.enabled || app_config.ml_data_collection_enabled) {
+    LOG(LogLevel::TRACE, LogComponent::ML_FEATURES,
+        "Extracting ML features for event.");
     event.feature_vector = feature_manager_.extract_and_normalize(event);
+  }
 
-  if (data_collector_ && !event.feature_vector.empty())
+  if (data_collector_ && !event.feature_vector.empty()) {
+    LOG(LogLevel::TRACE, LogComponent::ML_FEATURES,
+        "Collecting ML feature vector to file.");
     data_collector_->collect_features(event.feature_vector);
+  }
 
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+      "Exiting process_and_analyze for IP: " << raw_log.ip_address);
   return event;
 }
 

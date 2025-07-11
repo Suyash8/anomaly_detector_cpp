@@ -1,4 +1,7 @@
 #include "syslog_dispatcher.hpp"
+#include "core/alert.hpp"
+#include "core/alert_manager.hpp"
+#include "core/logger.hpp"
 
 #include <sstream>
 #include <syslog.h>
@@ -17,6 +20,8 @@ void SyslogDispatcher::dispatch(const Alert &alert) {
      << " | "
      << "Score: " << alert.normalized_score;
 
+  LOG(LogLevel::TRACE, LogComponent::IO_DISPATCH,
+      "Dispatching alert to syslog: " << ss.str());
   // LOG_WARNING is a standard syslog level
   syslog(LOG_WARNING, "%s", ss.str().c_str());
 }

@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "logger.hpp"
 #include "utils/utils.hpp"
 
 #include <algorithm>
@@ -18,6 +19,46 @@ namespace Config {
 
 AppConfig GlobalAppConfig;
 
+LogLevel string_to_log_level(const std::string &level_str_raw) {
+  std::string level_str = Utils::trim_copy(level_str_raw);
+  std::transform(level_str.begin(), level_str.end(), level_str.begin(),
+                 ::toupper);
+  if (level_str == "TRACE")
+    return LogLevel::TRACE;
+  if (level_str == "DEBUG")
+    return LogLevel::DEBUG;
+  if (level_str == "INFO")
+    return LogLevel::INFO;
+  if (level_str == "WARN")
+    return LogLevel::WARN;
+  if (level_str == "ERROR")
+    return LogLevel::ERROR;
+  if (level_str == "FATAL")
+    return LogLevel::FATAL;
+  return LogLevel::INFO; // A safe default
+}
+
+const std::map<std::string, LogComponent> key_to_component_map = {
+    {"core", LogComponent::CORE},
+    {"config", LogComponent::CONFIG},
+    {"io.reader", LogComponent::IO_READER},
+    {"io.dispatch", LogComponent::IO_DISPATCH},
+    {"io.threatintel", LogComponent::IO_THREATINTEL},
+    {"analysis.lifecycle", LogComponent::ANALYSIS_LIFECYCLE},
+    {"analysis.window", LogComponent::ANALYSIS_WINDOW},
+    {"analysis.stats", LogComponent::ANALYSIS_STATS},
+    {"analysis.zscore", LogComponent::ANALYSIS_ZSCORE},
+    {"analysis.session", LogComponent::ANALYSIS_SESSION},
+    {"rules.eval", LogComponent::RULES_EVAL},
+    {"rules.t1", LogComponent::RULES_T1_HEURISTIC},
+    {"rules.t2", LogComponent::RULES_T2_STATISTICAL},
+    {"rules.t3", LogComponent::RULES_T3_ML},
+    {"ml.features", LogComponent::ML_FEATURES},
+    {"ml.inference", LogComponent::ML_INFERENCE},
+    {"ml.lifecycle", LogComponent::ML_LIFECYCLE},
+    {"state.persist", LogComponent::STATE_PERSIST},
+    {"state.prune", LogComponent::STATE_PRUNE}};
+
 // Convert string to boolean using common truthy values
 bool string_to_bool(std::string &val_str_raw) {
   std::string val_str = Utils::trim_copy(val_str_raw);
@@ -27,6 +68,13 @@ bool string_to_bool(std::string &val_str_raw) {
 }
 
 bool parse_config_into(const std::string &filepath, AppConfig &config) {
+  // By default, everything is set to a high level (WARN)
+  for (const auto &pair : key_to_component_map) {
+    config.logging.log_levels[pair.second] = LogLevel::WARN;
+  }
+  // Except for CORE, which we want to see INFO messages from by default
+  config.logging.log_levels[LogComponent::CORE] = LogLevel::INFO;
+
   std::cout << "Attempting to load configuration from " << filepath
             << std::endl;
   std::ifstream config_file(filepath);
@@ -359,6 +407,30 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.mongo_log_source.collection = value;
         else if (key == Keys::MO_TIMESTAMP_FIELD_NAME)
           config.mongo_log_source.timestamp_field_name = value;
+
+        // Logging Settings
+      } else if (current_section == "Logging") {
+        if (key == Keys::LOGGING_DEFAULT_LEVEL) {
+          LogLevel default_level = string_to_log_level(value);
+          for (auto &pair : config.logging.log_levels)
+            pair.second = default_level;
+        } else {
+          auto comp_it = key_to_component_map.find(key);
+          if (comp_it != key_to_component_map.end())
+            config.logging.log_levels[comp_it->second] =
+                string_to_log_level(value);
+          else if (key.length() > 2 && key.substr(key.length() - 2) == ".*") {
+            // Wildcard match, e.g., "analysis.* = DEBUG"
+            std::string prefix = key.substr(0, key.length() - 1);
+            for (const auto &pair : key_to_component_map) {
+              if (component_to_string(pair.second) != nullptr &&
+                  std::string(component_to_string(pair.second))
+                          .rfind(prefix, 0) == 0)
+                config.logging.log_levels[pair.second] =
+                    string_to_log_level(value);
+            }
+          }
+        }
       }
     } catch (const std::invalid_argument &e) {
       std::cerr << "Warning (Config Line " << line_num

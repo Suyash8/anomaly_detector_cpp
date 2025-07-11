@@ -1,6 +1,7 @@
 #include "mongo_log_reader.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
+#include "core/logger.hpp"
 #include "io/db/mongo_manager.hpp"
 
 #include <bsoncxx/builder/basic/kvp.hpp>
@@ -31,9 +32,9 @@ MongoLogReader::MongoLogReader(std::shared_ptr<MongoManager> manager,
     : mongo_manager_(manager), config_(config),
       reader_state_path_(reader_state_path) {
   load_state();
-  std::cout
-      << "MongoLogReader initialized. Will start reading logs after timestamp: "
-      << last_processed_timestamp_ms_ << std::endl;
+  LOG(LogLevel::INFO, LogComponent::IO_READER,
+      "MongoLogReader initialized. Will start reading logs after timestamp: "
+          << last_processed_timestamp_ms_);
 }
 
 MongoLogReader::~MongoLogReader() { save_state(); }
@@ -43,9 +44,8 @@ void MongoLogReader::load_state() {
   if (state_file.is_open())
     state_file >> last_processed_timestamp_ms_;
   else {
-    std::cout
-        << "No reader state file found. Will process logs from the beginning."
-        << std::endl;
+    LOG(LogLevel::INFO, LogComponent::IO_READER,
+        "No reader state file found. Will process logs from the beginning.");
     last_processed_timestamp_ms_ = 0;
   }
 }
@@ -55,8 +55,8 @@ void MongoLogReader::save_state() const {
   if (state_file.is_open())
     state_file << last_processed_timestamp_ms_;
   else
-    std::cerr << "Error: Could not save reader state to " << reader_state_path_
-              << std::endl;
+    LOG(LogLevel::ERROR, LogComponent::IO_READER,
+        "Error: Could not save reader state to " << reader_state_path_);
 }
 
 std::optional<LogEntry>
@@ -83,9 +83,15 @@ MongoLogReader::bson_to_log_entry(const bsoncxx::document::view &doc) {
   line += '|' + std::string(get_string("country"));   // 11 country_code
   line += '|' + std::string(get_string("upstream"));  // 12 upstream_addr
   line += '|' + std::string(get_string("requestid")); // 13 x_request_id
-  line += '|' + std::string("-");
 
-  return LogEntry::parse_from_string(std::move(line), 0, false);
+  LOG(LogLevel::TRACE, LogComponent::IO_READER,
+      "Parsed log entry from BSON: " << line);
+
+  auto entry = LogEntry::parse_from_string(std::move(line), 0, false);
+  LOG(LogLevel::TRACE, LogComponent::IO_READER,
+      "Converted BSON to LogEntry successfully");
+
+  return entry;
 }
 
 std::vector<LogEntry> MongoLogReader::get_next_batch() {
@@ -93,6 +99,17 @@ std::vector<LogEntry> MongoLogReader::get_next_batch() {
   try {
     auto client = mongo_manager_->get_client();
     auto collection = (*client)[config_.database][config_.collection];
+
+    LOG(LogLevel::TRACE, LogComponent::IO_READER,
+        "Initiating MongoDB query for log entries after timestamp: "
+            << last_processed_timestamp_ms_);
+
+    LOG(LogLevel::TRACE, LogComponent::IO_READER,
+        "MongoDB query parameters: "
+            << "Database: " << config_.database
+            << ", Collection: " << config_.collection
+            << ", Timestamp field: " << config_.timestamp_field_name
+            << ", Last processed timestamp: " << last_processed_timestamp_ms_);
 
     bsoncxx::builder::basic::document filter_builder{};
 
@@ -127,6 +144,9 @@ std::vector<LogEntry> MongoLogReader::get_next_batch() {
             latest_ts_in_batch = *(batch.back().parsed_timestamp_ms);
         }
     }
+
+    LOG(LogLevel::DEBUG, LogComponent::IO_READER,
+        "Fetched a batch of " << batch.size() << " log entries from MongoDB.");
 
     if (latest_ts_in_batch > last_processed_timestamp_ms_) {
       last_processed_timestamp_ms_ = latest_ts_in_batch;

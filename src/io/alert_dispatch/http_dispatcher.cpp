@@ -1,9 +1,9 @@
 #include "io/alert_dispatch/http_dispatcher.hpp"
+#include "core/logger.hpp"
 #include "http_dispatcher.hpp"
 #include "httplib.h"
 #include "utils/json_formatter.hpp"
 
-#include <iostream>
 #include <regex>
 
 HttpDispatcher::HttpDispatcher(const std::string &webhook_url) {
@@ -20,10 +20,14 @@ HttpDispatcher::HttpDispatcher(const std::string &webhook_url) {
     host_ = match[2].str();
     path_ = match[3].matched ? match[3].str() : "/";
     is_https_ = (protocol == "https");
+    LOG(LogLevel::TRACE, LogComponent::IO_DISPATCH,
+        "HttpDispatcher initialized with URL: "
+            << webhook_url << " | Host: " << host_ << " | Path: " << path_
+            << " | Protocol: " << (is_https_ ? "HTTPS" : "HTTP"));
   } else {
-    std::cerr
-        << "Error: Invalid webhook URL format provided to HttpDispatcher: "
-        << webhook_url << std::endl;
+    LOG(LogLevel::ERROR, LogComponent::IO_DISPATCH,
+        "Invalid webhook URL format provided to HttpDispatcher: "
+            << webhook_url);
     // Set a default state to prevent crashes
     host_.clear();
     path_.clear();
@@ -33,6 +37,8 @@ HttpDispatcher::HttpDispatcher(const std::string &webhook_url) {
 void HttpDispatcher::dispatch(const Alert &alert) {
   // If the URL was invalid during construction, don't try to send
   if (host_.empty() || path_.empty()) {
+    LOG(LogLevel::ERROR, LogComponent::IO_DISPATCH,
+        "Cannot dispatch alert: Invalid host or path in HttpDispatcher.");
     return;
   }
 
@@ -50,12 +56,12 @@ void HttpDispatcher::dispatch(const Alert &alert) {
     auto res = client.Post(path_.c_str(), json_body, "application/json");
 
     if (!res || res->status >= 400) {
-      std::cerr << "Error: Failed to dispatch alert via HTTP to "
-                << (is_https_ ? "https://" : "http://") << host_ << path_;
-      if (res) {
-        std::cerr << " | Status: " << res->status;
-      }
-      std::cerr << std::endl;
+      LOG(LogLevel::ERROR, LogComponent::IO_DISPATCH,
+          "Failed to dispatch alert via HTTP to "
+              << (is_https_ ? "https://" : "http://") << host_ << path_
+              << " | Status: "
+              << (res ? std::to_string(res->status) : "No response")
+              << " | Body: " << (res ? res->body : "No response body"));
     }
   };
 
