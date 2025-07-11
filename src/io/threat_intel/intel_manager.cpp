@@ -1,4 +1,5 @@
 #include "intel_manager.hpp"
+#include "core/logger.hpp"
 #include "httplib.h"
 #include "utils/utils.hpp"
 
@@ -16,9 +17,8 @@ IntelManager::IntelManager(const std::vector<std::string> &feed_urls,
                            uint32_t update_interval_seconds)
     : feed_urls_(feed_urls), update_interval_seconds_(update_interval_seconds),
       ip_blacklist_(std::make_unique<std::unordered_set<uint32_t>>()) {
-  std::cout
-      << "IntelManager created. Starting background thread for feed updates."
-      << std::endl;
+  LOG(LogLevel::INFO, LogComponent::IO_THREATINTEL,
+      "IntelManager created. Starting background thread for feed updates.");
   // Initial fetch on startup
   update_feeds();
 
@@ -27,14 +27,15 @@ IntelManager::IntelManager(const std::vector<std::string> &feed_urls,
 }
 
 IntelManager::~IntelManager() {
-  std::cout << "Shutting down IntelManager..." << std::endl;
+  LOG(LogLevel::INFO, LogComponent::IO_THREATINTEL,
+      "Shutting down IntelManager...");
   shutdown_flag_ = true;
   cv_.notify_one();
 
   if (background_thread_.joinable())
     background_thread_.join();
 
-  std::cout << "IntelManager shut down." << std::endl;
+  LOG(LogLevel::INFO, LogComponent::IO_THREATINTEL, "IntelManager shut down.");
 }
 
 bool IntelManager::is_blacklisted(uint32_t ip) const {
@@ -53,8 +54,8 @@ void IntelManager::background_thread_func() {
     if (shutdown_flag_)
       break;
 
-    std::cout << "IntelManager: Running periodic threat feed update..."
-              << std::endl;
+    LOG(LogLevel::INFO, LogComponent::IO_THREATINTEL,
+        "IntelManager: Running periodic threat feed update...");
     update_feeds();
   }
 }
@@ -66,8 +67,8 @@ void IntelManager::update_feeds() {
     std::regex url_regex(R"(^(https?):\/\/([^\/]+)(\/.*)?$)");
     std::smatch match;
     if (!std::regex_match(url_str, match, url_regex)) {
-      std::cerr << "IntelManager: Skipping invalid feed URL: " << url_str
-                << std::endl;
+      LOG(LogLevel::WARN, LogComponent::IO_THREATINTEL,
+          "IntelManager: Skipping invalid feed URL: " + url_str);
       continue;
     }
     std::string host = match[2].str();
@@ -90,14 +91,14 @@ void IntelManager::update_feeds() {
             new_blacklist->insert(ip);
           }
         }
-        std::cout << "  -> Fetched " << (new_blacklist->size() - count_before)
-                  << " IPs from " << url_str << std::endl;
+        LOG(LogLevel::INFO, LogComponent::IO_THREATINTEL,
+            "Fetched " << std::to_string(new_blacklist->size() - count_before)
+                       << " IPs from " << url_str);
       } else {
-        std::cerr << "IntelManager: Failed to fetch feed from " << url_str;
-        if (res) {
-          std::cerr << " | Status: " << res->status;
-        }
-        std::cerr << std::endl;
+        LOG(LogLevel::ERROR, LogComponent::IO_THREATINTEL,
+            "IntelManager: Failed to fetch feed from "
+                << url_str
+                << (res ? " | Status: " + std::to_string(res->status) : ""));
       }
     };
 
@@ -119,7 +120,7 @@ void IntelManager::update_feeds() {
     if (ip_blacklist_)
       final_count = ip_blacklist_->size();
   }
-  std::cout << "IntelManager: Threat intelligence feeds updated. Total "
-               "blacklisted IPs: "
-            << final_count << std::endl;
+  LOG(LogLevel::INFO, LogComponent::IO_THREATINTEL,
+      "IntelManager: Threat intelligence feeds updated. Total blacklisted IPs: "
+          << final_count);
 }

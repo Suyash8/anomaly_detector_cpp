@@ -4,6 +4,7 @@
 #include "config.hpp"
 
 #include <iomanip>
+#include <iostream>
 #include <map>
 
 // Enum for standard log severity levels
@@ -19,6 +20,7 @@ enum class LogComponent {
   IO_READER,
   IO_DISPATCH,
   IO_THREATINTEL,
+  IO_DATABASE,
 
   // Analysis sub-components
   ANALYSIS_LIFECYCLE,
