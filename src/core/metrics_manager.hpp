@@ -11,19 +11,24 @@
 // Forward declaration
 class MetricsManager;
 
-struct Counter {
+using MetricLabels = std::map<std::string, std::string>;
+
+struct LabeledCounter {
   friend class MetricsManager;
-  void increment(uint64_t value = 1) {
-    val.fetch_add(value, std::memory_order_relaxed);
-  }
-  uint64_t get_value() const { return val.load(std::memory_order_relaxed); }
+  void increment(const MetricLabels &labels, uint64_t value = 1);
 
 private:
-  Counter(std::string name, std::string help)
-      : name(std::move(name)), help(std::move(help)), val(0) {}
+  LabeledCounter(std::string name, std::string help)
+      : name(std::move(name)), help(std::move(help)) {}
+
+  struct Series {
+    std::atomic<uint64_t> val{0};
+  };
+
   std::string name;
   std::string help;
-  std::atomic<uint64_t> val;
+  std::map<MetricLabels, std::unique_ptr<Series>> series_;
+  mutable std::mutex series_mutex_;
 };
 
 struct Gauge {
@@ -68,8 +73,8 @@ public:
   MetricsManager(const MetricsManager &) = delete;
   void operator=(const MetricsManager &) = delete;
 
-  Counter *register_counter(const std::string &name,
-                            const std::string &help_text);
+  LabeledCounter *register_labeled_counter(const std::string &name,
+                                           const std::string &help_text);
   Gauge *register_gauge(const std::string &name, const std::string &help_text);
   Histogram *register_histogram(const std::string &name,
                                 const std::string &help_text);
@@ -80,7 +85,7 @@ private:
   MetricsManager() = default;
   ~MetricsManager() = default;
 
-  std::map<std::string, std::unique_ptr<Counter>> counters_;
+  std::map<std::string, std::unique_ptr<LabeledCounter>> labeled_counters_;
   std::map<std::string, std::unique_ptr<Gauge>> gauges_;
   std::map<std::string, std::unique_ptr<Histogram>> histograms_;
   std::mutex registry_mutex_;

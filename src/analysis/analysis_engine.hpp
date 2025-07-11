@@ -29,6 +29,10 @@ public:
   void reconfigure(const Config::AppConfig &new_config);
   void reset_in_memory_state();
 
+  size_t get_ip_state_count() const { return ip_activity_trackers.size(); }
+  size_t get_path_state_count() const { return path_activity_trackers.size(); }
+  size_t get_session_state_count() const { return session_trackers.size(); }
+
 private:
   Config::AppConfig app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;

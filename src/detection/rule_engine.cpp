@@ -9,6 +9,7 @@
 #include "models/model_manager.hpp"
 #include "rules/scoring.hpp"
 #include "utils/aho_corasick.hpp"
+#include "utils/scoped_timer.hpp"
 #include "utils/sliding_window.hpp"
 #include "utils/utils.hpp"
 
@@ -67,6 +68,12 @@ RuleEngine::RuleEngine(AlertManager &manager, const Config::AppConfig &cfg,
 RuleEngine::~RuleEngine() {}
 
 void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
+  static Histogram *evaluation_timer =
+      MetricsManager::instance().register_histogram(
+          "ad_rule_engine_evaluation_duration_seconds",
+          "Latency of the entire RuleEngine::evaluate_rules function.");
+  ScopedTimer timer(*evaluation_timer);
+
   LOG(LogLevel::TRACE, LogComponent::RULES_EVAL,
       "Entering evaluate_rules for IP: " << event_ref.raw_log.ip_address);
 
@@ -207,6 +214,15 @@ void RuleEngine::create_and_record_alert(const AnalyzedEvent &event,
                                          std::string_view action_str,
                                          double score,
                                          std::string_view key_id) {
+  static LabeledCounter *alerts_counter =
+      MetricsManager::instance().register_labeled_counter(
+          "ad_alerts_generated_total",
+          "Total number of alerts generated, partitioned by tier and reason.");
+
+  alerts_counter->increment(
+      {{"tier", alert_tier_to_string_representation(tier)},
+       {"reason", std::string(reason)}});
+
   if (score <= 0.0) {
     LOG(LogLevel::TRACE, LogComponent::RULES_EVAL,
         "Score is <= 0.0, not creating alert for reason: " << reason);

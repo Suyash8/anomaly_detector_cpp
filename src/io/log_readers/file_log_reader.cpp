@@ -1,6 +1,7 @@
 #include "file_log_reader.hpp"
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
+#include "utils/scoped_timer.hpp"
 
 #include <iostream>
 #include <string>
@@ -28,6 +29,12 @@ FileLogReader::~FileLogReader() {
 bool FileLogReader::is_open() const { return log_file_stream_.is_open(); }
 
 std::vector<LogEntry> FileLogReader::get_next_batch() {
+  static Histogram *batch_fetch_timer =
+      MetricsManager::instance().register_histogram(
+          "ad_log_reader_batch_fetch_duration_seconds{type=\"file\"}",
+          "Latency of fetching a batch from a file source.");
+  ScopedTimer timer(*batch_fetch_timer);
+
   std::vector<LogEntry> batch;
   if (!is_open()) {
     LOG(LogLevel::ERROR, LogComponent::IO_READER,
