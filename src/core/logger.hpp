@@ -124,6 +124,8 @@ inline const char *component_to_string(LogComponent component) {
     return "IO.DISPATCH";
   case LogComponent::IO_THREATINTEL:
     return "IO.THREATINTEL";
+  case LogComponent::IO_DATABASE:
+    return "IO.DATABASE";
   case LogComponent::ANALYSIS_LIFECYCLE:
     return "ANALYSIS.LIFECYCLE";
   case LogComponent::ANALYSIS_WINDOW:
