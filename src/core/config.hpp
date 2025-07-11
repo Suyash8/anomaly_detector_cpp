@@ -3,11 +3,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+enum class LogLevel;
+enum class LogComponent;
 
 namespace Config {
 
@@ -119,7 +123,14 @@ constexpr const char *MO_URI = "uri";
 constexpr const char *MO_DATABASE = "database";
 constexpr const char *MO_COLLECTION = "collection";
 constexpr const char *MO_TIMESTAMP_FIELD_NAME = "timestamp_field_name";
+
+// Logging Settings
+constexpr const char *LOGGING_DEFAULT_LEVEL = "default_level";
 } // namespace Keys
+
+struct LoggingConfig {
+  std::map<LogComponent, LogLevel> log_levels;
+};
 
 struct Tier1Config {
   bool enabled = true;
@@ -231,6 +242,7 @@ struct AppConfig {
   AlertingConfig alerting;
   ThreatIntelConfig threat_intel;
   MongoLogSourceConfig mongo_log_source;
+  LoggingConfig logging;
 
   bool ml_data_collection_enabled = false;
   std::string ml_data_collection_path = "data/training_features.csv";
