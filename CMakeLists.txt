@@ -23,11 +23,13 @@ file(GLOB_RECURSE CORE_SOURCES
     "src/analysis/*.cpp"
     "src/core/*.cpp"
     "src/detection/*.cpp"
+    "src/detection/rules/*.cpp"
     "src/io/*.cpp"
     "src/io/alert_dispatch/*.cpp"
     "src/io/db/*.cpp"
     "src/io/log_readers/*.cpp"
     "src/io/threat_intel/*.cpp"
+    "src/io/web/*.cpp"
     "src/models/*.cpp"
     "src/utils/*.cpp"
 )

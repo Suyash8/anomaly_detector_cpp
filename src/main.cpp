@@ -3,11 +3,13 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
+#include "core/metrics_manager.hpp"
 #include "detection/rule_engine.hpp"
 #include "io/db/mongo_manager.hpp"
 #include "io/log_readers/base_log_reader.hpp"
 #include "io/log_readers/file_log_reader.hpp"
 #include "io/log_readers/mongo_log_reader.hpp"
+#include "io/web/web_server.hpp"
 #include "models/model_manager.hpp"
 
 #include <atomic>
@@ -150,6 +152,13 @@ int main(int argc, char *argv[]) {
             << "  Ctrl+P:          Pause Processing\n"
             << "  Ctrl+Q:          Resume Processing\n\n";
 
+  WebServer web_server("0.0.0.0", 9090, MetricsManager::instance());
+  web_server.start();
+
+  auto *logs_processed_counter = MetricsManager::instance().register_counter(
+      "ad_logs_processed_total",
+      "Total number of log entries processed since startup.");
+
   Config::ConfigManager config_manager;
   std::string config_file_to_load = "config.ini";
   if (argc > 1)
@@ -277,6 +286,7 @@ int main(int argc, char *argv[]) {
       if (!log_batch.empty()) {
         for (auto log_entry : log_batch) {
           total_processed_count++;
+          logs_processed_counter->increment();
 
           if (log_entry.successfully_parsed_structure) {
             auto analyzed_event =
@@ -352,6 +362,8 @@ int main(int argc, char *argv[]) {
 #endif
     keyboard_thread.join();
   }
+
+  web_server.stop();
 
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Processing finished or shutdown signal received.");
