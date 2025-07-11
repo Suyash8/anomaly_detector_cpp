@@ -1,118 +1,205 @@
 #include "models/model_manager.hpp"
+#include "core/logger.hpp" // NEW: Include the logger
 #include "models/onnx_model.hpp"
+#include <chrono> // NEW: Include for chrono literals
 #include <cstdio>
 #include <cstdlib>
-#include <iostream>
 
 ModelManager::ModelManager(const Config::AppConfig &config) : config_(config) {
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE, "ModelManager created.");
   // Initial load of the model
   if (config_.tier3.enabled) {
+    LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+        "Tier 3 is enabled. Attempting to load initial ONNX model.");
     try {
       active_model_ = std::make_unique<ONNXModel>(
           config_.tier3.model_path, config_.tier3.model_metadata_path);
-    } catch (...) { /* Error already logged by ONNXModel constructor */
+      if (active_model_) {
+        LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+            "Initial model loaded successfully.");
+      } else {
+        LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+            "Initial model failed to load. Tier 3 will be inactive.");
+        active_model_.reset();
+      }
+    } catch (const std::exception &e) {
+      LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+          "Exception caught during initial model load: " << e.what());
+      // Error is already logged by ONNXModel constructor
     }
+  } else {
+    LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+        "Tier 3 is disabled. No model will be loaded.");
   }
 
   // Start background thread if retraining is enabled
   if (config_.tier3.automated_retraining_enabled) {
+    LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+        "Automated retraining is enabled. Starting background thread.");
     background_thread_ =
         std::thread(&ModelManager::background_thread_func, this);
+  } else {
+    LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+        "Automated retraining is disabled.");
   }
 }
 
 ModelManager::~ModelManager() {
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+      "Shutting down ModelManager...");
   if (background_thread_.joinable()) {
     shutdown_flag_ = true;
     cv_.notify_one();
     background_thread_.join();
+    LOG(LogLevel::DEBUG, LogComponent::ML_LIFECYCLE,
+        "Background retraining thread joined successfully.");
   }
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE, "ModelManager shut down.");
 }
 
 void ModelManager::background_thread_func() {
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+      "Background retraining thread started. Waiting for initial interval.");
   while (!shutdown_flag_) {
     std::unique_lock<std::mutex> lock(cv_mutex_);
+
+    using namespace std::chrono_literals;
+    auto wait_duration =
+        std::chrono::seconds(config_.tier3.retraining_interval_seconds);
+    LOG(LogLevel::DEBUG, LogComponent::ML_LIFECYCLE,
+        "Retraining thread now sleeping for "
+            << config_.tier3.retraining_interval_seconds << " seconds.");
+
     // Sleep for the configured interval, but allow shutdown to interrupt it
-    if (cv_.wait_for(
-            lock,
-            std::chrono::seconds(config_.tier3.retraining_interval_seconds),
-            [this] { return shutdown_flag_.load(); })) {
+    if (cv_.wait_for(lock, wait_duration,
+                     [this] { return shutdown_flag_.load(); })) {
+      LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+          "Shutdown requested, exiting retraining thread sleep.");
       break; // Shutdown was requested
     }
 
-    std::cout << "[ModelManager] Kicking off scheduled model retraining..."
-              << std::endl;
+    // If we are here, the timer expired naturally.
+    if (shutdown_flag_)
+      break;
+
+    LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+        "Scheduled retraining interval elapsed. Kicking off model "
+        "retraining...");
     attempt_retrain_and_swap();
   }
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+      "Background retraining thread finished.");
 }
 
 void ModelManager::attempt_retrain_and_swap() {
+  LOG(LogLevel::TRACE, LogComponent::ML_LIFECYCLE,
+      "Entering attempt_retrain_and_swap.");
+
   // 1. Trigger the Python training script
   // Note: A more robust solution might use python-C-API, but std::system is
   // simplest for this scope.
   std::string command = "python3 " + config_.tier3.training_script_path;
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+      "Executing training script with command: " << command);
   int result = std::system(command.c_str());
 
   if (result != 0) {
-    std::cerr << "[ModelManager] Python training script failed with exit code: "
-              << result << std::endl;
+    LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+        "Python training script failed with non-zero exit code: "
+            << result << ". Aborting model swap.");
+    return;
+  }
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+      "Python training script completed successfully.");
+
+  // 2. Define paths for the new model. The script is expected to have
+  // overwritten the original files. We rename the newly created files to
+  // temporary names to attempt a safe load.
+  std::string original_model_path = config_.tier3.model_path;
+  std::string original_metadata_path = config_.tier3.model_metadata_path;
+
+  std::string temp_model_path = original_model_path + ".new";
+  std::string temp_metadata_path = original_metadata_path + ".new";
+
+  LOG(LogLevel::DEBUG, LogComponent::ML_LIFECYCLE,
+      "Renaming new model " << original_model_path << " to "
+                            << temp_model_path);
+  if (std::rename(original_model_path.c_str(), temp_model_path.c_str()) != 0) {
+    LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+        "Failed to rename new model file. Aborting swap.");
     return;
   }
 
-  // 2. Define paths for the new model
-  std::string new_model_path = config_.tier3.model_path + ".new";
-  std::string new_metadata_path = config_.tier3.model_metadata_path + ".new";
+  LOG(LogLevel::DEBUG, LogComponent::ML_LIFECYCLE,
+      "Renaming new metadata " << original_metadata_path << " to "
+                               << temp_metadata_path);
+  if (std::rename(original_metadata_path.c_str(), temp_metadata_path.c_str()) !=
+      0) {
+    LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+        "Failed to rename new metadata file. Cleaning up and aborting swap.");
+    std::rename(temp_model_path.c_str(),
+                original_model_path.c_str()); // Put the model file back
+    return;
+  }
 
-  // The script should save to the primary paths, so we rename them to our .new
-  // temp paths
-  std::rename(config_.tier3.model_path.c_str(), new_model_path.c_str());
-  std::rename(config_.tier3.model_metadata_path.c_str(),
-              new_metadata_path.c_str());
-
-  // 3. Attempt to load the new model
-  std::cout << "[ModelManager] Attempting to load newly trained model..."
-            << std::endl;
+  // 3. Attempt to load the new model from the temporary paths
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+      "Attempting to load newly trained model from temporary files...");
   try {
     auto new_model =
-        std::make_shared<ONNXModel>(new_model_path, new_metadata_path);
+        std::make_shared<ONNXModel>(temp_model_path, temp_metadata_path);
+
     if (new_model && new_model->is_ready()) {
-      // 4. Hot-swap the active model
+      LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+          "New model loaded successfully from temporary files. Proceeding to "
+          "hot-swap.");
+      // 4. Hot-swap the active model pointer
       {
         std::lock_guard<std::mutex> lock(model_mutex_);
         active_model_ = new_model;
+        LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+            "Model hot-swap complete. New model is now active.");
       }
 
-      // 5. Promote the new files and clean up old
-      std::cout << "[ModelManager] New model hot-swapped successfully. "
-                   "Promoting new model files."
-                << std::endl;
-      std::rename(new_model_path.c_str(), config_.tier3.model_path.c_str());
-      std::rename(new_metadata_path.c_str(),
-                  config_.tier3.model_metadata_path.c_str());
+      // 5. Promote the new files by renaming them back to the original paths
+      LOG(LogLevel::DEBUG, LogComponent::ML_LIFECYCLE,
+          "Promoting new model files to primary paths.");
+      std::rename(temp_model_path.c_str(), original_model_path.c_str());
+      std::rename(temp_metadata_path.c_str(), original_metadata_path.c_str());
+
     } else {
-      std::cerr << "[ModelManager] Newly trained model failed to load. "
-                   "Reverting to old model."
-                << std::endl;
-      std::remove(new_model_path.c_str());
-      std::remove(new_metadata_path.c_str());
+      LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+          "Newly trained model failed to load or is not ready. Reverting to "
+          "old model.");
+      std::remove(temp_model_path.c_str());
+      std::remove(temp_metadata_path.c_str());
     }
-  } catch (...) {
-    std::cerr
-        << "[ModelManager] Exception caught while loading new model. Reverting."
-        << std::endl;
-    std::remove(new_model_path.c_str());
-    std::remove(new_metadata_path.c_str());
+  } catch (const std::exception &e) {
+    LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+        "Exception caught while loading new model: " << e.what()
+                                                     << ". Reverting.");
+    std::remove(temp_model_path.c_str());
+    std::remove(temp_metadata_path.c_str());
   }
 }
 
 std::shared_ptr<IAnomalyModel> ModelManager::get_active_model() const {
+  LOG(LogLevel::TRACE, LogComponent::ML_LIFECYCLE,
+      "get_active_model called, acquiring lock...");
   std::lock_guard<std::mutex> lock(model_mutex_);
+  LOG(LogLevel::TRACE, LogComponent::ML_LIFECYCLE,
+      "get_active_model returning model pointer.");
   return active_model_;
 }
 
 void ModelManager::reconfigure(const Config::AppConfig &new_config) {
+  LOG(LogLevel::TRACE, LogComponent::ML_LIFECYCLE,
+      "reconfigure called, acquiring lock...");
   std::lock_guard<std::mutex> lock(model_mutex_);
   config_ = new_config;
+  LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+      "ModelManager reconfigured. Note: Retraining interval changes require an "
+      "application restart.");
   // Logic to restart the thread if interval changes could go here
   // For now, a full app restart is needed to change the timer
 }

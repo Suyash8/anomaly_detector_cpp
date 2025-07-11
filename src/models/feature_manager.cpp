@@ -1,11 +1,17 @@
 #include "feature_manager.hpp"
+#include "core/logger.hpp"
 #include "features.hpp"
 
 #include <cstddef>
+#include <sstream>
 #include <vector>
 
 std::vector<double>
 FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
+  LOG(LogLevel::TRACE, LogComponent::ML_FEATURES,
+      "Entering extract_and_normalize for event on line "
+          << event.raw_log.original_line_number);
+
   // Initialize a vector of the correct size with all zeros
   std::vector<double> features(static_cast<size_t>(Feature::FEATURE_COUNT),
                                0.0);
@@ -59,6 +65,8 @@ FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
   // --- Session Features ---
   // Safely check if session context exists before trying to access it
   if (event.raw_session_state) {
+    LOG(LogLevel::TRACE, LogComponent::ML_FEATURES,
+        "Extracting features from session context.");
     const auto &session_raw = *event.raw_session_state;
 
     // --- Session-Centric Raw Features ---
@@ -95,9 +103,34 @@ FeatureManager::extract_and_normalize(const AnalyzedEvent &event) {
     }
   }
 
+  // Log raw features before normalization for debugging
+  if (LogManager::instance().should_log(LogLevel::TRACE,
+                                        LogComponent::ML_FEATURES)) {
+    std::ostringstream ss;
+    ss << "Raw feature vector: [";
+    for (size_t i = 0; i < features.size(); ++i) {
+      ss << features[i] << (i == features.size() - 1 ? "" : ", ");
+    }
+    ss << "]";
+    LOG(LogLevel::TRACE, LogComponent::ML_FEATURES, ss.str());
+  }
+
   // --- Final Normalization Step ---
-  for (double &feature : features)
+  for (double &feature : features) {
     feature = normalize(feature);
+  }
+
+  // Log normalized features for debugging
+  if (LogManager::instance().should_log(LogLevel::TRACE,
+                                        LogComponent::ML_FEATURES)) {
+    std::ostringstream ss;
+    ss << "Normalized feature vector: [";
+    for (size_t i = 0; i < features.size(); ++i) {
+      ss << features[i] << (i == features.size() - 1 ? "" : ", ");
+    }
+    ss << "]";
+    LOG(LogLevel::TRACE, LogComponent::ML_FEATURES, ss.str());
+  }
 
   return features;
 }
