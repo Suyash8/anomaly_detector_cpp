@@ -2,6 +2,7 @@
 #include "core/alert_manager.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
+#include "core/logger.hpp"
 #include "detection/rule_engine.hpp"
 #include "io/db/mongo_manager.hpp"
 #include "io/log_readers/base_log_reader.hpp"
@@ -127,8 +128,6 @@ int main(int argc, char *argv[]) {
   std::ios_base::sync_with_stdio(false); // Potentially faster I/O
   std::cin.tie(nullptr);                 // Untie cin from cout
 
-  std::cout << "Starting Anomaly Detection Engine..." << std::endl;
-
   // Register all signal handlers
   struct sigaction action;
   action.sa_handler = signal_handler;
@@ -160,6 +159,13 @@ int main(int argc, char *argv[]) {
   auto current_config = config_manager.get_config();
   auto model_manager = std::make_shared<ModelManager>(*current_config);
 
+  LogManager::instance().configure(current_config->logging);
+
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Anomaly Detection Engine starting up...");
+#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+  LOG(LogLevel::DEBUG, LogComponent::CORE, "PID: " << getpid());
+#endif
   // --- Initialize Core Components ---
   AlertManager alert_manager_instance;
   alert_manager_instance.initialize(*current_config);
@@ -171,12 +177,16 @@ int main(int argc, char *argv[]) {
   // --- Log Reader Factory ---
   std::unique_ptr<ILogReader> log_reader;
   std::shared_ptr<MongoManager> mongo_manager;
+  LOG(LogLevel::INFO, LogComponent::IO_READER,
+      "Initializing log reader of type: " << current_config->log_source_type);
 
   if (current_config->log_source_type == "file") {
     auto reader =
         std::make_unique<FileLogReader>(current_config->log_input_path);
     if (!reader->is_open()) {
-      std::cerr << "Failed to open log source file. Exiting." << std::endl;
+      LOG(LogLevel::FATAL, LogComponent::IO_READER,
+          "Failed to open log source file: " << current_config->log_input_path
+                                             << ". Exiting.");
       return 1;
     }
     log_reader = std::move(reader);
@@ -186,21 +196,24 @@ int main(int argc, char *argv[]) {
     log_reader = std::make_unique<MongoLogReader>(
         mongo_manager, current_config->mongo_log_source,
         current_config->reader_state_path);
-    std::cout << "Initialized MongoDB log reader." << std::endl;
+    LOG(LogLevel::INFO, LogComponent::IO_READER,
+        "Initialized MongoDB log reader.");
   } else {
-    std::cerr << "Invalid log_source_type configured: "
-              << current_config->log_source_type << ". Exiting." << std::endl;
+    LOG(LogLevel::FATAL, LogComponent::CORE,
+        "Invalid log_source_type configured: "
+            << current_config->log_source_type << ". Exiting.");
     return 1;
   }
 
   // Load state on startup
   if (current_config->state_persistence_enabled) {
     if (analysis_engine_instance.load_state(current_config->state_file_path))
-      std::cout << "Successfully loaded previous engine state." << std::endl;
+      LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
+          "Successfully loaded previous engine state.");
     else
-      std::cout << "No previous state file found or file was invalid. Starting "
-                   "with a fresh state."
-                << std::endl;
+      LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
+          "No previous state file found or file was invalid. Starting with a "
+          "fresh state.");
   }
 
   uint64_t total_processed_count = 0;
@@ -211,45 +224,50 @@ int main(int argc, char *argv[]) {
   while (!g_shutdown_requested) {
     // --- Signal Polling and State Transition Block ---
     if (g_reset_state_requested.exchange(false)) {
-      std::cout << "\n[Action] Resetting engine state (Ctrl+E)..." << std::endl;
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "SIGUSR1 or Ctrl+E detected. Resetting engine state...");
       analysis_engine_instance.reset_in_memory_state();
       if (current_config->state_persistence_enabled)
         if (std::remove(current_config->state_file_path.c_str()) == 0)
-          std::cout << "  -> Deleted persisted state file: "
-                    << current_config->state_file_path << std::endl;
+          LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
+              "Deleted persisted state file: "
+                  << current_config->state_file_path);
       first_pause_message = true;
     }
 
     if (g_reload_config_requested.exchange(false)) {
-      std::cout << "\n[Action] Reloading configuration (Ctrl+R) from "
-                << config_file_to_load << "..." << std::endl;
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "SIGHUP or Ctrl+R detected. Reloading configuration from "
+              << config_file_to_load << "...");
       if (config_manager.load_configuration(config_file_to_load)) {
         current_config = config_manager.get_config();
-
+        LogManager::instance().configure(current_config->logging);
+        LOG(LogLevel::INFO, LogComponent::CONFIG,
+            "Logger has been reconfigured.");
         alert_manager_instance.reconfigure(*current_config);
         rule_engine_instance.reconfigure(*current_config);
         analysis_engine_instance.reconfigure(*current_config);
-        std::cout << "  -> Configuration reloaded successfully." << std::endl;
+        LOG(LogLevel::INFO, LogComponent::CONFIG,
+            "All components reconfigured successfully.");
       } else
-        std::cerr
-            << "  -> Failed to reload configuration. Keeping old settings."
-            << std::endl;
+        LOG(LogLevel::ERROR, LogComponent::CONFIG,
+            "Failed to reload configuration. Keeping old settings.");
       first_pause_message = true;
     }
 
-    if (g_resume_requested.exchange(false)) {
-      if (current_state == ServiceState::PAUSED) {
-        std::cout << "\n[Action] Resuming processing (Ctrl+Q)..." << std::endl;
-        current_state = ServiceState::RUNNING;
-        first_pause_message = true;
-      }
+    if (g_resume_requested.exchange(false) &&
+        current_state == ServiceState::PAUSED) {
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "SIGCONT or Ctrl+Q detected. Resuming processing...");
+      current_state = ServiceState::RUNNING;
+      first_pause_message = true;
     }
 
-    if (g_pause_requested.exchange(false)) {
-      if (current_state == ServiceState::RUNNING) {
-        std::cout << "\n[Action] Pausing processing (Ctrl+P)..." << std::endl;
-        current_state = ServiceState::PAUSED;
-      }
+    if (g_pause_requested.exchange(false) &&
+        current_state == ServiceState::RUNNING) {
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "SIGUSR2 or Ctrl+P detected. Pausing processing...");
+      current_state = ServiceState::PAUSED;
     }
 
     // --- State-Specific Action Block ---
@@ -257,7 +275,6 @@ int main(int argc, char *argv[]) {
       std::vector<LogEntry> log_batch = log_reader->get_next_batch();
 
       if (!log_batch.empty()) {
-
         for (auto log_entry : log_batch) {
           total_processed_count++;
 
@@ -287,38 +304,38 @@ int main(int argc, char *argv[]) {
                 current_config->state_file_path);
           }
 
-          // Progress update for file processing
-          // if (current_config->log_input_path != "stdin" &&
-          //     line_counter % 200000 == 0) { // Print every 200k lines for
-          //     files
-          //   auto now = std::chrono::high_resolution_clock::now();
-          //   auto elapsed_ms =
-          //       std::chrono::duration_cast<std::chrono::milliseconds>(now -
-          //                                                             time_start)
-          //           .count();
-
-          //   if (elapsed_ms > 0)
-          //     std::cout << "Progress: Read " << line_counter << " lines ("
-          //               << (line_counter * 1000 / elapsed_ms) << "
-          //               lines/sec)."
-          //               << std::endl;
-          //   else
-          //     std::cout << "Progress: Read " << line_counter << " lines."
-          //               << std::endl;
-          // }
+          if (current_config->log_source_type != "stdin" &&
+              total_processed_count % 1000 == 0) {
+            LOG(LogLevel::DEBUG, LogComponent::CORE,
+                "Progress: Read "
+                    << total_processed_count << " lines ("
+                    << (total_processed_count * 1000 /
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::high_resolution_clock::now() -
+                            time_start)
+                            .count())
+                    << " lines/sec).");
+          }
         }
       } else {
         // End of File (or closed stdin) reached
-        if (current_config->live_monitoring_enabled)
+        if (current_config->live_monitoring_enabled) {
+          LOG(LogLevel::TRACE, LogComponent::IO_READER,
+              "No new logs found. Sleeping for "
+                  << current_config->live_monitoring_sleep_seconds << "s.");
           current_state = ServiceState::PAUSED;
-        else
+        } else {
+          LOG(LogLevel::INFO, LogComponent::IO_READER,
+              "End of log source reached and live monitoring is disabled. "
+              "Shutting down.");
           g_shutdown_requested = true;
+        }
       }
     } else if (current_state == ServiceState::PAUSED) {
       // --- Efficient Sleep State ---
       if (first_pause_message) {
-        std::cout << "[Status] Paused. Waiting for input or signals..."
-                  << std::endl;
+        LOG(LogLevel::INFO, LogComponent::CORE,
+            "Processing is paused. Waiting for input or signals...");
         first_pause_message = false;
       }
 
@@ -330,15 +347,17 @@ int main(int argc, char *argv[]) {
 
   // --- Final Save on Graceful Exit ---
   if (keyboard_thread.joinable()) {
+#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
     pthread_kill(keyboard_thread.native_handle(), SIGCONT);
+#endif
     keyboard_thread.join();
   }
 
-  std::cout << "\nProcessing finished or shutdown signal received."
-            << std::endl;
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Processing finished or shutdown signal received.");
 
   if (current_config->state_persistence_enabled) {
-    std::cout << "Saving final engine state..." << std::endl;
+    LOG(LogLevel::INFO, LogComponent::CORE, "Saving final engine state...");
     analysis_engine_instance.save_state(current_config->state_file_path);
   }
 
@@ -348,14 +367,15 @@ int main(int argc, char *argv[]) {
   auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                          time_end - time_start)
                          .count();
-  std::cout << "\n---Processing Summary---" << std::endl;
-  std::cout << "Total entries processed: " << total_processed_count
-            << std::endl;
-  std::cout << "Total processing time: " << duration_ms << " ms" << std::endl;
-  if (duration_ms > 0 && total_processed_count > 0)
-    std::cout << "Processing rate: "
-              << (total_processed_count * 1000 / duration_ms) << " lines/sec"
-              << std::endl;
 
-  std::cout << "Anomaly Detection Engine finished" << std::endl;
+  LOG(LogLevel::INFO, LogComponent::CORE, "---Processing Summary---");
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Total entries processed: " << total_processed_count);
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Total processing time: " << duration_ms << " ms");
+  if (duration_ms > 0 && total_processed_count > 0)
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Processing rate: " << (total_processed_count * 1000 / duration_ms)
+                            << " lines/sec");
+  LOG(LogLevel::INFO, LogComponent::CORE, "Anomaly Detection Engine finished.");
 }
