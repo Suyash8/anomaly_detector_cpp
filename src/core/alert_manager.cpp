@@ -85,11 +85,31 @@ void AlertManager::record_alert(const Alert &new_alert) {
                                               total_alerts_recorded_};
   }
 
+  {
+    std::lock_guard<std::mutex> lock(recent_alerts_mutex_);
+    recent_alerts_.push_front(new_alert);
+    if (recent_alerts_.size() > MAX_RECENT_ALERTS) {
+      recent_alerts_.pop_back();
+    }
+  }
+
   if (output_alerts_to_stdout)
     std::cout << format_alert_to_human_readable(new_alert) << std::endl;
 
   for (const auto &dispatcher : dispatchers_)
     dispatcher->dispatch(new_alert);
+}
+
+std::vector<Alert> AlertManager::get_recent_alerts(size_t limit) const {
+  std::lock_guard<std::mutex> lock(recent_alerts_mutex_);
+  std::vector<Alert> alerts_copy;
+  size_t count = 0;
+  for (const auto &alert : recent_alerts_) {
+    if (count++ >= limit)
+      break;
+    alerts_copy.push_back(alert);
+  }
+  return alerts_copy;
 }
 
 void AlertManager::flush_all_alerts() {}
