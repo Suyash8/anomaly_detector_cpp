@@ -11,6 +11,7 @@
 #include "io/log_readers/mongo_log_reader.hpp"
 #include "io/web/web_server.hpp"
 #include "models/model_manager.hpp"
+#include "utils/scoped_timer.hpp"
 
 #include <atomic>
 #include <cerrno>
@@ -155,10 +156,15 @@ int main(int argc, char *argv[]) {
   WebServer web_server("0.0.0.0", 9090, MetricsManager::instance());
   web_server.start();
 
+  // --- Metrics Registration ---
   auto *logs_processed_counter = MetricsManager::instance().register_counter(
       "ad_logs_processed_total",
       "Total number of log entries processed since startup.");
+  auto *batch_processing_timer = MetricsManager::instance().register_histogram(
+      "ad_batch_processing_duration_seconds",
+      "Latency of processing a batch of logs.");
 
+  // --- Load Configuration ---
   Config::ConfigManager config_manager;
   std::string config_file_to_load = "config.ini";
   if (argc > 1)
@@ -168,6 +174,7 @@ int main(int argc, char *argv[]) {
   auto current_config = config_manager.get_config();
   auto model_manager = std::make_shared<ModelManager>(*current_config);
 
+  // --- Initialize Logging ---
   LogManager::instance().configure(current_config->logging);
 
   LOG(LogLevel::INFO, LogComponent::CORE,
@@ -284,6 +291,7 @@ int main(int argc, char *argv[]) {
       std::vector<LogEntry> log_batch = log_reader->get_next_batch();
 
       if (!log_batch.empty()) {
+        ScopedTimer timer(*batch_processing_timer);
         for (auto log_entry : log_batch) {
           total_processed_count++;
           logs_processed_counter->increment();

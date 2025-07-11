@@ -3,6 +3,7 @@
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
 #include "io/db/mongo_manager.hpp"
+#include "utils/scoped_timer.hpp"
 
 #include <bsoncxx/builder/basic/kvp.hpp>
 #include <bsoncxx/builder/stream/document.hpp>
@@ -95,6 +96,12 @@ MongoLogReader::bson_to_log_entry(const bsoncxx::document::view &doc) {
 }
 
 std::vector<LogEntry> MongoLogReader::get_next_batch() {
+  static Histogram *batch_fetch_timer =
+      MetricsManager::instance().register_histogram(
+          "ad_log_reader_batch_fetch_duration_seconds{type=\"mongodb\"}",
+          "Latency of fetching a batch from a MongoDB source.");
+  ScopedTimer timer(*batch_fetch_timer);
+
   std::vector<LogEntry> batch;
   try {
     auto client = mongo_manager_->get_client();
