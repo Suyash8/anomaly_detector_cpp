@@ -82,6 +82,7 @@ public:
                                 const std::string &help_text);
 
   std::string expose_as_prometheus_text();
+  std::string expose_as_json();
 
 private:
   MetricsManager() = default;

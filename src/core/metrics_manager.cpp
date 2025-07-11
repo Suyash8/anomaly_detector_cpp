@@ -1,4 +1,5 @@
 #include "metrics_manager.hpp"
+#include "nlohmann/json.hpp"
 
 #include <algorithm>
 #include <numeric>
@@ -138,4 +139,57 @@ std::string MetricsManager::expose_as_prometheus_text() {
   }
 
   return ss.str();
+}
+
+std::string MetricsManager::expose_as_json() {
+  std::lock_guard<std::mutex> lock(registry_mutex_);
+  nlohmann::json j;
+
+  // Labeled Counters
+  nlohmann::json j_counters = nlohmann::json::object();
+  for (const auto &[name, counter_ptr] : labeled_counters_) {
+    nlohmann::json j_series = nlohmann::json::object();
+    std::lock_guard<std::mutex> series_lock(counter_ptr->series_mutex_);
+    for (const auto &[labels, series_ptr] : counter_ptr->series_) {
+      // Create a key from labels, e.g., "tier=T1,reason=..."
+      std::string label_key;
+      for (const auto &[k, v] : labels) {
+        if (!label_key.empty())
+          label_key += ",";
+        label_key += k + "=" + v;
+      }
+      if (label_key.empty())
+        label_key = "total";
+      j_series[label_key] = series_ptr->val.load(std::memory_order_relaxed);
+    }
+    j_counters[name] = j_series;
+  }
+  j["counters"] = j_counters;
+
+  // Gauges
+  nlohmann::json j_gauges = nlohmann::json::object();
+  for (const auto &[name, gauge_ptr] : gauges_) {
+    j_gauges[name] = gauge_ptr->get_value();
+  }
+  j["gauges"] = j_gauges;
+
+  // Histograms
+  nlohmann::json j_histograms = nlohmann::json::object();
+  std::vector<double> default_quantiles = {0.50, 0.90, 0.99};
+  for (const auto &[name, histo_ptr] : histograms_) {
+    nlohmann::json j_histo_details;
+    j_histo_details["count"] = histo_ptr->get_count();
+    j_histo_details["sum"] = histo_ptr->get_sum();
+
+    auto quantiles_map = histo_ptr->get_quantiles(default_quantiles);
+    nlohmann::json j_quantiles = nlohmann::json::object();
+    for (const auto &[q, val] : quantiles_map) {
+      j_quantiles[std::to_string(q)] = val;
+    }
+    j_histo_details["quantiles"] = j_quantiles;
+    j_histograms[name] = j_histo_details;
+  }
+  j["histograms"] = j_histograms;
+
+  return j.dump(2); // dump with 2-space indent
 }

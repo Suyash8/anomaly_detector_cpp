@@ -12,6 +12,12 @@ WebServer::WebServer(const std::string &host, int port,
         res.set_content(metrics_data, "text/plain; version=0.0.4");
       });
 
+  server_->Get("/api/v1/metrics/performance",
+               [this](const httplib::Request &, httplib::Response &res) {
+                 std::string json_data = metrics_manager_.expose_as_json();
+                 res.set_content(json_data, "application/json");
+               });
+
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Web server initialized for " << host_ << ":" << port_);
 }
