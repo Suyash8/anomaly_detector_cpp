@@ -3,8 +3,9 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <string_view>
 
-std::string JsonFormatter::escape_json_value(const std::string &input) {
+std::string JsonFormatter::escape_json_value(std::string_view input) {
   std::ostringstream o;
   for (char c : input)
     switch (c) {
