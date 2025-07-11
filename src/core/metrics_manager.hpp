@@ -1,10 +1,59 @@
 #ifndef METRICS_MANAGER_HPP
 #define METRICS_MANAGER_HPP
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
+
+// Forward declaration
+class MetricsManager;
+
+struct Counter {
+  friend class MetricsManager;
+  void increment(uint64_t value = 1) {
+    val.fetch_add(value, std::memory_order_relaxed);
+  }
+  uint64_t get_value() const { return val.load(std::memory_order_relaxed); }
+
+private:
+  Counter(std::string name, std::string help)
+      : name(std::move(name)), help(std::move(help)), val(0) {}
+  std::string name;
+  std::string help;
+  std::atomic<uint64_t> val;
+};
+
+struct Gauge {
+  friend class MetricsManager;
+  void set(double value) { val.store(value, std::memory_order_relaxed); }
+  double get_value() const { return val.load(std::memory_order_relaxed); }
+
+private:
+  Gauge(std::string name, std::string help)
+      : name(std::move(name)), help(std::move(help)), val(0.0) {}
+  std::string name;
+  std::string help;
+  std::atomic<double> val;
+};
+
+struct Histogram {
+  friend class MetricsManager;
+  void observe(double value) {
+    std::lock_guard<std::mutex> lock(mtx);
+    observations.push_back(value);
+  }
+
+private:
+  Histogram(std::string name, std::string help)
+      : name(std::move(name)), help(std::move(help)) {}
+  std::string name;
+  std::string help;
+  std::vector<double> observations;
+  mutable std::mutex mtx;
+};
 
 class MetricsManager {
 public:
@@ -14,9 +63,20 @@ public:
   MetricsManager(const MetricsManager &) = delete;
   void operator=(const MetricsManager &) = delete;
 
+  Counter *register_counter(const std::string &name,
+                            const std::string &help_text);
+  Gauge *register_gauge(const std::string &name, const std::string &help_text);
+  Histogram *register_histogram(const std::string &name,
+                                const std::string &help_text);
+
 private:
-  MetricsManager() = default; // Private constructor
+  MetricsManager() = default;
   ~MetricsManager() = default;
+
+  std::map<std::string, std::unique_ptr<Counter>> counters_;
+  std::map<std::string, std::unique_ptr<Gauge>> gauges_;
+  std::map<std::string, std::unique_ptr<Histogram>> histograms_;
+  std::mutex registry_mutex_;
 };
 
 #endif // METRICS_MANAGER_HPP
