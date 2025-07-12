@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Anomaly Detector - Monitoring</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Anomaly Detector</h1>
+      <nav>
+        <button id="nav-performance" class="active">Performance</button>
+        <button id="nav-operations">Operations</button>
+      </nav>
+    </header>
+
+    <main>
+      <div id="performance-view" class="view active">
+        <h2>Performance Metrics</h2>
+        <div class="kpi-container">
+          <div class="kpi-box">
+            <h3>Logs / Sec</h3>
+            <span id="kpi-logs-per-sec">...</span>
+          </div>
+          <div class="kpi-box">
+            <h3>Alerts / Min</h3>
+            <span id="kpi-alerts-per-min">...</span>
+          </div>
+          <div class="kpi-box">
+            <h3>P90 Latency (ms)</h3>
+            <span id="kpi-p90-latency">...</span>
+          </div>
+        </div>
+        <div class="chart-container">
+          <h3>Batch Processing Latency (ms)</h3>
+          <canvas id="latency-chart"></canvas>
+        </div>
+        <div class="chart-container">
+          <h3>Latency Breakdown (ms)</h3>
+          <canvas id="breakdown-chart"></canvas>
+        </div>
+      </div>
+
+      <div id="operations-view" class="view">
+        <!-- Content for Day 5 -->
+        <h2>Operational Dashboard</h2>
+      </div>
+    </main>
+
+    <script src="/libs/chart.umd.min.js"></script>
+    <script src="/js/app.js"></script>
+  </body>
+</html>
