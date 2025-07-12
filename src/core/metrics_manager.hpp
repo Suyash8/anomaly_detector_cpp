@@ -2,6 +2,7 @@
 #define METRICS_MANAGER_HPP
 
 #include <atomic>
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -51,10 +52,11 @@ public:
   }
 
   friend class MetricsManager;
-  void observe(double value) {
-    std::lock_guard<std::mutex> lock(mtx);
-    observations.push_back(value);
-  }
+  void observe(double value);
+
+  std::map<double, double> get_quantiles(const std::vector<double> &quantiles);
+  double get_sum();
+  size_t get_count();
 
 private:
   Histogram(std::string name, std::string help)
@@ -80,6 +82,7 @@ public:
                                 const std::string &help_text);
 
   std::string expose_as_prometheus_text();
+  std::string expose_as_json();
 
 private:
   MetricsManager() = default;

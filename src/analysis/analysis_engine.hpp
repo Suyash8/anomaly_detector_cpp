@@ -13,6 +13,12 @@
 #include <cstdint>
 #include <string>
 
+struct TopIpInfo {
+  std::string ip;
+  double value;
+  std::string metric;
+};
+
 class AnalysisEngine {
 public:
   AnalysisEngine(const Config::AppConfig &cfg);
@@ -32,6 +38,9 @@ public:
   size_t get_ip_state_count() const { return ip_activity_trackers.size(); }
   size_t get_path_state_count() const { return path_activity_trackers.size(); }
   size_t get_session_state_count() const { return session_trackers.size(); }
+
+  std::vector<TopIpInfo> get_top_n_by_metric(size_t n,
+                                             const std::string &metric_name);
 
 private:
   Config::AppConfig app_config;

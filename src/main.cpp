@@ -153,26 +153,6 @@ int main(int argc, char *argv[]) {
             << "  Ctrl+P:          Pause Processing\n"
             << "  Ctrl+Q:          Resume Processing\n\n";
 
-  WebServer web_server("0.0.0.0", 9090, MetricsManager::instance());
-  web_server.start();
-
-  // --- Metrics Registration ---
-  auto *logs_processed_counter =
-      MetricsManager::instance().register_labeled_counter(
-          "ad_logs_processed_total",
-          "Total number of log entries processed since startup.");
-  auto *batch_processing_timer = MetricsManager::instance().register_histogram(
-      "ad_batch_processing_duration_seconds",
-      "Latency of processing a batch of logs.");
-
-  auto *ip_states_gauge = MetricsManager::instance().register_gauge(
-      "ad_active_ip_states", "Current number of IP states held in memory.");
-  auto *path_states_gauge = MetricsManager::instance().register_gauge(
-      "ad_active_path_states", "Current number of Path states held in memory.");
-  auto *session_states_gauge = MetricsManager::instance().register_gauge(
-      "ad_active_session_states",
-      "Current number of Session states held in memory.");
-
   // --- Load Configuration ---
   Config::ConfigManager config_manager;
   std::string config_file_to_load = "config.ini";
@@ -198,6 +178,28 @@ int main(int argc, char *argv[]) {
   AnalysisEngine analysis_engine_instance(*current_config);
   RuleEngine rule_engine_instance(alert_manager_instance, *current_config,
                                   model_manager);
+
+  // --- Initialize Web Server ---
+  WebServer web_server("0.0.0.0", 9090, MetricsManager::instance(),
+                       alert_manager_instance, analysis_engine_instance);
+  web_server.start();
+
+  // --- Metrics Registration ---
+  auto *logs_processed_counter =
+      MetricsManager::instance().register_labeled_counter(
+          "ad_logs_processed_total",
+          "Total number of log entries processed since startup.");
+  auto *batch_processing_timer = MetricsManager::instance().register_histogram(
+      "ad_batch_processing_duration_seconds",
+      "Latency of processing a batch of logs.");
+
+  auto *ip_states_gauge = MetricsManager::instance().register_gauge(
+      "ad_active_ip_states", "Current number of IP states held in memory.");
+  auto *path_states_gauge = MetricsManager::instance().register_gauge(
+      "ad_active_path_states", "Current number of Path states held in memory.");
+  auto *session_states_gauge = MetricsManager::instance().register_gauge(
+      "ad_active_session_states",
+      "Current number of Session states held in memory.");
 
   // --- Log Reader Factory ---
   std::unique_ptr<ILogReader> log_reader;

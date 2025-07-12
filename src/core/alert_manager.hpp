@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "io/alert_dispatch/base_dispatcher.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -26,6 +27,8 @@ public:
   void flush_all_alerts();
   void reconfigure(const Config::AppConfig &new_config);
 
+  std::vector<Alert> get_recent_alerts(size_t limit) const;
+
 private:
   std::string format_alert_to_human_readable(const Alert &alert_data) const;
 
@@ -38,6 +41,10 @@ private:
 
   std::unordered_map<std::string, std::pair<uint64_t, size_t>>
       recent_alert_timestamps_;
+
+  mutable std::mutex recent_alerts_mutex_;
+  std::deque<Alert> recent_alerts_;
+  static constexpr size_t MAX_RECENT_ALERTS = 50;
 };
 
 #endif // ALERT_MANAGER_HPP

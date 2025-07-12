@@ -1,6 +1,5 @@
 #include "json_formatter.hpp"
 
-#include <ctime>
 #include <iomanip>
 #include <sstream>
 #include <string_view>
@@ -40,102 +39,114 @@ std::string JsonFormatter::escape_json_value(std::string_view input) {
   return o.str();
 }
 
-std::string JsonFormatter::format_alert_to_json(const Alert &alert_data) {
-  const auto &log_context = alert_data.event_context->raw_log;
+nlohmann::json JsonFormatter::alert_to_json_object(const Alert &alert_data) {
+  nlohmann::json j;
   const auto &analysis_context = *alert_data.event_context;
+  const auto &log_context = analysis_context.raw_log;
 
-  std::ostringstream ss;
-  ss << "{ ";
-  ss << "\"timestamp_ms\": " << alert_data.event_timestamp_ms << ", ";
+  // Helper to handle optional values cleanly
+  auto get_opt = [](const auto &opt, auto default_val) {
+    return opt.value_or(default_val);
+  };
 
-  // ISO 8601 timestamp for human readability in other tools
-  auto time_in_seconds =
-      static_cast<std::time_t>(alert_data.event_timestamp_ms / 1000);
-  char time_buffer[100];
+  // === Core Alert Info ===
+  j["timestamp_ms"] = alert_data.event_timestamp_ms;
+  j["alert_reason"] = alert_data.alert_reason;
+  j["detection_tier"] =
+      alert_tier_to_string_representation(alert_data.detection_tier);
+  j["suggested_action"] = alert_data.suggested_action;
+  j["action_code"] = alert_action_to_string(alert_data.action_code);
+  j["anomaly_score"] = alert_data.normalized_score;
+  j["offending_key"] = alert_data.offending_key_identifier;
+  j["ml_contributing_factors"] = alert_data.ml_feature_contribution;
 
-  std::tm tm_buf;
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
-  std::tm *tm_info = gmtime_r(&time_in_seconds, &tm_buf);
-#elif defined(_MSC_VER)
-  errno_t err = gmtime_s(&tm_buf, &time_in_seconds);
-  std::tm *tm_info = (err == 0) ? &tm_buf : nullptr;
-#else
-  std::tm *tm_info = std::gmtime(&time_in_seconds);
-#endif
+  // === Log Context (The Raw Log Fields) ===
+  nlohmann::json j_log;
+  j_log["source_ip"] = log_context.ip_address;
+  j_log["line_number"] = log_context.original_line_number;
+  j_log["host"] = log_context.host;
+  j_log["timestamp_str"] = log_context.timestamp_str;
+  j_log["request_method"] = log_context.request_method;
+  j_log["request_path"] = log_context.request_path;
+  j_log["request_protocol"] = log_context.request_protocol;
+  j_log["status_code"] = get_opt(log_context.http_status_code, 0);
+  j_log["bytes_sent"] = get_opt(log_context.bytes_sent, (uint64_t)0);
+  j_log["request_time_s"] = get_opt(log_context.request_time_s, 0.0);
+  j_log["user_agent"] = log_context.user_agent;
+  j_log["referer"] = log_context.referer;
+  j_log["country_code"] = log_context.country_code;
+  j_log["x_request_id"] = log_context.x_request_id;
+  j["log_context"] = j_log;
 
-  if (tm_info) {
-    std::strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%dT%H:%M:%S",
-                  tm_info);
-    ss << "\"timestamp_utc\":\"" << time_buffer << "." << std::setw(3)
-       << std::setfill('0') << (alert_data.event_timestamp_ms % 1000) << "Z\",";
+  // === Analysis Context (The Rich, Calculated Data) ===
+  nlohmann::json j_analysis;
+
+  // Binary Flags
+  j_analysis["flags"] = {
+      {"is_first_request_from_ip", analysis_context.is_first_request_from_ip},
+      {"is_path_new_for_ip", analysis_context.is_path_new_for_ip},
+      {"is_ua_missing", analysis_context.is_ua_missing},
+      {"is_ua_changed_for_ip", analysis_context.is_ua_changed_for_ip},
+      {"is_ua_known_bad", analysis_context.is_ua_known_bad},
+      {"is_ua_outdated", analysis_context.is_ua_outdated},
+      {"is_ua_headless", analysis_context.is_ua_headless},
+      {"is_ua_inconsistent", analysis_context.is_ua_inconsistent},
+      {"is_ua_cycling", analysis_context.is_ua_cycling},
+      {"found_suspicious_path_str", analysis_context.found_suspicious_path_str},
+      {"found_suspicious_ua_str", analysis_context.found_suspicious_ua_str}};
+
+  // Windowed Stats
+  j_analysis["windowed_stats"] = {
+      {"ip_request_count",
+       get_opt(analysis_context.current_ip_request_count_in_window, (size_t)0)},
+      {"ip_failed_login_count",
+       get_opt(analysis_context.current_ip_failed_login_count_in_window,
+               (size_t)0)},
+      {"ip_html_requests", analysis_context.ip_html_requests_in_window},
+      {"ip_asset_requests", analysis_context.ip_asset_requests_in_window},
+      {"ip_assets_per_html_ratio",
+       get_opt(analysis_context.ip_assets_per_html_ratio, 0.0)}};
+
+  // Z-Scores
+  j_analysis["z_scores"] = {
+      {"ip_req_time", get_opt(analysis_context.ip_req_time_zscore, 0.0)},
+      {"ip_bytes_sent", get_opt(analysis_context.ip_bytes_sent_zscore, 0.0)},
+      {"ip_error_event", get_opt(analysis_context.ip_error_event_zscore, 0.0)},
+      {"ip_req_volume", get_opt(analysis_context.ip_req_vol_zscore, 0.0)},
+      {"path_req_time", get_opt(analysis_context.path_req_time_zscore, 0.0)},
+      {"path_bytes_sent",
+       get_opt(analysis_context.path_bytes_sent_zscore, 0.0)},
+      {"path_error_event",
+       get_opt(analysis_context.path_error_event_zscore, 0.0)}};
+
+  // Session Features (if they exist)
+  if (analysis_context.raw_session_state.has_value()) {
+    const auto &session = analysis_context.raw_session_state.value();
+    const auto &derived =
+        analysis_context.derived_session_features.value_or(SessionFeatures{});
+    j_analysis["session_context"] = {
+        {"start_time_ms", session.session_start_timestamp_ms},
+        {"last_seen_ms", session.last_seen_timestamp_ms},
+        {"request_count", session.request_count},
+        {"unique_paths", session.unique_paths_visited.size()},
+        {"unique_uas", session.unique_user_agents.size()},
+        {"failed_logins", session.failed_login_attempts},
+        {"errors_4xx", session.error_4xx_count},
+        {"errors_5xx", session.error_5xx_count},
+        {"avg_time_between_reqs_s", derived.avg_time_between_request_s},
+        {"post_to_get_ratio", derived.post_to_get_ratio}};
+  } else {
+    j_analysis["session_context"] = nullptr;
   }
 
-  // Core Alert Info
-  ss << "\"alert_reason\":\"" << escape_json_value(alert_data.alert_reason)
-     << "\",";
-  ss << "\"detection_tier\":\""
-     << alert_tier_to_string_representation(alert_data.detection_tier) << "\",";
-  ss << "\"suggested_action\":\""
-     << escape_json_value(alert_data.suggested_action) << "\",";
-  ss << "\"action\":\""
-     << escape_json_value(alert_action_to_string(alert_data.action_code));
-  ss << "\"anomaly_score\":" << alert_data.normalized_score << ",";
-  ss << "\"offending_key\":\""
-     << escape_json_value(alert_data.offending_key_identifier) << "\",";
-  ss << "\"ml_contributing_factors\":\""
-     << escape_json_value(alert_data.ml_feature_contribution) << "\",";
+  j["analysis_context"] = j_analysis;
 
-  // Log Context (all the important fields from the log that triggered the
-  // alert)
-  ss << "\"log_context\":{";
-  ss << "\"source_ip\":\"" << escape_json_value(alert_data.source_ip) << "\",";
-  ss << "\"log_line_number\":" << alert_data.associated_log_line << ",";
-  ss << "\"host\":\"" << escape_json_value(log_context.host) << "\",";
-  ss << "\"request_method\":\"" << escape_json_value(log_context.request_method)
-     << "\",";
-  ss << "\"request_path\":\"" << escape_json_value(log_context.request_path)
-     << "\",";
-  ss << "\"status_code\":" << log_context.http_status_code.value_or(0) << ",";
-  ss << "\"bytes_sent\":" << log_context.bytes_sent.value_or(0) << ",";
-  ss << "\"request_time_s\":" << log_context.request_time_s.value_or(0.0)
-     << ",";
-  ss << "\"user_agent\":\"" << escape_json_value(log_context.user_agent)
-     << "\",";
-  ss << "\"referer\":\"" << escape_json_value(log_context.referer) << "\",";
-  ss << "\"country_code\":\"" << escape_json_value(log_context.country_code)
-     << "\"";
-  ss << "}";
+  // Add the raw log line itself for full context
+  j["raw_log_line"] = log_context.raw_log_line;
 
-  // Analysis Context (all the rich data from AnalyzedEvent)
-  ss << ",\"analysis_context\":{";
-  // Tier 1 flags
-  ss << "\"is_ua_missing\":"
-     << (analysis_context.is_ua_missing ? "true" : "false") << ",";
-  ss << "\"is_ua_outdated\":"
-     << (analysis_context.is_ua_outdated ? "true" : "false") << ",";
-  ss << "\"is_ua_headless\":"
-     << (analysis_context.is_ua_headless ? "true" : "false") << ",";
-  ss << "\"is_ua_cycling\":"
-     << (analysis_context.is_ua_cycling ? "true" : "false") << ",";
-  ss << "\"found_suspicious_path_str\":"
-     << (analysis_context.found_suspicious_path_str ? "true" : "false") << ",";
-  ss << "\"found_suspicious_ua_str\":"
-     << (analysis_context.found_suspicious_ua_str ? "true" : "false") << ",";
-  // Tier 2 Z-scores
-  ss << "\"ip_req_time_zscore\":"
-     << analysis_context.ip_req_time_zscore.value_or(0.0) << ",";
-  ss << "\"ip_bytes_sent_zscore\":"
-     << analysis_context.ip_bytes_sent_zscore.value_or(0.0) << ",";
-  ss << "\"ip_error_event_zscore\":"
-     << analysis_context.ip_error_event_zscore.value_or(0.0) << ",";
-  ss << "\"ip_req_vol_zscore\":"
-     << analysis_context.ip_req_vol_zscore.value_or(0.0);
-  // Add more analysis fields here as they are created
-  ss << "}";
+  return j;
+}
 
-  ss << ",\"raw_log\":\""
-     << escape_json_value(alert_data.raw_log_trigger_sample) << "\"";
-
-  ss << "}";
-  return ss.str();
+std::string JsonFormatter::format_alert_to_json(const Alert &alert_data) {
+  return alert_to_json_object(alert_data).dump();
 }
