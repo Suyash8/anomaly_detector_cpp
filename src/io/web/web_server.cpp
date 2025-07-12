@@ -10,6 +10,12 @@ WebServer::WebServer(const std::string &host, int port,
       alert_manager_(alert_manager), analysis_engine_(analysis_engine) {
   server_ = std::make_unique<httplib::Server>();
 
+  const char *ui_path = "./src/io/web/ui";
+  if (!server_->set_mount_point("/", ui_path)) {
+    LOG(LogLevel::WARN, LogComponent::CORE,
+        "Failed to set mount point for UI. UI will not be available.");
+  }
+
   server_->Get(
       "/metrics", [this](const httplib::Request &, httplib::Response &res) {
         std::string metrics_data = metrics_manager_.expose_as_prometheus_text();
