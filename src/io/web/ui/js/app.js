@@ -3,7 +3,19 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- STATE ---
     charts: {},
     updateInterval: 2000,
-    currentAlertIds: new Set(),
+    data: {
+      // Metrics history
+      logs: [], // {timestamp, value}
+      alerts: [], // {timestamp, value}
+      latency: [], // {timestamp, p50, p90, p99}
+      breakdown: [], // {timestamp, ...}
+      memory: [], // {timestamp, value}
+
+      // Current operational data
+      recentAlerts: [],
+      topState: {},
+    },
+    maxHistory: 60,
 
     // --- DOM ELEMENTS ---
     elements: {
@@ -34,7 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
     init() {
       this.setupNavigation();
       this.setupCharts();
-      this.startSequentialFetching();
+      this.startUnifiedFetchingLoop();
     },
 
     setupNavigation() {
@@ -130,196 +142,282 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // --- DATA FETCHING & RENDERING ---
-    startDataFetching() {
-      this.fetchPerformanceData();
-      this.fetchOperationsData();
-      setInterval(() => this.fetchPerformanceData(), this.updateInterval);
-      setInterval(() => this.fetchOperationsData(), this.updateInterval * 2);
-    },
-
-    startSequentialFetching() {
-      this.sequentialFetchLoop(
-        this.fetchPerformanceData.bind(this),
-        this.updateInterval
-      );
-      this.sequentialFetchLoop(
-        this.fetchOperationsData.bind(this),
-        this.updateInterval * 2
-      );
-    },
-
-    async sequentialFetchLoop(fetchFunction, interval) {
+    async startUnifiedFetchingLoop() {
       try {
-        await fetchFunction();
+        // Fetch all data concurrently
+        const [perfRes, alertsRes, stateRes] = await Promise.all([
+          fetch("/api/v1/metrics/performance").catch((e) => e),
+          fetch("/api/v1/operations/alerts").catch((e) => e),
+          fetch("/api/v1/operations/state").catch((e) => e),
+        ]);
+
+        // Process whatever data we received successfully
+        if (perfRes instanceof Response && perfRes.ok) {
+          this.processPerformanceData(await perfRes.json());
+        }
+        if (alertsRes instanceof Response && alertsRes.ok) {
+          this.processOperationsData(await alertsRes.json());
+        }
+        if (stateRes instanceof Response && stateRes.ok) {
+          this.data.topState = await stateRes.json();
+        }
+
+        // After ALL data for this tick is processed, update the entire UI
+        this.renderAll();
       } catch (error) {
-        console.error("Data fetch failed, will retry after interval:", error);
+        console.error("Data fetch/processing failed:", error);
       } finally {
-        setTimeout(
-          () => this.sequentialFetchLoop(fetchFunction, interval),
-          interval
-        );
+        // Schedule the next full update cycle
+        setTimeout(() => this.startUnifiedFetchingLoop(), this.updateInterval);
       }
     },
 
-    async fetchPerformanceData() {
-      const response = await fetch("/api/v1/metrics/performance");
-      if (!response.ok)
-        throw new Error(`Perf API returned status ${response.status}`);
+    // --- DATA PROCESSING ---
+    processPerformanceData(apiData) {
+      const now = apiData.server_timestamp_ms;
 
-      const data = await response.json();
-      this.updatePerformanceView(data);
+      // Counters
+      this.data.logs.push({
+        timestamp: now,
+        value: apiData.counters.ad_logs_processed_total || 0,
+      });
+      if (this.data.logs.length > this.maxHistory) this.data.logs.shift();
+
+      // Gauges
+      this.data.memory.push({
+        timestamp: now,
+        value: apiData.gauges?.ad_process_memory_rss_bytes || 0,
+      });
+      if (this.data.memory.length > this.maxHistory) this.data.memory.shift();
+
+      // Histograms
+      const getValues = (metric) => (metric ? metric.map((obs) => obs[1]) : []);
+      const findMetricData = (prefix) =>
+        apiData.histograms?.[
+          Object.keys(apiData.histograms || {}).find((k) =>
+            k.startsWith(prefix)
+          )
+        ] || [];
+
+      const latencyValues = getValues(
+        apiData.histograms?.ad_batch_processing_duration_seconds
+      );
+      latencyValues.sort((a, b) => a - b);
+
+      this.data.latency.push({
+        timestamp: now,
+        p50: latencyValues[Math.floor(latencyValues.length * 0.5)] || 0,
+        p90: latencyValues[Math.floor(latencyValues.length * 0.9)] || 0,
+        p99: latencyValues[Math.floor(latencyValues.length * 0.99)] || 0,
+      });
+      if (this.data.latency.length > this.maxHistory) this.data.latency.shift();
+
+      const readerValues = getValues(
+        findMetricData("ad_log_reader_batch_fetch_duration_seconds")
+      );
+      const analysisValues = getValues(
+        apiData.histograms?.ad_analysis_engine_process_duration_seconds
+      );
+      const ruleValues = getValues(
+        apiData.histograms?.ad_rule_engine_evaluation_duration_seconds
+      );
+      const getAvg = (arr) =>
+        arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+      this.data.breakdown.push({
+        timestamp: now,
+        reader: getAvg(readerValues),
+        analysis: getAvg(analysisValues),
+        rules: getAvg(ruleValues),
+      });
+      if (this.data.breakdown.length > this.maxHistory)
+        this.data.breakdown.shift();
     },
 
-    async fetchOperationsData() {
-      const [alertsRes, stateRes] = await Promise.all([
-        fetch("/api/v1/operations/alerts"),
-        fetch("/api/v1/operations/state"),
-      ]);
-      if (alertsRes.ok) this.updateAlertsView(await alertsRes.json());
-      else console.warn(`Alerts API returned status ${alertsRes.status}`);
+    processOperationsData(alerts) {
+      this.data.recentAlerts = alerts; // Store the latest batch of alerts
 
-      if (stateRes.ok) this.updateWidgets(await stateRes.json());
-      else console.warn(`State API returned status ${stateRes.status}`);
+      const now = Date.now();
+      this.data.alerts.push({ timestamp: now, value: alerts.length });
+      if (this.data.alerts.length > this.maxHistory) this.data.alerts.shift();
     },
 
-    updatePerformanceView(data) {
-      console.log("Performance data:", data);
+    // --- UI UPDATING ---
+    renderAll() {
+      this.renderPerformanceView();
+      this.renderOperationsView();
+    },
 
-      // KPIs
-      const logs_per_sec =
-        data.counters?.ad_logs_processed_total?.["total"]?.rate_per_second || 0;
-      this.elements.kpis.logsPerSec.textContent = logs_per_sec.toFixed(1);
+    renderPerformanceView() {
+      const calculateRate = (history, seconds) => {
+        if (history.length < 2) return 0.0;
+        const now_ms = history[history.length - 1].timestamp;
+        const cutoff_ms = now_ms - seconds * 1000;
 
-      const p90_latency_ms =
-        (data.histograms?.ad_batch_processing_duration_seconds?.quantiles[
-          "0.9"
-        ] || 0) * 1000;
-      this.elements.kpis.p90Latency.textContent = p90_latency_ms.toFixed(2);
+        const relevantData = history.filter((d) => d.timestamp >= cutoff_ms);
+        if (relevantData.length < 2) return 0.0;
 
+        const first = relevantData[0];
+        const last = relevantData[relevantData.length - 1];
+        const valueDelta = last.value - first.value;
+        const timeDeltaSec = (last.timestamp - first.timestamp) / 1000;
+
+        return timeDeltaSec > 0 ? valueDelta / timeDeltaSec : 0.0;
+      };
+
+      this.elements.kpis.logsPerSec.textContent = calculateRate(
+        this.data.logs,
+        10
+      ).toFixed(1);
+      this.elements.kpis.alertsPerMin.textContent = (
+        calculateRate(this.data.alerts, 60) * 60
+      ).toFixed(1);
+
+      const lastLatency = this.data.latency[this.data.latency.length - 1] || {};
+      this.elements.kpis.p90Latency.textContent = (
+        (lastLatency.p90 || 0) * 1000
+      ).toFixed(2);
+
+      const lastMemory = this.data.memory[this.data.memory.length - 1] || {};
       this.elements.kpis.memory.textContent = (
-        (data.gauges?.ad_process_memory_rss_bytes || 0) /
+        (lastMemory.value || 0) /
         1024 /
         1024
       ).toFixed(1);
 
-      // Latency Chart
-      const timeLabel = new Date().toLocaleTimeString();
-      this.updateLineChart(this.charts.latency, timeLabel, [
-        (data.histograms?.ad_batch_processing_duration_seconds?.quantiles[
-          "0.99"
-        ] || 0) * 1000,
-        p90_latency_ms,
-        (data.histograms?.ad_batch_processing_duration_seconds?.quantiles[
-          "0.5"
-        ] || 0) * 1000,
-      ]);
-
-      // Breakdown Chart
-      const findMetric = (prefix) =>
-        Object.keys(data.histograms || {}).find((k) => k.startsWith(prefix));
-      const logReaderKey = findMetric(
-        "ad_log_reader_batch_fetch_duration_seconds"
+      // Update Charts
+      this.charts.latency.data.labels = this.data.latency.map((p) =>
+        new Date(p.timestamp).toLocaleTimeString()
       );
-      const getAvg = (metric) =>
-        metric && metric.count > 0 ? (metric.sum / metric.count) * 1000 : 0;
+      this.charts.latency.data.datasets[0].data = this.data.latency.map(
+        (p) => p.p99 * 1000
+      );
+      this.charts.latency.data.datasets[1].data = this.data.latency.map(
+        (p) => p.p90 * 1000
+      );
+      this.charts.latency.data.datasets[2].data = this.data.latency.map(
+        (p) => p.p50 * 1000
+      );
+      this.charts.latency.update("none");
 
+      const lastBreakdown =
+        this.data.breakdown[this.data.breakdown.length - 1] || {};
       this.charts.breakdown.data.datasets[0].data = [
-        getAvg(data.histograms?.[logReaderKey]),
-        getAvg(data.histograms?.ad_analysis_engine_process_duration_seconds),
-        getAvg(data.histograms?.ad_rule_engine_evaluation_duration_seconds),
+        (lastBreakdown.reader || 0) * 1000,
+        (lastBreakdown.analysis || 0) * 1000,
+        (lastBreakdown.rules || 0) * 1000,
       ];
       this.charts.breakdown.update();
     },
 
-    updateAlertsView(alerts) {
-      if (!alerts || alerts.length === 0) return;
+    renderOperationsView() {
+      this.elements.alertsTableBody.innerHTML = "";
+      // ... (rest of table rendering logic from previous response) ...
 
-      // Update KPI
-      const time_delta_seconds =
-        alerts[0].analysis_context?.time_delta_seconds ||
-        this.updateInterval / 1000;
-      const alerts_per_min = (alerts.length / time_delta_seconds) * 60;
-      this.elements.kpis.alertsPerMin.textContent = alerts_per_min.toFixed(1);
-
-      // Render table
-      this.elements.alertsTableBody.innerHTML = ""; // Clear old rows
-      const newIds = new Set(alerts.map((a) => a.log_context.line_number));
-
-      for (const alert of alerts) {
-        const tr = document.createElement("tr");
-        const isNew = !this.currentAlertIds.has(alert.log_context.line_number);
-        if (isNew) tr.classList.add("new-alert");
-
-        const tierClass = alert.detection_tier
-          .toLowerCase()
-          .replace(/_/g, "-")
-          .replace("heuristic", "t1")
-          .replace("statistical", "t2")
-          .replace("ml", "t3");
-        tr.innerHTML = `
-                    <td>${new Date(
-                      alert.timestamp_ms
-                    ).toLocaleTimeString()}</td>
-                    <td class="ip-mono">${alert.log_context.source_ip}</td>
-                    <td><span class="badge ${tierClass}">${
-          alert.detection_tier
-        }</span></td>
-                    <td>${alert.anomaly_score.toFixed(1)}</td>
-                    <td>${alert.alert_reason}</td>
-                    <td><span class="details-toggle" data-alert='${JSON.stringify(
-                      alert
-                    )}'>></span></td>
-                `;
-        this.elements.alertsTableBody.appendChild(tr);
-      }
-      this.currentAlertIds = newIds;
-      this.addDetailsToggleListeners();
-    },
-
-    addDetailsToggleListeners() {
-      this.elements.alertsTableBody
-        .querySelectorAll(".details-toggle")
-        .forEach((toggle) => {
-          toggle.addEventListener("click", (e) => {
-            const button = e.currentTarget;
-            const tr = button.closest("tr");
-            const existingDetails =
-              tr.nextElementSibling &&
-              tr.nextElementSibling.classList.contains("details-row");
-
-            if (existingDetails) {
-              existingDetails.remove();
-              button.textContent = ">";
-            } else {
-              const alertData = JSON.parse(button.dataset.alert);
-              const detailsRow = document.createElement("tr");
-              detailsRow.className = "details-row visible";
-              detailsRow.innerHTML = `<td colspan="6" class="details-cell"><pre>${JSON.stringify(
-                alertData,
-                null,
-                2
-              )}</pre></td>`;
-              tr.insertAdjacentElement("afterend", detailsRow);
-              button.textContent = "v";
-            }
-          });
-        });
-    },
-
-    updateWidgets(state) {
       const createRow = (label, value, valueClass = "value-primary") =>
         `<div class="widget-row"><span class="ip-mono">${label}</span><span class="${valueClass}">${value}</span></div>`;
-
-      this.elements.widgets.activeIps.innerHTML = state.top_active_ips
+      this.elements.widgets.activeIps.innerHTML = (
+        this.data.topState.top_active_ips || []
+      )
         .map((item) => createRow(item.ip, item.value.toFixed(0)))
         .join("");
-      this.elements.widgets.scoredIps.innerHTML = state.top_error_ips
+      this.elements.widgets.scoredIps.innerHTML = (
+        this.data.topState.top_error_ips || []
+      )
+        .map((item) =>
+          createRow(item.ip, item.value.toFixed(2), "value-destructive")
+        )
+        .join("");
+      // ... (rest of widget rendering logic) ...
+    },
+
+    renderOperationsView() {
+      const alerts = this.data.recentAlerts;
+      const state = this.data.topState;
+
+      // --- Render Alerts Table ---
+      if (alerts && alerts.length > 0) {
+        this.elements.alertsTableBody.innerHTML = ""; // Clear old rows
+        const newIds = new Set(alerts.map((a) => a.log_context.line_number));
+
+        for (const alert of alerts) {
+          const tr = document.createElement("tr");
+          // Check if this alert was present in the *previous* batch to determine if it's "new"
+          const isNew =
+            !this.currentAlertIds ||
+            !this.currentAlertIds.has(alert.log_context.line_number);
+          if (isNew) {
+            tr.classList.add("new-alert");
+          }
+
+          const tierClass = alert.detection_tier
+            .toLowerCase()
+            .replace(/_/g, "-")
+            .replace("heuristic", "t1")
+            .replace("statistical", "t2")
+            .replace("ml", "t3");
+
+          // Use textContent to prevent XSS issues, even from our own API.
+          const createCell = (content) => {
+            const td = document.createElement("td");
+            td.innerHTML = content;
+            return td;
+          };
+
+          tr.appendChild(
+            createCell(new Date(alert.timestamp_ms).toLocaleTimeString())
+          );
+          tr.appendChild(
+            createCell(
+              `<span class="ip-mono">${this.escapeHTML(
+                alert.log_context.source_ip
+              )}</span>`
+            )
+          );
+          tr.appendChild(
+            createCell(
+              `<span class="badge ${tierClass}">${this.escapeHTML(
+                alert.detection_tier
+              )}</span>`
+            )
+          );
+          tr.appendChild(createCell(alert.anomaly_score.toFixed(1)));
+          tr.appendChild(createCell(this.escapeHTML(alert.alert_reason)));
+
+          const detailsCell = document.createElement("td");
+          const detailsToggle = document.createElement("span");
+          detailsToggle.className = "details-toggle";
+          detailsToggle.textContent = ">";
+          // Safely store data without putting it directly in HTML attributes for large objects
+          detailsToggle.alertData = alert;
+          detailsCell.appendChild(detailsToggle);
+          tr.appendChild(detailsCell);
+
+          this.elements.alertsTableBody.appendChild(tr);
+        }
+        this.currentAlertIds = newIds; // Update the set of current IDs for the next cycle
+        this.addDetailsToggleListeners();
+      }
+
+      // --- Render Widgets ---
+      const createRow = (label, value, valueClass = "value-primary") =>
+        `<div class="widget-row"><span class="ip-mono">${this.escapeHTML(
+          label
+        )}</span><span class="${valueClass}">${this.escapeHTML(
+          value
+        )}</span></div>`;
+
+      this.elements.widgets.activeIps.innerHTML = (state.top_active_ips || [])
+        .map((item) => createRow(item.ip, item.value.toFixed(0)))
+        .join("");
+
+      this.elements.widgets.scoredIps.innerHTML = (state.top_error_ips || [])
         .map((item) =>
           createRow(item.ip, item.value.toFixed(2), "value-destructive")
         )
         .join("");
 
-      // Dummy data for now as API does not provide this yet
+      // Dummy data for widgets not yet provided by the API
       this.elements.widgets.suspiciousPaths.innerHTML =
         createRow("/etc/passwd", 23, "value-destructive") +
         createRow("/admin/config.php", 18, "value-destructive");
@@ -330,15 +428,45 @@ document.addEventListener("DOMContentLoaded", () => {
       );
     },
 
-    updateLineChart(chart, label, dataPoints) {
-      chart.data.labels.push(label);
-      if (chart.data.labels.length > 30) chart.data.labels.shift();
-      dataPoints.forEach((point, i) => {
-        chart.data.datasets[i].data.push(point);
-        if (chart.data.datasets[i].data.length > 30)
-          chart.data.datasets[i].data.shift();
-      });
-      chart.update("none"); // Use 'none' for smoother updates
+    addDetailsToggleListeners() {
+      // Use event delegation for better performance
+      this.elements.alertsTableBody.onclick = (e) => {
+        if (!e.target.classList.contains("details-toggle")) return;
+
+        const button = e.target;
+        const tr = button.closest("tr");
+        const existingDetails =
+          tr.nextElementSibling &&
+          tr.nextElementSibling.classList.contains("details-row");
+
+        if (existingDetails) {
+          existingDetails.remove();
+          button.textContent = ">";
+        } else {
+          const alertData = button.alertData; // Retrieve data stored on the element
+          const detailsRow = document.createElement("tr");
+          detailsRow.className = "details-row visible";
+
+          const detailsCell = document.createElement("td");
+          detailsCell.colSpan = 6;
+          detailsCell.className = "details-cell";
+
+          const pre = document.createElement("pre");
+          // Pretty-print the JSON with 2-space indentation
+          pre.textContent = JSON.stringify(alertData, null, 2);
+
+          detailsCell.appendChild(pre);
+          detailsRow.appendChild(detailsCell);
+          tr.insertAdjacentElement("afterend", detailsRow);
+          button.textContent = "v";
+        }
+      };
+    },
+
+    escapeHTML(str) {
+      const p = document.createElement("p");
+      p.textContent = str;
+      return p.innerHTML;
     },
   };
 
