@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Forward declaration
@@ -46,21 +47,28 @@ private:
 
 struct Histogram {
 public:
-  std::pair<std::vector<double>, std::mutex *> get_observations_for_read() {
+  std::pair<std::vector<std::pair<
+                std::chrono::time_point<std::chrono::steady_clock>, double>>,
+            std::mutex *>
+  get_observations_for_read() {
     return {observations, &mtx};
   }
 
   friend class MetricsManager;
   void observe(double value);
 
-  std::vector<double> get_and_clear_observations();
+  std::vector<
+      std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
+  get_and_clear_observations();
 
 private:
   Histogram(std::string name, std::string help)
       : name(std::move(name)), help(std::move(help)) {}
   std::string name;
   std::string help;
-  std::vector<double> observations;
+  std::vector<
+      std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
+      observations;
   mutable std::mutex mtx;
 };
 
@@ -82,16 +90,13 @@ public:
   std::string expose_as_json();
 
 private:
-  MetricsManager() : last_api_call_time_(std::chrono::steady_clock::now()) {}
+  MetricsManager() = default;
   ~MetricsManager() = default;
 
   std::map<std::string, std::unique_ptr<LabeledCounter>> labeled_counters_;
   std::map<std::string, std::unique_ptr<Gauge>> gauges_;
   std::map<std::string, std::unique_ptr<Histogram>> histograms_;
   std::mutex registry_mutex_;
-
-  std::chrono::time_point<std::chrono::steady_clock> last_api_call_time_;
-  std::map<std::string, uint64_t> last_counter_values_;
 };
 
 #endif // METRICS_MANAGER_HPP
