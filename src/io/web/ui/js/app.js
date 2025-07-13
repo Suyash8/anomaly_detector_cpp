@@ -139,6 +139,61 @@ document.addEventListener("DOMContentLoaded", () => {
           },
         }
       );
+
+      this.charts.memory = new Chart(document.getElementById("memory-chart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "Memory RSS (MB)",
+              data: [],
+              borderColor: "#4bc0c0",
+              backgroundColor: "rgba(75, 192, 192, 0.2)",
+              fill: true,
+              tension: 0.2,
+              pointRadius: 0,
+            },
+          ],
+        },
+        options: commonOptions,
+      });
+
+      this.charts.deepDive = new Chart(
+        document.getElementById("deep-dive-chart"),
+        {
+          type: "bar",
+          data: {
+            labels: [
+              "State Lookup",
+              "UA Analysis",
+              "Z-Score Calc",
+              "Tier 1 Rules",
+              "Tier 2 Rules",
+              "Tier 3 / ML",
+            ],
+            datasets: [
+              {
+                label: "Avg Latency (µs)",
+                data: [],
+                backgroundColor: [
+                  "#ff6384",
+                  "#36a2eb",
+                  "#cc65fe",
+                  "#ffce56",
+                  "#4bc0c0",
+                  "#ff9f40",
+                ],
+              },
+            ],
+          },
+          options: {
+            ...commonOptions,
+            indexAxis: "y",
+            plugins: { legend: { display: false } },
+          },
+        }
+      );
     },
 
     // --- DATA FETCHING & RENDERING ---
@@ -232,6 +287,21 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       if (this.data.breakdown.length > this.maxHistory)
         this.data.breakdown.shift();
+
+      const getDeepAvg = (name) => {
+        const values = getValues(apiData.histograms?.[name]);
+        return getAvg(values);
+      };
+
+      this.data.deepDive = {
+        stateLookup: getDeepAvg("ad_analysis_state_lookup_duration_seconds"),
+        uaAnalysis: getDeepAvg("ad_analysis_ua_analysis_duration_seconds"),
+        zscoreCalc: getDeepAvg("ad_analysis_zscore_calc_duration_seconds"),
+        tier1: getDeepAvg("ad_rules_tier1_duration_seconds"),
+        tier2: getDeepAvg("ad_rules_tier2_duration_seconds"),
+        tier3: getDeepAvg("ad_rules_tier3_duration_seconds"),
+        mlInference: getDeepAvg("ad_ml_inference_duration_seconds"),
+      };
     },
 
     processOperationsData(alerts) {
@@ -308,6 +378,36 @@ document.addEventListener("DOMContentLoaded", () => {
         (lastBreakdown.rules || 0) * 1000,
       ];
       this.charts.breakdown.update();
+
+      // Update Memory Chart
+      this.charts.memory.data.labels = this.data.memory.map((p) =>
+        new Date(p.timestamp).toLocaleTimeString()
+      );
+      this.charts.memory.data.datasets[0].data = this.data.memory.map(
+        (p) => (p.value || 0) / 1024 / 1024
+      );
+      this.charts.memory.update("none");
+
+      // Update Deep Dive Chart
+      const deepDiveCard = document.getElementById("deep-dive-card");
+      const deepDiveData = this.data.deepDive;
+
+      if (deepDiveData && deepDiveData.stateLookup > 0) {
+        // Check if deep timing is enabled
+        deepDiveCard.style.display = "block";
+        this.charts.deepDive.data.datasets[0].data = [
+          (deepDiveData.stateLookup || 0) * 1000000, // to microseconds
+          (deepDiveData.uaAnalysis || 0) * 1000000,
+          (deepDiveData.zscoreCalc || 0) * 1000000,
+          (deepDiveData.tier1 || 0) * 1000000,
+          (deepDiveData.tier2 || 0) * 1000000,
+          ((deepDiveData.tier3 || 0) + (deepDiveData.mlInference || 0)) *
+            1000000,
+        ];
+        this.charts.deepDive.update();
+      } else {
+        deepDiveCard.style.display = "none";
+      }
     },
 
     renderOperationsView() {
