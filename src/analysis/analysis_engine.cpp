@@ -431,10 +431,32 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
           "Latency of the entire AnalysisEngine::process_and_analyze "
           "function.");
   ScopedTimer timer(*processing_timer);
-
   LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
       "Entering process_and_analyze for IP: " << raw_log.ip_address << " Path: "
                                               << raw_log.request_path);
+
+  // --- Granular Timers ---
+  static Histogram *state_lookup_timer =
+      app_config.monitoring.enable_deep_timing
+          ? MetricsManager::instance().register_histogram(
+                "ad_analysis_state_lookup_duration_seconds",
+                "Latency of get_or_create IP/Path state.")
+          : nullptr;
+
+  static Histogram *zscore_calc_timer =
+      app_config.monitoring.enable_deep_timing
+          ? MetricsManager::instance().register_histogram(
+                "ad_analysis_zscore_calc_duration_seconds",
+                "Latency of Z-Score calculation block.")
+          : nullptr;
+
+  static Histogram *ua_analysis_timer =
+      app_config.monitoring.enable_deep_timing
+          ? MetricsManager::instance().register_histogram(
+                "ad_analysis_ua_analysis_duration_seconds",
+                "Latency of advanced User-Agent analysis.")
+          : nullptr;
+
   AnalyzedEvent event(raw_log);
 
   if (!raw_log.parsed_timestamp_ms) {
@@ -449,10 +471,22 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     max_timestamp_seen_ = current_event_ts;
   }
 
-  PerIpState &current_ip_state =
-      get_or_create_ip_state(std::string(raw_log.ip_address), current_event_ts);
-  PerPathState &current_path_state =
-      get_or_create_path_state(raw_log.request_path, current_event_ts);
+  // --- Instrument State Lookup ---
+  PerIpState *current_ip_state_ptr;
+  PerPathState *current_path_state_ptr;
+
+  {
+    std::optional<ScopedTimer> t =
+        state_lookup_timer ? std::optional<ScopedTimer>(*state_lookup_timer)
+                           : std::nullopt;
+    current_ip_state_ptr = &get_or_create_ip_state(
+        std::string(raw_log.ip_address), current_event_ts);
+    current_path_state_ptr =
+        &get_or_create_path_state(raw_log.request_path, current_event_ts);
+  }
+
+  PerIpState &current_ip_state = *current_ip_state_ptr;
+  PerPathState &current_path_state = *current_path_state_ptr;
 
   // --- "New Seen" Tracking Logic ---
   if (current_ip_state.ip_first_seen_timestamp_ms == 0) {
@@ -511,7 +545,6 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.current_ip_failed_login_count_in_window =
       current_ip_state.failed_login_timestamps_window.get_event_count();
 
-  // HTML/Asset request tracking
   // HTML/Asset request tracking
   RequestType type = get_request_type(raw_log.request_path, app_config.tier1);
   if (type == RequestType::HTML) {
@@ -618,6 +651,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
                                                   << *raw_log.request_time_s);
     current_path_state.request_time_tracker.update(*raw_log.request_time_s);
   }
+
   if (raw_log.bytes_sent) {
     LOG(LogLevel::TRACE, LogComponent::ANALYSIS_STATS,
         "Updating bytes_sent_tracker for IP "
@@ -630,6 +664,7 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     current_path_state.bytes_sent_tracker.update(
         static_cast<double>(*raw_log.bytes_sent));
   }
+
   bool is_error =
       (raw_log.http_status_code && *raw_log.http_status_code >= 400 &&
        *raw_log.http_status_code < 600);
@@ -695,136 +730,154 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   event.path_hist_error_rate_stddev =
       current_path_state.error_rate_tracker.get_stddev();
 
-  // --- Z-Score calculation logic ---
-  const auto &tier2_cfg = app_config.tier2;
-  size_t min_samples = tier2_cfg.min_samples_for_z_score;
-  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_ZSCORE,
-      "Checking Z-score conditions with min_samples = " << min_samples);
+  // --- Instrument Z-Score Calculation ---
 
-  // Path Req Time Z-score
-  if (raw_log.request_time_s &&
-      static_cast<size_t>(
-          current_path_state.request_time_tracker.get_count()) >= min_samples) {
-    double stddev = *event.path_hist_req_time_stddev;
-    if (stddev > 1e-6) {
-      event.path_req_time_zscore =
-          (*raw_log.request_time_s - *event.path_hist_req_time_mean) / stddev;
-      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
-          "Calculated path_req_time_zscore: " << *event.path_req_time_zscore
-                                              << " for Path "
-                                              << raw_log.request_path);
-    }
-  }
+  {
+    std::optional<ScopedTimer> t =
+        zscore_calc_timer ? std::optional<ScopedTimer>(*zscore_calc_timer)
+                          : std::nullopt;
 
-  // Path Bytes Sent Z-score
-  if (raw_log.bytes_sent &&
-      static_cast<size_t>(current_path_state.bytes_sent_tracker.get_count()) >=
-          min_samples) {
-    double stddev = *event.path_hist_bytes_stddev;
-    if (stddev > 1.0) {
-      event.path_bytes_sent_zscore = (static_cast<double>(*raw_log.bytes_sent) -
-                                      *event.path_hist_bytes_mean) /
-                                     stddev;
-      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
-          "Calculated path_bytes_sent_zscore: " << *event.path_bytes_sent_zscore
+    // --- Z-Score calculation logic ---
+    const auto &tier2_cfg = app_config.tier2;
+    size_t min_samples = tier2_cfg.min_samples_for_z_score;
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_ZSCORE,
+        "Checking Z-score conditions with min_samples = " << min_samples);
+
+    // Path Req Time Z-score
+    if (raw_log.request_time_s &&
+        static_cast<size_t>(
+            current_path_state.request_time_tracker.get_count()) >=
+            min_samples) {
+      double stddev = *event.path_hist_req_time_stddev;
+      if (stddev > 1e-6) {
+        event.path_req_time_zscore =
+            (*raw_log.request_time_s - *event.path_hist_req_time_mean) / stddev;
+        LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+            "Calculated path_req_time_zscore: " << *event.path_req_time_zscore
                                                 << " for Path "
                                                 << raw_log.request_path);
+      }
     }
-  }
 
-  // Path Error Event Z-score
-  if (static_cast<size_t>(current_path_state.error_rate_tracker.get_count()) >=
-      min_samples) {
-    double current_error_val =
-        (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
-                                                                       : 0.0;
-    double stddev = *event.path_hist_error_rate_stddev;
-    if (stddev > 0.01) {
-      event.path_error_event_zscore =
-          (current_error_val - *event.path_hist_error_rate_mean) / stddev;
-      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
-          "Calculated path_error_event_zscore: "
-              << *event.path_error_event_zscore << " for Path "
-              << raw_log.request_path);
+    // Path Bytes Sent Z-score
+    if (raw_log.bytes_sent &&
+        static_cast<size_t>(
+            current_path_state.bytes_sent_tracker.get_count()) >= min_samples) {
+      double stddev = *event.path_hist_bytes_stddev;
+      if (stddev > 1.0) {
+        event.path_bytes_sent_zscore =
+            (static_cast<double>(*raw_log.bytes_sent) -
+             *event.path_hist_bytes_mean) /
+            stddev;
+        LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+            "Calculated path_bytes_sent_zscore: "
+                << *event.path_bytes_sent_zscore << " for Path "
+                << raw_log.request_path);
+      }
     }
-  }
 
-  // Req Time Z-score
-  if (raw_log.request_time_s &&
-      static_cast<size_t>(current_ip_state.request_time_tracker.get_count()) >=
-          min_samples) {
-    double stddev = current_ip_state.request_time_tracker.get_stddev();
-    if (stddev > 1e-6) {
-      event.ip_req_time_zscore =
-          (*raw_log.request_time_s -
-           current_ip_state.request_time_tracker.get_mean()) /
-          stddev;
-      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
-          "Calculated ip_req_time_zscore: "
-              << *event.ip_req_time_zscore << " for IP " << raw_log.ip_address);
+    // Path Error Event Z-score
+    if (static_cast<size_t>(
+            current_path_state.error_rate_tracker.get_count()) >= min_samples) {
+      double current_error_val =
+          (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
+                                                                         : 0.0;
+      double stddev = *event.path_hist_error_rate_stddev;
+      if (stddev > 0.01) {
+        event.path_error_event_zscore =
+            (current_error_val - *event.path_hist_error_rate_mean) / stddev;
+        LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+            "Calculated path_error_event_zscore: "
+                << *event.path_error_event_zscore << " for Path "
+                << raw_log.request_path);
+      }
     }
-  }
 
-  // Bytes Sent Z-score
-  if (raw_log.bytes_sent &&
-      static_cast<size_t>(current_ip_state.bytes_sent_tracker.get_count()) >=
-          min_samples) {
-    double stddev = current_ip_state.bytes_sent_tracker.get_stddev();
-    if (stddev > 1.0) {
-      event.ip_bytes_sent_zscore =
-          (static_cast<double>(*raw_log.bytes_sent) -
-           current_ip_state.bytes_sent_tracker.get_mean()) /
-          stddev;
-      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
-          "Calculated ip_bytes_sent_zscore: " << *event.ip_bytes_sent_zscore
+    // Req Time Z-score
+    if (raw_log.request_time_s &&
+        static_cast<size_t>(
+            current_ip_state.request_time_tracker.get_count()) >= min_samples) {
+      double stddev = current_ip_state.request_time_tracker.get_stddev();
+      if (stddev > 1e-6) {
+        event.ip_req_time_zscore =
+            (*raw_log.request_time_s -
+             current_ip_state.request_time_tracker.get_mean()) /
+            stddev;
+        LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+            "Calculated ip_req_time_zscore: " << *event.ip_req_time_zscore
                                               << " for IP "
                                               << raw_log.ip_address);
+      }
+    }
+
+    // Bytes Sent Z-score
+    if (raw_log.bytes_sent &&
+        static_cast<size_t>(current_ip_state.bytes_sent_tracker.get_count()) >=
+            min_samples) {
+      double stddev = current_ip_state.bytes_sent_tracker.get_stddev();
+      if (stddev > 1.0) {
+        event.ip_bytes_sent_zscore =
+            (static_cast<double>(*raw_log.bytes_sent) -
+             current_ip_state.bytes_sent_tracker.get_mean()) /
+            stddev;
+        LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+            "Calculated ip_bytes_sent_zscore: " << *event.ip_bytes_sent_zscore
+                                                << " for IP "
+                                                << raw_log.ip_address);
+      }
+    }
+
+    // Error Event Z-score
+    if (static_cast<size_t>(current_ip_state.error_rate_tracker.get_count()) >=
+        min_samples) {
+      double current_error_val =
+          (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
+                                                                         : 0.0;
+      double stddev = current_ip_state.error_rate_tracker.get_stddev();
+
+      if (stddev > 0.01) {
+        event.ip_error_event_zscore =
+            (current_error_val -
+             current_ip_state.error_rate_tracker.get_mean()) /
+            stddev;
+        LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+            "Calculated ip_error_event_zscore: " << *event.ip_error_event_zscore
+                                                 << " for IP "
+                                                 << raw_log.ip_address);
+      }
+    }
+
+    // Request Volume Z-score
+    if (static_cast<size_t>(
+            current_ip_state.requests_in_window_count_tracker.get_count()) >=
+        min_samples) {
+      double current_req_vol = static_cast<double>(
+          current_ip_state.request_timestamps_window.get_event_count());
+      double stddev =
+          current_ip_state.requests_in_window_count_tracker.get_stddev();
+
+      if (stddev > 0.5) {
+        event.ip_req_vol_zscore =
+            (current_req_vol -
+             current_ip_state.requests_in_window_count_tracker.get_mean()) /
+            stddev;
+        LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
+            "Calculated ip_req_vol_zscore: " << *event.ip_req_vol_zscore
+                                             << " for IP "
+                                             << raw_log.ip_address);
+      }
     }
   }
 
-  // Error Event Z-score
-  if (static_cast<size_t>(current_ip_state.error_rate_tracker.get_count()) >=
-      min_samples) {
-    double current_error_val =
-        (raw_log.http_status_code && *raw_log.http_status_code >= 400) ? 1.0
-                                                                       : 0.0;
-    double stddev = current_ip_state.error_rate_tracker.get_stddev();
-
-    if (stddev > 0.01) {
-      event.ip_error_event_zscore =
-          (current_error_val - current_ip_state.error_rate_tracker.get_mean()) /
-          stddev;
-      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
-          "Calculated ip_error_event_zscore: " << *event.ip_error_event_zscore
-                                               << " for IP "
-                                               << raw_log.ip_address);
-    }
+  // --- Instrument User-Agent analysis ---
+  {
+    std::optional<ScopedTimer> t =
+        ua_analysis_timer ? std::optional<ScopedTimer>(*ua_analysis_timer)
+                          : std::nullopt;
+    perform_advanced_ua_analysis(std::string(raw_log.user_agent),
+                                 app_config.tier1, current_ip_state, event,
+                                 current_event_ts, max_timestamp_seen_);
   }
-
-  // Request Volume Z-score
-  if (static_cast<size_t>(
-          current_ip_state.requests_in_window_count_tracker.get_count()) >=
-      min_samples) {
-    double current_req_vol = static_cast<double>(
-        current_ip_state.request_timestamps_window.get_event_count());
-    double stddev =
-        current_ip_state.requests_in_window_count_tracker.get_stddev();
-
-    if (stddev > 0.5) {
-      event.ip_req_vol_zscore =
-          (current_req_vol -
-           current_ip_state.requests_in_window_count_tracker.get_mean()) /
-          stddev;
-      LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_ZSCORE,
-          "Calculated ip_req_vol_zscore: " << *event.ip_req_vol_zscore
-                                           << " for IP " << raw_log.ip_address);
-    }
-  }
-
-  // --- User-Agent analysis logic ---
-  perform_advanced_ua_analysis(std::string(raw_log.user_agent),
-                               app_config.tier1, current_ip_state, event,
-                               current_event_ts, max_timestamp_seen_);
 
   // --- Feature extraction for ML ---
   if (app_config.tier3.enabled || app_config.ml_data_collection_enabled) {
