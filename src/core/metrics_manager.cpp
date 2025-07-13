@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <sys/types.h>
 
+using json = nlohmann::json;
+
 void Histogram::observe(double value) {
   // Update atomics first, as they don't require a heavy lock
   double current_sum = cumulative_sum_.load(std::memory_order_relaxed);
@@ -179,49 +181,89 @@ std::string MetricsManager::expose_as_prometheus_text() {
 
 std::string MetricsManager::expose_as_json() {
   std::lock_guard<std::mutex> lock(registry_mutex_);
-  nlohmann::json j;
+  json j;
 
+  // --- General Info ---
+  auto now = std::chrono::steady_clock::now();
   j["server_timestamp_ms"] =
       std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::system_clock::now().time_since_epoch())
           .count();
+  j["app_runtime_seconds"] =
+      std::chrono::duration_cast<std::chrono::seconds>(now - start_time_)
+          .count();
 
-  // Counters
-  nlohmann::json j_counters = nlohmann::json::object();
+  // --- Labeled Counters ---
+  json j_counters = json::object();
   for (const auto &[name, counter_ptr] : labeled_counters_) {
-    if (name != "ad_logs_processed_total")
-      continue;
-
+    json j_series = json::object();
     std::lock_guard<std::mutex> series_lock(counter_ptr->series_mutex_);
+    uint64_t total = 0;
 
-    auto it = counter_ptr->series_.find({});
-    if (it != counter_ptr->series_.end())
-      j_counters[name] = it->second->val.load(std::memory_order_relaxed);
+    for (const auto &[labels, series_ptr] : counter_ptr->series_) {
+      // Create a key from labels, e.g., "tier=T1,reason=High Rate"
+      std::string label_key;
+      bool first_label = true;
+      for (const auto &[key, val] : labels) {
+        if (!first_label) {
+          label_key += ",";
+        }
+        label_key += key + "=" + val;
+        first_label = false;
+      }
+
+      // Handle the case of an empty label set (the total for a simple counter)
+      if (label_key.empty()) {
+        // This case is for counters that are registered as "labeled" but
+        // are incremented with no labels, like the old total log counter.
+        // We can skip giving it a complex key.
+      }
+
+      uint64_t val = series_ptr->val.load(std::memory_order_relaxed);
+
+      if (!label_key.empty()) {
+        j_series[label_key] = val;
+      }
+
+      total += val;
+    }
+
+    // Always include a 'total' for the entire metric.
+    j_series["total"] = total;
+    j_counters[name] = j_series;
   }
   j["counters"] = j_counters;
 
-  // Gauges
-  nlohmann::json j_gauges = nlohmann::json::object();
+  // --- Gauges ---
+  json j_gauges = json::object();
   for (const auto &[name, gauge_ptr] : gauges_) {
     j_gauges[name] = gauge_ptr->get_value();
   }
   j["gauges"] = j_gauges;
 
-  // Histograms
-  nlohmann::json j_histograms = nlohmann::json::object();
+  // --- Time Window Counters ---
+  json j_twc = json::object();
+  for (const auto &[name, twc_ptr] : time_window_counters_) {
+    j_twc[name] = twc_ptr->get_counts_in_windows();
+  }
+  j["time_window_counters"] = j_twc;
+
+  // --- Histograms ---
+  json j_histograms = json::object();
   for (const auto &[name, histo_ptr] : histograms_) {
-    auto observations = histo_ptr->get_and_clear_observations();
-
-    nlohmann::json j_observations = nlohmann::json::array();
-
+    json j_histo_details;
+    auto observations = histo_ptr->get_recent_observations();
+    json j_observations = json::array();
     for (const auto &obs_pair : observations) {
-      auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                              obs_pair.first.time_since_epoch())
-                              .count();
-      j_observations.push_back({timestamp_ms, obs_pair.second});
+      // Use relative time in seconds for the chart
+      double time_ago_s =
+          std::chrono::duration<double>(now - obs_pair.first).count();
+      j_observations.push_back({time_ago_s, obs_pair.second});
     }
+    j_histo_details["recent_observations"] = j_observations;
+    j_histograms[name] = j_histo_details;
   }
   j["histograms"] = j_histograms;
 
-  return j.dump(2); // dump with 2-space indent
+  return j.dump();
 }
