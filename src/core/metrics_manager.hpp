@@ -46,14 +46,6 @@ private:
 };
 
 struct Histogram {
-public:
-  std::pair<std::vector<std::pair<
-                std::chrono::time_point<std::chrono::steady_clock>, double>>,
-            std::mutex *>
-  get_observations_for_read() {
-    return {observations, &mtx};
-  }
-
   friend class MetricsManager;
   void observe(double value);
 
@@ -61,14 +53,22 @@ public:
       std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
   get_and_clear_observations();
 
+  double get_cumulative_sum() const;
+  uint64_t get_cumulative_count() const;
+
 private:
   Histogram(std::string name, std::string help)
       : name(std::move(name)), help(std::move(help)) {}
   std::string name;
   std::string help;
+
   std::vector<
       std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
       observations;
+
+  std::atomic<double> cumulative_sum_{0.0};
+  std::atomic<uint64_t> cumulative_count_{0};
+
   mutable std::mutex mtx;
 };
 

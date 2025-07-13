@@ -3,12 +3,20 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <sys/types.h>
 
 void Histogram::observe(double value) {
+  // Update atomics first, as they don't require a heavy lock
+  double current_sum = cumulative_sum_.load(std::memory_order_relaxed);
+  while (!cumulative_sum_.compare_exchange_weak(
+      current_sum, current_sum + value, std::memory_order_release,
+      std::memory_order_relaxed))
+    ;
+  cumulative_count_.fetch_add(1, std::memory_order_relaxed);
+
+  // Then lock and update the vector for the JSON API
   std::lock_guard<std::mutex> lock(mtx);
   observations.emplace_back(std::chrono::steady_clock::now(), value);
 }
@@ -28,6 +36,14 @@ Histogram::get_and_clear_observations() {
     std::swap(obs_copy, observations);
   }
   return obs_copy;
+}
+
+double Histogram::get_cumulative_sum() const {
+  return cumulative_sum_.load(std::memory_order_relaxed);
+}
+
+uint64_t Histogram::get_cumulative_count() const {
+  return cumulative_count_.load(std::memory_order_relaxed);
 }
 
 void LabeledCounter::increment(const MetricLabels &labels, uint64_t value) {
@@ -108,11 +124,10 @@ std::string MetricsManager::expose_as_prometheus_text() {
     ss << "# HELP " << name << " " << histo_ptr->help << "\n";
     ss << "# TYPE " << name << " histogram\n";
 
-    auto [obs, mtx] = histo_ptr->get_observations_for_read();
-    std::lock_guard<std::mutex> obs_lock(*mtx);
+    double sum = histo_ptr->get_cumulative_sum();
+    uint64_t count = histo_ptr->get_cumulative_count();
 
-    double sum = std::accumulate(obs.begin(), obs.end(), 0.0);
-    size_t count = obs.size();
+    ss << name << "_bucket{le=\"+Inf\"} " << count << "\n";
 
     ss << name << "_sum " << sum << "\n";
     ss << name << "_count " << count << "\n";
