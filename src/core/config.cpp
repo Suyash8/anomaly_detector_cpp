@@ -431,6 +431,17 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
             }
           }
         }
+
+        // Monitoring Settings
+      } else if (current_section == "Monitoring") {
+        if (key == Keys::MONITORING_ENABLE_DEEP_TIMING)
+          config.monitoring.enable_deep_timing = string_to_bool(value);
+        else if (key == Keys::MONITORING_WEB_SERVER_HOST)
+          config.monitoring.web_server_host = value;
+        else if (key == Keys::MONITORING_WEB_SERVER_PORT)
+          config.monitoring.web_server_port =
+              Utils::string_to_number<int>(value).value_or(
+                  config.monitoring.web_server_port);
       }
     } catch (const std::invalid_argument &e) {
       std::cerr << "Warning (Config Line " << line_num
