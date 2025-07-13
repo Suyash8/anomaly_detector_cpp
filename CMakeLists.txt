@@ -19,7 +19,7 @@ find_package(Threads REQUIRED) # For pthread, which was a linker flag in the mak
 
 # --- Source File Discovery ---
 # Automatically find all .cpp files in the 'src' directory and its subdirectories.
-file(GLOB_RECURSE CORE_SOURCES 
+file(GLOB_RECURSE CORE_SOURCES
     "src/analysis/*.cpp"
     "src/core/*.cpp"
     "src/detection/*.cpp"
@@ -37,10 +37,6 @@ file(GLOB_RECURSE CORE_SOURCES
 # --- Define the Core Logic Library ---
 # This creates a static library named 'ad_core' containing all our application logic.
 add_library(ad_core STATIC ${CORE_SOURCES})
-
-# # --- Define the Executable Target ---
-# # This command creates the `anomaly_detector` executable from the discovered source files.
-# add_executable(anomaly_detector ${SOURCES})
 
 # --- Set Include Directories ---
 set(ONNX_RUNTIME_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime)
@@ -80,6 +76,40 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang
     target_compile_options(ad_core PRIVATE -Wall -Wextra -pedantic)
 endif()
 
+
+# ==============================================================================
+# --- UI Pre-compilation Step ---
+# ==============================================================================
+# This section integrates the Vite/React UI build process into the C++ build.
+
+# Find the Node.js package manager (npm). This makes the script more portable.
+find_program(NPM_EXECUTABLE npm)
+if(NOT NPM_EXECUTABLE)
+    message(FATAL_ERROR "npm could not be found. Please install Node.js and ensure npm is in your PATH.")
+endif()
+
+# Define the path to the UI source directory.
+set(UI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/io/web/ui)
+
+# Define a custom target to build the React UI.
+# This target will not be built by default unless it's a dependency of another target.
+add_custom_target(
+    ui_build_target
+    # The COMMAND runs 'npm install' then 'npm run build' inside the UI directory.
+    COMMAND ${NPM_EXECUTABLE} install
+    COMMAND ${NPM_EXECUTABLE} run build
+    # Set the working directory for the commands.
+    WORKING_DIRECTORY ${UI_SOURCE_DIR}
+    COMMENT "Compiling React UI assets with Vite..."
+    # VERBATIM ensures arguments are passed correctly, especially on Windows.
+    VERBATIM
+)
+
+
+# ==============================================================================
+# --- Main Executable and Utility Targets ---
+# ==============================================================================
+
 # --- Define the Main Executable Target ---
 # The main executable is now very simple: just main.cpp.
 add_executable(anomaly_detector src/main.cpp)
@@ -88,13 +118,21 @@ add_executable(anomaly_detector src/main.cpp)
 # This gives main.cpp access to all the classes like AnalysisEngine, etc.
 target_link_libraries(anomaly_detector PRIVATE ad_core)
 
+# --- CRITICAL STEP: Make the C++ build depend on the UI build ---
+# This tells CMake: "Do not start building `anomaly_detector` until `ui_build_target` has finished successfully."
+add_dependencies(anomaly_detector ui_build_target)
+
+
 # --- Utility Target for Log Generator ---
 # This creates a separate, simple build target for the log generator utility,
 # which is not part of the main application logic. It can be built with
 # `cmake --build build --target log_generator`.
 add_executable(log_generator log_generator.cpp)
 
+
+# ==============================================================================
 # --- Installation Rules ---
+# ==============================================================================
 # This section defines what happens when `cmake --install` is run. It creates
 # a clean, distributable layout for the application and its required data files.
 
@@ -109,20 +147,24 @@ install(FILES config.ini
 )
 
 # Install the ML models and data files to a shared data directory.
-install(DIRECTORY src/models/ 
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/models/
     DESTINATION share/anomaly_detector/models
     FILES_MATCHING PATTERN "*.onnx" PATTERN "*.json"
 )
 
-install(FILES data/allowlist.txt
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/allowlist.txt
     DESTINATION share/anomaly_detector/data
 )
 
-install(DIRECTORY src/io/web/ui/
+# Install the COMPILED UI assets from the 'dist' directory, not the source.
+install(DIRECTORY ${UI_SOURCE_DIR}/dist/
     DESTINATION share/anomaly_detector/ui
 )
 
+
+# ==============================================================================
 # --- Testing Setup ---
+# ==============================================================================
 # This block is only enabled when -DBUILD_TESTING=ON is passed to CMake.
 option(BUILD_TESTING "Build the unit and integration tests" ON)
 if(BUILD_TESTING)
@@ -134,8 +176,8 @@ if(BUILD_TESTING)
     # Create a directory for test source files
     file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
 
-    # Define the test executable
-    add_executable(run_tests ${TEST_SOURCES} ${SOURCES})
+    # The test runner should not depend on the UI build, so it's defined separately.
+    add_executable(run_tests ${TEST_SOURCES})
     set_property(TARGET run_tests PROPERTY WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # Link the test executable to GTest and all the project's dependencies
@@ -146,6 +188,5 @@ if(BUILD_TESTING)
     )
 
     include(CTest)
-
     gtest_discover_tests(run_tests)
 endif()

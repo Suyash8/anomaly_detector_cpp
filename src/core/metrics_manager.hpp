@@ -71,7 +71,7 @@ private:
   std::atomic<uint64_t> cumulative_count_{0};
 
   mutable std::mutex mtx;
-  static constexpr size_t MAX_OBSERVATIONS = 2000;
+  static constexpr size_t MAX_OBSERVATIONS = 200;
 };
 
 struct TimeWindowCounter {
@@ -90,7 +90,7 @@ private:
   mutable std::mutex mtx_;
   // Keep events up to the longest window + a buffer
   static constexpr size_t MAX_TIMESTAMPS =
-      100000; // Adjust based on expected throughput
+      10; // Adjust based on expected throughput
 };
 
 class MetricsManager {

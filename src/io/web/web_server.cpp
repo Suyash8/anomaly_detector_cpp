@@ -11,7 +11,7 @@ WebServer::WebServer(const std::string &host, int port,
       alert_manager_(alert_manager), analysis_engine_(analysis_engine) {
   server_ = std::make_unique<httplib::Server>();
 
-  const char *ui_path = "./src/io/web/ui";
+  const char *ui_path = "./src/io/web/ui/dist";
   if (!server_->set_mount_point("/", ui_path)) {
     LOG(LogLevel::WARN, LogComponent::CORE,
         "Failed to set mount point for UI. UI will not be available.");
