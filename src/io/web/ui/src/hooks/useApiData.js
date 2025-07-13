@@ -9,7 +9,12 @@ export default function useApiData() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let isCancelled = false;
+
     const fetchData = async () => {
+      if (isCancelled) return;
+
+      setIsLoading(true);
       try {
         const [perfRes, alertsRes, stateRes] = await Promise.all([
           fetch("/api/v1/metrics/performance"),
@@ -25,20 +30,29 @@ export default function useApiData() {
         const alertsData = await alertsRes.json();
         const stateData = await stateRes.json();
 
-        setPerformanceData(perfData);
-        setOperationsData({ alerts: alertsData, state: stateData });
+        if (!isCancelled) {
+          setPerformanceData(perfData);
+          setOperationsData({ alerts: alertsData, state: stateData });
+          setError(null);
+        }
       } catch (e) {
-        setError(e);
-        console.error("Failed to fetch API data:", e);
+        if (!isCancelled) {
+          setError(e);
+          console.error("Failed to fetch API data:", e);
+        }
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+          setTimeout(fetchData, API_POLL_INTERVAL); // Schedule next fetch after delay
+        }
       }
     };
 
     fetchData(); // Initial fetch
-    const intervalId = setInterval(fetchData, API_POLL_INTERVAL);
 
-    return () => clearInterval(intervalId); // Cleanup on component unmount
+    return () => {
+      isCancelled = true; // Prevent further state updates after unmount
+    };
   }, []);
 
   return { performanceData, operationsData, isLoading, error };
