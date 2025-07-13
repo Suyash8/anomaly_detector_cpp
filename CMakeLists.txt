@@ -109,11 +109,18 @@ install(FILES config.ini
 )
 
 # Install the ML models and data files to a shared data directory.
-install(DIRECTORY src/models/ DESTINATION share/anomaly_detector/models
+install(DIRECTORY src/models/ 
+    DESTINATION share/anomaly_detector/models
     FILES_MATCHING PATTERN "*.onnx" PATTERN "*.json"
 )
 
-install(FILES data/allowlist.txt DESTINATION share/anomaly_detector/data)
+install(FILES data/allowlist.txt
+    DESTINATION share/anomaly_detector/data
+)
+
+install(DIRECTORY src/io/web/ui/
+    DESTINATION share/anomaly_detector/ui
+)
 
 # --- Testing Setup ---
 # This block is only enabled when -DBUILD_TESTING=ON is passed to CMake.

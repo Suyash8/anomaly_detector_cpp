@@ -2,50 +2,48 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
-#include <numeric>
+#include <cstdint>
 #include <sstream>
 #include <stdexcept>
+#include <sys/types.h>
 
 void Histogram::observe(double value) {
+  // Update atomics first, as they don't require a heavy lock
+  double current_sum = cumulative_sum_.load(std::memory_order_relaxed);
+  while (!cumulative_sum_.compare_exchange_weak(
+      current_sum, current_sum + value, std::memory_order_release,
+      std::memory_order_relaxed))
+    ;
+  cumulative_count_.fetch_add(1, std::memory_order_relaxed);
+
+  // Then lock and update the vector for the JSON API
   std::lock_guard<std::mutex> lock(mtx);
-  observations.push_back(value);
+  observations.emplace_back(std::chrono::steady_clock::now(), value);
 }
 
-std::map<double, double>
-Histogram::get_quantiles(const std::vector<double> &quantiles) {
-  std::map<double, double> results;
-  if (observations.empty()) {
-    for (double q : quantiles)
-      results[q] = 0.0;
-    return results;
-  }
-
-  // Create a copy for sorting to not block for too long
-  std::vector<double> sorted_observations;
+std::vector<
+    std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
+Histogram::get_and_clear_observations() {
+  std::vector<
+      std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
+      obs_copy;
   {
     std::lock_guard<std::mutex> lock(mtx);
-    sorted_observations = observations;
+    if (observations.empty()) {
+      return {};
+    }
+    // Swap with an empty vector, which is a fast, non-allocating way to clear
+    std::swap(obs_copy, observations);
   }
-  std::sort(sorted_observations.begin(), sorted_observations.end());
-
-  for (double q : quantiles) {
-    if (q < 0.0 || q > 1.0)
-      continue;
-    size_t index =
-        static_cast<size_t>((double)(sorted_observations.size() - 1) * q);
-    results[q] = sorted_observations[index];
-  }
-  return results;
+  return obs_copy;
 }
 
-double Histogram::get_sum() {
-  std::lock_guard<std::mutex> lock(mtx);
-  return std::accumulate(observations.begin(), observations.end(), 0.0);
+double Histogram::get_cumulative_sum() const {
+  return cumulative_sum_.load(std::memory_order_relaxed);
 }
 
-size_t Histogram::get_count() {
-  std::lock_guard<std::mutex> lock(mtx);
-  return observations.size();
+uint64_t Histogram::get_cumulative_count() const {
+  return cumulative_count_.load(std::memory_order_relaxed);
 }
 
 void LabeledCounter::increment(const MetricLabels &labels, uint64_t value) {
@@ -126,13 +124,10 @@ std::string MetricsManager::expose_as_prometheus_text() {
     ss << "# HELP " << name << " " << histo_ptr->help << "\n";
     ss << "# TYPE " << name << " histogram\n";
 
-    // This is a simplified version. A full implementation would have buckets.
-    // For now, we provide sum and count, which are standard.
-    auto [obs, mtx] = histo_ptr->get_observations_for_read();
-    std::lock_guard<std::mutex> obs_lock(*mtx);
+    double sum = histo_ptr->get_cumulative_sum();
+    uint64_t count = histo_ptr->get_cumulative_count();
 
-    double sum = std::accumulate(obs.begin(), obs.end(), 0.0);
-    size_t count = obs.size();
+    ss << name << "_bucket{le=\"+Inf\"} " << count << "\n";
 
     ss << name << "_sum " << sum << "\n";
     ss << name << "_count " << count << "\n";
@@ -145,24 +140,22 @@ std::string MetricsManager::expose_as_json() {
   std::lock_guard<std::mutex> lock(registry_mutex_);
   nlohmann::json j;
 
-  // Labeled Counters
+  j["server_timestamp_ms"] =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count();
+
+  // Counters
   nlohmann::json j_counters = nlohmann::json::object();
   for (const auto &[name, counter_ptr] : labeled_counters_) {
-    nlohmann::json j_series = nlohmann::json::object();
+    if (name != "ad_logs_processed_total")
+      continue;
+
     std::lock_guard<std::mutex> series_lock(counter_ptr->series_mutex_);
-    for (const auto &[labels, series_ptr] : counter_ptr->series_) {
-      // Create a key from labels, e.g., "tier=T1,reason=..."
-      std::string label_key;
-      for (const auto &[k, v] : labels) {
-        if (!label_key.empty())
-          label_key += ",";
-        label_key += k + "=" + v;
-      }
-      if (label_key.empty())
-        label_key = "total";
-      j_series[label_key] = series_ptr->val.load(std::memory_order_relaxed);
-    }
-    j_counters[name] = j_series;
+
+    auto it = counter_ptr->series_.find({});
+    if (it != counter_ptr->series_.end())
+      j_counters[name] = it->second->val.load(std::memory_order_relaxed);
   }
   j["counters"] = j_counters;
 
@@ -175,19 +168,17 @@ std::string MetricsManager::expose_as_json() {
 
   // Histograms
   nlohmann::json j_histograms = nlohmann::json::object();
-  std::vector<double> default_quantiles = {0.50, 0.90, 0.99};
   for (const auto &[name, histo_ptr] : histograms_) {
-    nlohmann::json j_histo_details;
-    j_histo_details["count"] = histo_ptr->get_count();
-    j_histo_details["sum"] = histo_ptr->get_sum();
+    auto observations = histo_ptr->get_and_clear_observations();
 
-    auto quantiles_map = histo_ptr->get_quantiles(default_quantiles);
-    nlohmann::json j_quantiles = nlohmann::json::object();
-    for (const auto &[q, val] : quantiles_map) {
-      j_quantiles[std::to_string(q)] = val;
+    nlohmann::json j_observations = nlohmann::json::array();
+
+    for (const auto &obs_pair : observations) {
+      auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              obs_pair.first.time_since_epoch())
+                              .count();
+      j_observations.push_back({timestamp_ms, obs_pair.second});
     }
-    j_histo_details["quantiles"] = j_quantiles;
-    j_histograms[name] = j_histo_details;
   }
   j["histograms"] = j_histograms;
 
