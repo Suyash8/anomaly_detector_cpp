@@ -34,7 +34,7 @@ document.addEventListener("DOMContentLoaded", () => {
     init() {
       this.setupNavigation();
       this.setupCharts();
-      this.startDataFetching();
+      this.startSequentialFetching();
     },
 
     setupNavigation() {
@@ -137,31 +137,54 @@ document.addEventListener("DOMContentLoaded", () => {
       setInterval(() => this.fetchOperationsData(), this.updateInterval * 2);
     },
 
-    async fetchPerformanceData() {
+    startSequentialFetching() {
+      this.sequentialFetchLoop(
+        this.fetchPerformanceData.bind(this),
+        this.updateInterval
+      );
+      this.sequentialFetchLoop(
+        this.fetchOperationsData.bind(this),
+        this.updateInterval * 2
+      );
+    },
+
+    async sequentialFetchLoop(fetchFunction, interval) {
       try {
-        const response = await fetch("/api/v1/metrics/performance");
-        if (!response.ok) return;
-        const data = await response.json();
-        this.updatePerformanceView(data);
-      } catch (e) {
-        console.error("Perf fetch failed:", e);
+        await fetchFunction();
+      } catch (error) {
+        console.error("Data fetch failed, will retry after interval:", error);
+      } finally {
+        setTimeout(
+          () => this.sequentialFetchLoop(fetchFunction, interval),
+          interval
+        );
       }
+    },
+
+    async fetchPerformanceData() {
+      const response = await fetch("/api/v1/metrics/performance");
+      if (!response.ok)
+        throw new Error(`Perf API returned status ${response.status}`);
+
+      const data = await response.json();
+      this.updatePerformanceView(data);
     },
 
     async fetchOperationsData() {
-      try {
-        const [alertsRes, stateRes] = await Promise.all([
-          fetch("/api/v1/operations/alerts"),
-          fetch("/api/v1/operations/state"),
-        ]);
-        if (alertsRes.ok) this.updateAlertsView(await alertsRes.json());
-        if (stateRes.ok) this.updateWidgets(await stateRes.json());
-      } catch (e) {
-        console.error("Ops fetch failed:", e);
-      }
+      const [alertsRes, stateRes] = await Promise.all([
+        fetch("/api/v1/operations/alerts"),
+        fetch("/api/v1/operations/state"),
+      ]);
+      if (alertsRes.ok) this.updateAlertsView(await alertsRes.json());
+      else console.warn(`Alerts API returned status ${alertsRes.status}`);
+
+      if (stateRes.ok) this.updateWidgets(await stateRes.json());
+      else console.warn(`State API returned status ${stateRes.status}`);
     },
 
     updatePerformanceView(data) {
+      console.log("Performance data:", data);
+
       // KPIs
       const logs_per_sec =
         data.counters?.ad_logs_processed_total?.["total"]?.rate_per_second || 0;
