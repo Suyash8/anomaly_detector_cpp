@@ -77,6 +77,7 @@ TimeWindowCounter::get_counts_in_windows() const {
                                std::greater<>());
     results[name] = std::distance(timestamps_.rbegin(), it);
   }
+  results["total"] = timestamps_.size();
   return results;
 }
 

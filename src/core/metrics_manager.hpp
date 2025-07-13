@@ -90,7 +90,7 @@ private:
   mutable std::mutex mtx_;
   // Keep events up to the longest window + a buffer
   static constexpr size_t MAX_TIMESTAMPS =
-      10; // Adjust based on expected throughput
+      100000; // Adjust based on expected throughput
 };
 
 class MetricsManager {
