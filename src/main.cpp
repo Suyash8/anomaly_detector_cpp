@@ -187,10 +187,11 @@ int main(int argc, char *argv[]) {
   web_server.start();
 
   // --- Metrics Registration ---
-  auto *logs_processed_counter =
-      MetricsManager::instance().register_labeled_counter(
-          "ad_logs_processed_total",
-          "Total number of log entries processed since startup.");
+  auto *logs_processed_twc =
+      MetricsManager::instance().register_time_window_counter(
+          "ad_logs_processed", "Timestamped counter for processed logs to "
+                               "calculate windowed rates.");
+
   auto *batch_processing_timer = MetricsManager::instance().register_histogram(
       "ad_batch_processing_duration_seconds",
       "Latency of processing a batch of logs.");
@@ -313,7 +314,7 @@ int main(int argc, char *argv[]) {
 
         for (auto log_entry : log_batch) {
           total_processed_count++;
-          logs_processed_counter->increment({});
+          logs_processed_twc->record_event();
 
           if (log_entry.successfully_parsed_structure) {
             auto analyzed_event =
