@@ -74,6 +74,25 @@ private:
   static constexpr size_t MAX_OBSERVATIONS = 2000;
 };
 
+struct TimeWindowCounter {
+public:
+  friend class MetricsManager;
+  void record_event();
+  // Calculates counts for various windows up to 'now'
+  std::map<std::string, uint64_t> get_counts_in_windows() const;
+
+private:
+  TimeWindowCounter(std::string name, std::string help)
+      : name_(std::move(name)), help_(std::move(help)) {}
+  std::string name_;
+  std::string help_;
+  std::deque<std::chrono::time_point<std::chrono::steady_clock>> timestamps_;
+  mutable std::mutex mtx_;
+  // Keep events up to the longest window + a buffer
+  static constexpr size_t MAX_TIMESTAMPS =
+      100000; // Adjust based on expected throughput
+};
+
 class MetricsManager {
 public:
   static MetricsManager &instance();
@@ -88,17 +107,25 @@ public:
   Histogram *register_histogram(const std::string &name,
                                 const std::string &help_text);
 
+  TimeWindowCounter *register_time_window_counter(const std::string &name,
+                                                  const std::string &help_text);
+  std::chrono::time_point<std::chrono::steady_clock> get_start_time() const;
+
   std::string expose_as_prometheus_text();
   std::string expose_as_json();
 
 private:
-  MetricsManager() = default;
+  MetricsManager() : start_time_(std::chrono::steady_clock::now()) {}
   ~MetricsManager() = default;
 
   std::map<std::string, std::unique_ptr<LabeledCounter>> labeled_counters_;
   std::map<std::string, std::unique_ptr<Gauge>> gauges_;
   std::map<std::string, std::unique_ptr<Histogram>> histograms_;
   std::mutex registry_mutex_;
+
+  std::map<std::string, std::unique_ptr<TimeWindowCounter>>
+      time_window_counters_;
+  const std::chrono::time_point<std::chrono::steady_clock> start_time_;
 };
 
 #endif // METRICS_MANAGER_HPP

@@ -47,6 +47,37 @@ void LabeledCounter::increment(const MetricLabels &labels, uint64_t value) {
   series_[labels]->val.fetch_add(value, std::memory_order_relaxed);
 }
 
+void TimeWindowCounter::record_event() {
+  std::lock_guard<std::mutex> lock(mtx_);
+  timestamps_.push_front(std::chrono::steady_clock::now());
+  if (timestamps_.size() > MAX_TIMESTAMPS) {
+    timestamps_.pop_back();
+  }
+}
+
+std::map<std::string, uint64_t>
+TimeWindowCounter::get_counts_in_windows() const {
+  std::map<std::string, uint64_t> results;
+  std::map<std::string, std::chrono::seconds> windows = {
+      {"1m", std::chrono::minutes(1)},
+      {"10m", std::chrono::minutes(10)},
+      {"30m", std::chrono::minutes(30)},
+      {"1h", std::chrono::hours(1)}};
+
+  auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lock(mtx_);
+
+  for (const auto &[name, duration] : windows) {
+    auto cutoff = now - duration;
+    // std::upper_bound is efficient on a sorted deque (which ours is, by
+    // insertion time)
+    auto it = std::upper_bound(timestamps_.rbegin(), timestamps_.rend(), cutoff,
+                               std::greater<>());
+    results[name] = std::distance(timestamps_.rbegin(), it);
+  }
+  return results;
+}
+
 MetricsManager &MetricsManager::instance() {
   static MetricsManager instance;
   return instance;
@@ -83,6 +114,23 @@ Histogram *MetricsManager::register_histogram(const std::string &name,
   histograms_[name] =
       std::unique_ptr<Histogram>(new Histogram(name, help_text));
   return histograms_[name].get();
+}
+
+TimeWindowCounter *
+MetricsManager::register_time_window_counter(const std::string &name,
+                                             const std::string &help_text) {
+  std::lock_guard<std::mutex> lock(registry_mutex_);
+  if (time_window_counters_.count(name)) {
+    throw std::runtime_error("Metric already registered: " + name);
+  }
+  time_window_counters_[name] = std::unique_ptr<TimeWindowCounter>(
+      new TimeWindowCounter(name, help_text));
+  return time_window_counters_[name].get();
+}
+
+std::chrono::time_point<std::chrono::steady_clock>
+MetricsManager::get_start_time() const {
+  return start_time_;
 }
 
 std::string MetricsManager::expose_as_prometheus_text() {
