@@ -2,9 +2,11 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+#include <sys/types.h>
 
 void Histogram::observe(double value) {
   std::lock_guard<std::mutex> lock(mtx);
@@ -121,24 +123,58 @@ std::string MetricsManager::expose_as_json() {
   std::lock_guard<std::mutex> lock(registry_mutex_);
   nlohmann::json j;
 
+  auto now = std::chrono::steady_clock::now();
+  auto time_diff = std::chrono::duration_cast<std::chrono::duration<double>>(
+      now - last_api_call_time_);
+  double time_delta_seconds = time_diff.count();
+  last_api_call_time_ = now;
+
+  j["time_delta_seconds"] = time_delta_seconds;
+
   // Labeled Counters
   nlohmann::json j_counters = nlohmann::json::object();
   for (const auto &[name, counter_ptr] : labeled_counters_) {
-    nlohmann::json j_series = nlohmann::json::object();
+    nlohmann::json j_series_map = nlohmann::json::object();
     std::lock_guard<std::mutex> series_lock(counter_ptr->series_mutex_);
+
     for (const auto &[labels, series_ptr] : counter_ptr->series_) {
       // Create a key from labels, e.g., "tier=T1,reason=..."
       std::string label_key;
+
       for (const auto &[k, v] : labels) {
         if (!label_key.empty())
           label_key += ",";
         label_key += k + "=" + v;
       }
+
       if (label_key.empty())
         label_key = "total";
-      j_series[label_key] = series_ptr->val.load(std::memory_order_relaxed);
+
+      nlohmann::json series_data;
+      uint64_t current_val = series_ptr->val.load(std::memory_order_relaxed);
+
+      // Get the last known value for this specific series
+      uint64_t last_val = 0;
+      std::string unique_series_key =
+          name + "{" + label_key + "}"; // e.g., ad_logs_processed_total{total}
+
+      if (last_counter_values_.count(unique_series_key)) {
+        last_val = last_counter_values_[unique_series_key];
+      }
+
+      uint64_t delta =
+          (current_val >= last_val) ? (current_val - last_val) : current_val;
+
+      series_data["total"] = current_val;
+      series_data["delta"] = delta;
+      series_data["rate_per_second"] = delta / time_delta_seconds;
+
+      j_series_map[label_key] = series_data;
+
+      // Update the state for the next call
+      last_counter_values_[unique_series_key] = current_val;
     }
-    j_counters[name] = j_series;
+    j_counters[name] = j_series_map;
   }
   j["counters"] = j_counters;
 

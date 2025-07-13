@@ -82,7 +82,7 @@ public:
   std::string expose_as_json();
 
 private:
-  MetricsManager() = default;
+  MetricsManager() : last_api_call_time_(std::chrono::steady_clock::now()) {}
   ~MetricsManager() = default;
 
   std::map<std::string, std::unique_ptr<LabeledCounter>> labeled_counters_;

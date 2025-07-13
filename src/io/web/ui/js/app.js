@@ -132,17 +132,25 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     updateUI(data) {
-      const now = Date.now();
-      const timeDiffSec = (now - this.lastTimestamp) / 1000;
-      this.lastTimestamp = now;
+      // const now = Date.now();
+      // const timeDiffSec = (now - this.lastTimestamp) / 1000;
+      // this.lastTimestamp = now;
 
       // Update KPIs
-      const logCount = data.counters?.ad_logs_processed_total?.total || 0;
-      const logDelta = logCount - this.lastLogCount;
-      this.lastLogCount = logCount;
-      this.elements.kpiLogsPerSec.textContent = (
-        logDelta / timeDiffSec
-      ).toFixed(1);
+      const logs_per_sec =
+        data.counters?.ad_logs_processed_total?.["total"]?.rate_per_second || 0;
+      this.elements.kpiLogsPerSec.textContent = logs_per_sec.toFixed(1);
+
+      const alerts_data = data.counters?.ad_alerts_generated_total || {};
+      const total_alert_delta = Object.values(alerts_data).reduce(
+        (sum, item) => sum + (item.delta || 0),
+        0
+      );
+      const alerts_per_min =
+        data.time_delta_seconds > 0
+          ? (total_alert_delta / data.time_delta_seconds) * 60
+          : 0.0;
+      this.elements.kpiAlertsPerMin.textContent = alerts_per_min.toFixed(1);
 
       const alertCount = data.counters?.ad_alerts_generated_total
         ? Object.values(data.counters.ad_alerts_generated_total).reduce(
