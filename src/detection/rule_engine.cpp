@@ -5,6 +5,7 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
+#include "core/metrics_manager.hpp"
 #include "io/threat_intel/intel_manager.hpp"
 #include "models/model_manager.hpp"
 #include "rules/scoring.hpp"
@@ -73,9 +74,30 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
           "ad_rule_engine_evaluation_duration_seconds",
           "Latency of the entire RuleEngine::evaluate_rules function.");
   ScopedTimer timer(*evaluation_timer);
-
   LOG(LogLevel::TRACE, LogComponent::RULES_EVAL,
       "Entering evaluate_rules for IP: " << event_ref.raw_log.ip_address);
+
+  // --- Granular Timers ---
+  static Histogram *tier1_timer =
+      app_config.monitoring.enable_deep_timing
+          ? MetricsManager::instance().register_histogram(
+                "ad_rules_tier1_duration_seconds",
+                "Latency of evaluating Tier 1 (Heuristic) rules.")
+          : nullptr;
+
+  static Histogram *tier2_timer =
+      app_config.monitoring.enable_deep_timing
+          ? MetricsManager::instance().register_histogram(
+                "ad_rules_tier2_duration_seconds",
+                "Latency of evaluating Tier 2 (Statistical) rules.")
+          : nullptr;
+
+  static Histogram *tier3_timer =
+      app_config.monitoring.enable_deep_timing
+          ? MetricsManager::instance().register_histogram(
+                "ad_rules_tier3_duration_seconds",
+                "Latency of evaluating Tier 3 (ML) rules.")
+          : nullptr;
 
   // --- Pre-checks: Threat Intel and Allowlist ---
   uint32_t event_ip_u32 =
@@ -106,6 +128,9 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
   const auto event = std::make_shared<const AnalyzedEvent>(event_ref);
 
   if (app_config.tier1.enabled) {
+    std::optional<ScopedTimer> t =
+        tier1_timer ? std::optional<ScopedTimer>(*tier1_timer) : std::nullopt;
+
     LOG(LogLevel::DEBUG, LogComponent::RULES_EVAL,
         "Evaluating Tier 1 rules for IP: " << event->raw_log.ip_address);
     check_requests_per_ip_rule(*event);
@@ -120,6 +145,9 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
         "Tier 1 rules are disabled.");
 
   if (app_config.tier2.enabled) {
+    std::optional<ScopedTimer> t =
+        tier2_timer ? std::optional<ScopedTimer>(*tier2_timer) : std::nullopt;
+
     LOG(LogLevel::DEBUG, LogComponent::RULES_EVAL,
         "Evaluating Tier 2 rules for IP: " << event->raw_log.ip_address);
     check_ip_zscore_rules(*event);
@@ -130,6 +158,9 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
         "Tier 2 rules are disabled.");
 
   if (app_config.tier3.enabled) {
+    std::optional<ScopedTimer> t =
+        tier3_timer ? std::optional<ScopedTimer>(*tier3_timer) : std::nullopt;
+
     LOG(LogLevel::DEBUG, LogComponent::RULES_EVAL,
         "Evaluating Tier 3 rules for IP: " << event->raw_log.ip_address);
     check_ml_rules(*event);

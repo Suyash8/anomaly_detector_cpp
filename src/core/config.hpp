@@ -126,6 +126,11 @@ constexpr const char *MO_TIMESTAMP_FIELD_NAME = "timestamp_field_name";
 
 // Logging Settings
 constexpr const char *LOGGING_DEFAULT_LEVEL = "default_level";
+
+// Monitoring Settings
+constexpr const char *MONITORING_ENABLE_DEEP_TIMING = "enable_deep_timing";
+constexpr const char *MONITORING_WEB_SERVER_HOST = "web_server_host";
+constexpr const char *MONITORING_WEB_SERVER_PORT = "web_server_port";
 } // namespace Keys
 
 struct LoggingConfig {
@@ -214,6 +219,12 @@ struct MongoLogSourceConfig {
   std::string timestamp_field_name = "timestamp";
 };
 
+struct MonitoringConfig {
+  bool enable_deep_timing = false;
+  std::string web_server_host = "0.0.0.0";
+  int web_server_port = 9090;
+};
+
 struct AppConfig {
   std::string log_source_type = "mongodb";
   std::string log_input_path = "data/sample_log.txt";
@@ -243,6 +254,7 @@ struct AppConfig {
   ThreatIntelConfig threat_intel;
   MongoLogSourceConfig mongo_log_source;
   LoggingConfig logging;
+  MonitoringConfig monitoring;
 
   bool ml_data_collection_enabled = false;
   std::string ml_data_collection_path = "data/training_features.csv";

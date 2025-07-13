@@ -1,5 +1,7 @@
 #include "models/onnx_model.hpp"
 #include "core/logger.hpp"
+#include "core/metrics_manager.hpp"
+#include "utils/scoped_timer.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -93,8 +95,14 @@ void ONNXModel::load_metadata(const std::string &metadata_path) {
 
 std::pair<double, std::vector<std::string>>
 ONNXModel::score_with_explanation(const std::vector<double> &features) {
+  static Histogram *inference_timer =
+      MetricsManager::instance().register_histogram(
+          "ad_ml_inference_duration_seconds",
+          "Latency of a single ONNX model inference call.");
+
   LOG(LogLevel::TRACE, LogComponent::ML_INFERENCE,
       "Entering ONNXModel::score_with_explanation.");
+
   if (!ready_ ||
       (features.size() != static_cast<size_t>(input_node_dims_[1]))) {
     LOG(LogLevel::ERROR, LogComponent::ML_INFERENCE,
@@ -115,9 +123,16 @@ ONNXModel::score_with_explanation(const std::vector<double> &features) {
   LOG(LogLevel::TRACE, LogComponent::ML_INFERENCE,
       "Created input tensor for ONNX Runtime.");
 
-  auto output_tensors = session_.Run(
-      Ort::RunOptions{nullptr}, input_node_names_.data(), &input_tensor, 1,
-      output_node_names_.data(), output_node_names_.size());
+  // Instrument the Run() call
+  std::vector<Ort::Value> output_tensors;
+
+  {
+    ScopedTimer timer(*inference_timer);
+    output_tensors = session_.Run(
+        Ort::RunOptions{nullptr}, input_node_names_.data(), &input_tensor, 1,
+        output_node_names_.data(), output_node_names_.size());
+  }
+
   LOG(LogLevel::TRACE, LogComponent::ML_INFERENCE,
       "ONNX session Run() completed.");
 
