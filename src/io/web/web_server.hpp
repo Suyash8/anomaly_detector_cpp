@@ -21,9 +21,12 @@ public:
 
 private:
   void run();
+  void monitor_memory();
 
   std::unique_ptr<httplib::Server> server_;
   std::thread server_thread_;
+  std::thread memory_monitor_thread_;
+  std::atomic<bool> shutdown_flag_{false};
   std::string host_;
   int port_;
   MetricsManager &metrics_manager_;

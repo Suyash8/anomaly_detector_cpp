@@ -180,8 +180,10 @@ int main(int argc, char *argv[]) {
                                   model_manager);
 
   // --- Initialize Web Server ---
-  WebServer web_server("0.0.0.0", 9090, MetricsManager::instance(),
-                       alert_manager_instance, analysis_engine_instance);
+  WebServer web_server(config_manager.get_config()->monitoring.web_server_host,
+                       config_manager.get_config()->monitoring.web_server_port,
+                       MetricsManager::instance(), alert_manager_instance,
+                       analysis_engine_instance);
   web_server.start();
 
   // --- Metrics Registration ---

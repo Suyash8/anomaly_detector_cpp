@@ -1,6 +1,7 @@
 #include "web_server.hpp"
 #include "core/logger.hpp"
 #include "utils/json_formatter.hpp"
+#include <chrono>
 
 WebServer::WebServer(const std::string &host, int port,
                      MetricsManager &metrics_manager,
@@ -64,23 +65,29 @@ WebServer::WebServer(const std::string &host, int port,
 }
 
 WebServer::~WebServer() {
-  if (server_thread_.joinable()) {
+  if (server_thread_.joinable() || memory_monitor_thread_.joinable())
     stop();
-  }
 }
 
 void WebServer::start() {
-  if (server_thread_.joinable()) {
+  if (server_thread_.joinable())
     return; // Already running
-  }
+
   server_thread_ = std::thread(&WebServer::run, this);
+#if defined(__linux__)
+  memory_monitor_thread_ = std::thread(&WebServer::monitor_memory, this);
+#endif
   server_thread_.detach(); // Run in the background
 }
 
 void WebServer::stop() {
-  if (server_) {
+  shutdown_flag_ = true;
+  if (server_)
     server_->stop();
-  }
+
+  if (memory_monitor_thread_.joinable())
+    memory_monitor_thread_.join();
+
   // Note: Since we detach, we can't join. Stop is best-effort.
   LOG(LogLevel::INFO, LogComponent::CORE, "Web server stopping...");
 }
@@ -93,3 +100,29 @@ void WebServer::run() {
         "Web server failed to listen on " << host_ << ":" << port_);
   }
 }
+
+#if defined(__linux__)
+void WebServer::monitor_memory() {
+  Gauge *memory_gauge = metrics_manager_.register_gauge(
+      "ad_process_memory_rss_bytes", "Resident Set Size (RSS) memory usage.");
+  while (!shutdown_flag_) {
+    std::ifstream statm("/proc/self/statm");
+    if (statm.is_open()) {
+      long long size, resident, share, text, lib, data, dt;
+      statm >> size >> resident >> share >> text >> lib >> data >> dt;
+      long page_size = getpagesize();
+      memory_gauge->set(static_cast<double>(resident * page_size));
+    }
+
+    for (int i = 0; i < 150; ++i) {
+      if (shutdown_flag_)
+        break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+}
+#else
+void WebServer::monitor_memory() {
+  // No-op on non-Linux systems
+}
+#endif
