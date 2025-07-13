@@ -2,6 +2,7 @@
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <sstream>
 #include <stdexcept>
@@ -18,24 +19,16 @@ void Histogram::observe(double value) {
 
   // Then lock and update the vector for the JSON API
   std::lock_guard<std::mutex> lock(mtx);
-  observations.emplace_back(std::chrono::steady_clock::now(), value);
+  observations_.emplace_front(std::chrono::steady_clock::now(), value);
+  if (observations_.size() > MAX_OBSERVATIONS)
+    observations_.pop_back();
 }
 
 std::vector<
     std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
-Histogram::get_and_clear_observations() {
-  std::vector<
-      std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
-      obs_copy;
-  {
-    std::lock_guard<std::mutex> lock(mtx);
-    if (observations.empty()) {
-      return {};
-    }
-    // Swap with an empty vector, which is a fast, non-allocating way to clear
-    std::swap(obs_copy, observations);
-  }
-  return obs_copy;
+Histogram::get_recent_observations() const {
+  std::lock_guard<std::mutex> lock(mtx);
+  return {observations_.begin(), observations_.end()};
 }
 
 double Histogram::get_cumulative_sum() const {

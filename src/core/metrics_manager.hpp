@@ -2,6 +2,7 @@
 #define METRICS_MANAGER_HPP
 
 #include <atomic>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -51,7 +52,7 @@ struct Histogram {
 
   std::vector<
       std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
-  get_and_clear_observations();
+  get_recent_observations() const;
 
   double get_cumulative_sum() const;
   uint64_t get_cumulative_count() const;
@@ -62,14 +63,15 @@ private:
   std::string name;
   std::string help;
 
-  std::vector<
+  std::deque<
       std::pair<std::chrono::time_point<std::chrono::steady_clock>, double>>
-      observations;
+      observations_;
 
   std::atomic<double> cumulative_sum_{0.0};
   std::atomic<uint64_t> cumulative_count_{0};
 
   mutable std::mutex mtx;
+  static constexpr size_t MAX_OBSERVATIONS = 2000;
 };
 
 class MetricsManager {
