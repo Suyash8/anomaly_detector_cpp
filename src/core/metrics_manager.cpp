@@ -11,41 +11,17 @@ void Histogram::observe(double value) {
   observations.push_back(value);
 }
 
-std::map<double, double>
-Histogram::get_quantiles(const std::vector<double> &quantiles) {
-  std::map<double, double> results;
-  if (observations.empty()) {
-    for (double q : quantiles)
-      results[q] = 0.0;
-    return results;
-  }
-
-  // Create a copy for sorting to not block for too long
-  std::vector<double> sorted_observations;
+std::vector<double> Histogram::get_and_clear_observations() {
+  std::vector<double> obs_copy;
   {
     std::lock_guard<std::mutex> lock(mtx);
-    sorted_observations = observations;
+    if (observations.empty()) {
+      return {};
+    }
+    // Swap with an empty vector, which is a fast, non-allocating way to clear
+    std::swap(obs_copy, observations);
   }
-  std::sort(sorted_observations.begin(), sorted_observations.end());
-
-  for (double q : quantiles) {
-    if (q < 0.0 || q > 1.0)
-      continue;
-    size_t index =
-        static_cast<size_t>((double)(sorted_observations.size() - 1) * q);
-    results[q] = sorted_observations[index];
-  }
-  return results;
-}
-
-double Histogram::get_sum() {
-  std::lock_guard<std::mutex> lock(mtx);
-  return std::accumulate(observations.begin(), observations.end(), 0.0);
-}
-
-size_t Histogram::get_count() {
-  std::lock_guard<std::mutex> lock(mtx);
-  return observations.size();
+  return obs_copy;
 }
 
 void LabeledCounter::increment(const MetricLabels &labels, uint64_t value) {
@@ -177,15 +153,26 @@ std::string MetricsManager::expose_as_json() {
   nlohmann::json j_histograms = nlohmann::json::object();
   std::vector<double> default_quantiles = {0.50, 0.90, 0.99};
   for (const auto &[name, histo_ptr] : histograms_) {
-    nlohmann::json j_histo_details;
-    j_histo_details["count"] = histo_ptr->get_count();
-    j_histo_details["sum"] = histo_ptr->get_sum();
+    std::vector<double> observations = histo_ptr->get_and_clear_observations();
 
-    auto quantiles_map = histo_ptr->get_quantiles(default_quantiles);
+    nlohmann::json j_histo_details;
+    j_histo_details["count"] = observations.size();
+    j_histo_details["sum"] =
+        std::accumulate(observations.begin(), observations.end(), 0.0);
+
     nlohmann::json j_quantiles = nlohmann::json::object();
-    for (const auto &[q, val] : quantiles_map) {
-      j_quantiles[std::to_string(q)] = val;
+    if (!observations.empty()) {
+      std::sort(observations.begin(), observations.end());
+      for (double q : default_quantiles) {
+        size_t index =
+            static_cast<size_t>((double)(observations.size() - 1) * q);
+        j_quantiles[std::to_string(q)] = observations[index];
+      }
+    } else {
+      for (double q : default_quantiles)
+        j_quantiles[std::to_string(q)] = 0.0;
     }
+
     j_histo_details["quantiles"] = j_quantiles;
     j_histograms[name] = j_histo_details;
   }

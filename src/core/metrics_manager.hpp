@@ -2,7 +2,6 @@
 #define METRICS_MANAGER_HPP
 
 #include <atomic>
-#include <cstddef>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -54,9 +53,7 @@ public:
   friend class MetricsManager;
   void observe(double value);
 
-  std::map<double, double> get_quantiles(const std::vector<double> &quantiles);
-  double get_sum();
-  size_t get_count();
+  std::vector<double> get_and_clear_observations();
 
 private:
   Histogram(std::string name, std::string help)
@@ -92,6 +89,9 @@ private:
   std::map<std::string, std::unique_ptr<Gauge>> gauges_;
   std::map<std::string, std::unique_ptr<Histogram>> histograms_;
   std::mutex registry_mutex_;
+
+  std::chrono::time_point<std::chrono::steady_clock> last_api_call_time_;
+  std::map<std::string, uint64_t> last_counter_values_;
 };
 
 #endif // METRICS_MANAGER_HPP
