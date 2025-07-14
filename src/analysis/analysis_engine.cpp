@@ -492,27 +492,26 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   if (current_ip_state.ip_first_seen_timestamp_ms == 0) {
     current_ip_state.ip_first_seen_timestamp_ms = current_event_ts;
     event.is_first_request_from_ip = true;
-    LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_LIFECYCLE,
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
         "First request ever seen from IP: " << raw_log.ip_address);
   }
 
   if (current_ip_state.paths_seen_by_ip.find(raw_log.request_path) ==
       current_ip_state.paths_seen_by_ip.end()) {
     event.is_path_new_for_ip = true;
-    LOG(LogLevel::DEBUG, LogComponent::ANALYSIS_LIFECYCLE,
+    LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
         "IP " << raw_log.ip_address
               << " accessed a new path: " << raw_log.request_path);
 
     // Enforce the cap from the configuration to prevent unbounded memory growth
     const size_t path_cap = app_config.tier1.max_unique_paths_stored_per_ip;
-    if (path_cap == 0 || current_ip_state.paths_seen_by_ip.size() < path_cap) {
+    if (path_cap == 0 || current_ip_state.paths_seen_by_ip.size() < path_cap)
       current_ip_state.paths_seen_by_ip.insert(raw_log.request_path);
-    } else {
+    else
       LOG(LogLevel::WARN, LogComponent::ANALYSIS_LIFECYCLE,
           "Paths seen by IP " << raw_log.ip_address
                               << " has reached its cap of " << path_cap
                               << ". Not storing new path.");
-    }
   }
 
   // --- Tier 1 window updates ---
@@ -1015,4 +1014,40 @@ AnalysisEngine::get_top_n_by_metric(size_t n, const std::string &metric_name) {
   top_n.assign(all_ips.begin(), all_ips.begin() + limit);
 
   return top_n;
+}
+
+EngineStateMetrics AnalysisEngine::get_internal_state_metrics() const {
+  EngineStateMetrics metrics;
+
+  // This method is read-only, but if the engine were multi-threaded,
+  // we would need to acquire a read-lock here to safely iterate the maps.
+
+  metrics.total_ip_states = ip_activity_trackers.size();
+  for (const auto &[ip, state] : ip_activity_trackers) {
+    metrics.total_ip_asset_req_window_elements +=
+        state.get_asset_request_timestamps_count();
+    metrics.total_ip_failed_login_window_elements +=
+        state.get_failed_login_timestamps_count();
+    metrics.total_ip_html_req_window_elements +=
+        state.get_html_request_timestamps_count();
+    metrics.total_ip_asset_req_window_elements +=
+        state.get_asset_request_timestamps_count();
+    metrics.total_ip_ua_window_elements += state.get_recent_unique_ua_count();
+    metrics.total_ip_paths_seen_elements += state.get_paths_seen_count();
+    metrics.total_ip_historical_ua_elements +=
+        state.get_historical_user_agents_count();
+  }
+
+  metrics.total_path_states = path_activity_trackers.size();
+
+  metrics.total_session_states = session_trackers.size();
+  for (const auto &[key, state] : session_trackers) {
+    metrics.total_session_req_window_elements +=
+        state.get_request_timestamps_count();
+    metrics.total_session_unique_paths += state.get_unique_paths_count();
+    metrics.total_session_unique_user_agents +=
+        state.get_unique_user_agents_count();
+  }
+
+  return metrics;
 }
