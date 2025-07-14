@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <sys/types.h>
@@ -237,9 +238,27 @@ std::string MetricsManager::expose_as_json() {
 
   // --- Gauges ---
   json j_gauges = json::object();
+
+  const std::regex labeled_metric_regex(
+      "([a-zA-Z0-9_]+)\\{([a-zA-Z0-9_]+)=\"([a-zA-Z0-9_]+)\"\\}");
+  std::smatch match;
+
   for (const auto &[name, gauge_ptr] : gauges_) {
-    j_gauges[name] = gauge_ptr->get_value();
+    if (std::regex_match(name, match, labeled_metric_regex)) {
+
+      std::string metric_name = match[1].str();
+      std::string label_value = match[3].str();
+
+      if (!j_gauges.contains(metric_name)) {
+        j_gauges[metric_name] = json::object();
+      }
+
+      j_gauges[metric_name][label_value] = gauge_ptr->get_value();
+    } else {
+      j_gauges[name] = gauge_ptr->get_value();
+    }
   }
+
   j["gauges"] = j_gauges;
 
   // --- Time Window Counters ---
