@@ -14,6 +14,7 @@
 #include "utils/scoped_timer.hpp"
 #include "utils/thread_safe_queue.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -295,6 +296,18 @@ int main(int argc, char *argv[]) {
   std::thread reader_thread(log_reader_thread, std::ref(*log_reader),
                             std::ref(log_queue),
                             std::ref(g_shutdown_requested));
+
+  // --- Worker Pool Setup ---
+  // We subtract 2 to leave one core for the Log Reader thread and one for the
+  // OS/Alerting/Dispatching
+  const unsigned int num_workers =
+      std::max(1u, std::thread::hardware_concurrency() - 2);
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Initializing with " << num_workers << " worker threads.");
+  std::vector<std::unique_ptr<ThreadSafeQueue<LogEntry>>> worker_queues;
+  for (unsigned int i = 0; i < num_workers; ++i)
+    worker_queues.push_back(std::make_unique<ThreadSafeQueue<LogEntry>>());
+  std::vector<std::thread> worker_threads;
 
   // Load state on startup
   if (current_config->state_persistence_enabled) {
