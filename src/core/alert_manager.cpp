@@ -17,10 +17,17 @@ AlertManager::AlertManager() : output_alerts_to_stdout(true) {
   std::cout << "AlertManager created" << std::endl;
 }
 
-AlertManager::~AlertManager() { flush_all_alerts(); }
+AlertManager::~AlertManager() {
+  shutdown_flag_ = true;
+  alert_queue_.shutdown();
+  if (dispatcher_thread_.joinable())
+    dispatcher_thread_.join();
+  flush_all_alerts();
+}
 
 void AlertManager::initialize(const Config::AppConfig &app_config) {
   reconfigure(app_config);
+  dispatcher_thread_ = std::thread(&AlertManager::dispatcher_loop, this);
 }
 
 void AlertManager::reconfigure(const Config::AppConfig &new_config) {

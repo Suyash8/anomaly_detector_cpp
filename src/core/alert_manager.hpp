@@ -3,11 +3,14 @@
 
 #include "config.hpp"
 #include "io/alert_dispatch/base_dispatcher.hpp"
+#include "utils/thread_safe_queue.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -30,9 +33,14 @@ public:
   std::vector<Alert> get_recent_alerts(size_t limit) const;
 
 private:
+  void dispatcher_loop();
   std::string format_alert_to_human_readable(const Alert &alert_data) const;
 
   std::vector<std::unique_ptr<IAlertDispatcher>> dispatchers_;
+
+  ThreadSafeQueue<Alert> alert_queue_;
+  std::thread dispatcher_thread_;
+  std::atomic<bool> shutdown_flag_{false};
 
   bool output_alerts_to_stdout;
   uint64_t throttle_duration_ms_ = 0;
