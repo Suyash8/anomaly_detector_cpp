@@ -81,9 +81,8 @@ void AlertManager::record_alert(const Alert &new_alert) {
           (alert_throttle_max_intervening_alerts_ > 0) &&
           (intervening_alerts >= alert_throttle_max_intervening_alerts_);
 
-      if (is_in_time_window && !has_exceeded_intervening_limit) {
+      if (is_in_time_window && !has_exceeded_intervening_limit)
         return; // Suppress the alert
-      }
     }
 
     // If we are here, the alert will be recorded
@@ -95,16 +94,11 @@ void AlertManager::record_alert(const Alert &new_alert) {
   {
     std::lock_guard<std::mutex> lock(recent_alerts_mutex_);
     recent_alerts_.push_front(new_alert);
-    if (recent_alerts_.size() > MAX_RECENT_ALERTS) {
+    if (recent_alerts_.size() > MAX_RECENT_ALERTS)
       recent_alerts_.pop_back();
-    }
   }
 
-  if (output_alerts_to_stdout)
-    std::cout << format_alert_to_human_readable(new_alert) << std::endl;
-
-  for (const auto &dispatcher : dispatchers_)
-    dispatcher->dispatch(new_alert);
+  alert_queue_.push(new_alert);
 }
 
 std::vector<Alert> AlertManager::get_recent_alerts(size_t limit) const {
