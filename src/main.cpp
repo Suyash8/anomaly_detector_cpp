@@ -11,6 +11,7 @@
 #include "io/log_readers/mongo_log_reader.hpp"
 #include "io/web/web_server.hpp"
 #include "models/model_manager.hpp"
+#include "utils/scoped_timer.hpp"
 #include "utils/thread_safe_queue.hpp"
 
 #include <algorithm>
@@ -100,6 +101,45 @@ void log_reader_thread(ILogReader &reader, ThreadSafeQueue<LogEntry> &queue,
   LOG(LogLevel::INFO, LogComponent::IO_READER,
       "Log reader thread shutting down.");
   queue.shutdown();
+}
+
+// --- Worker thread function ---
+void worker_thread(int worker_id, ThreadSafeQueue<LogEntry> &queue,
+                   AnalysisEngine &analysis_engine, RuleEngine &rule_engine,
+                   std::atomic<bool> &shutdown_flag) {
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Worker thread " << worker_id << " started.");
+
+  auto *logs_processed_twc =
+      MetricsManager::instance().register_time_window_counter(
+          "ad_logs_processed", "Timestamped counter for processed logs to "
+                               "calculate windowed rates.");
+  auto *batch_processing_timer = MetricsManager::instance().register_histogram(
+      "ad_batch_processing_duration_seconds",
+      "Latency of processing a batch of logs.");
+
+  while (!shutdown_flag) {
+    std::optional<LogEntry> log_entry_opt = queue.wait_and_pop();
+
+    if (!log_entry_opt) {
+      if (shutdown_flag || queue.empty()) {
+        LOG(LogLevel::INFO, LogComponent::CORE,
+            "Worker " << worker_id << " shutting down.");
+        break;
+      }
+      continue;
+    }
+
+    LogEntry &log_entry = *log_entry_opt;
+
+    ScopedTimer timer(*batch_processing_timer);
+    logs_processed_twc->record_event();
+
+    if (log_entry.successfully_parsed_structure) {
+      auto analyzed_event = analysis_engine.process_and_analyze(log_entry);
+      rule_engine.evaluate_rules(analyzed_event);
+    }
+  }
 }
 
 // --- Keyboard listener thread function ---
