@@ -144,7 +144,7 @@ void keyboard_listener_thread() {
 
     if (bytes_read > 0)
       switch (c) {
-      // case 3: // Ctrl+C
+      case 3: // Ctrl+C
       case 4: // Ctrl+D
         g_shutdown_requested = true;
         break;
@@ -229,12 +229,12 @@ int main(int argc, char *argv[]) {
 
   // --- Metrics Registration ---
   // TODO: Update metrics for multithreaded context
-  /*
   auto *logs_processed_twc =
       MetricsManager::instance().register_time_window_counter(
           "ad_logs_processed", "Timestamped counter for processed logs to "
                                "calculate windowed rates.");
 
+  /*
   auto *batch_processing_timer = MetricsManager::instance().register_histogram(
       "ad_batch_processing_duration_seconds",
       "Latency of processing a batch of logs.");
@@ -345,6 +345,14 @@ int main(int argc, char *argv[]) {
                        *analysis_engines[0]);
   web_server.start();
 
+  // --- Launch Worker Threads ---
+  for (unsigned int i = 0; i < num_workers; ++i) {
+    worker_threads.emplace_back(worker_thread, i, std::ref(*worker_queues[i]),
+                                std::ref(*analysis_engines[i]),
+                                std::ref(*rule_engines[i]),
+                                std::ref(g_shutdown_requested));
+  }
+
   // State loading must happen after engines are created but before workers
   // (current_config->state_persistence_enabled) { ... }
 
@@ -425,6 +433,8 @@ int main(int argc, char *argv[]) {
       LogEntry &log_entry = *log_entry_opt;
 
       // --- Dispatcher Logic ---
+      logs_processed_twc->record_event();
+
       if (!log_entry.ip_address.empty()) {
         std::hash<std::string_view> hasher;
         size_t worker_index = hasher(log_entry.ip_address) % num_workers;
@@ -468,6 +478,12 @@ int main(int argc, char *argv[]) {
   if (reader_thread.joinable())
     reader_thread.join();
 
+  LOG(LogLevel::INFO, LogComponent::CORE, "Joining worker threads...");
+  for (auto &t : worker_threads)
+    if (t.joinable())
+      t.join();
+  LOG(LogLevel::INFO, LogComponent::CORE, "Worker threads joined.");
+
   if (keyboard_thread.joinable()) {
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
     pthread_kill(keyboard_thread.native_handle(), SIGCONT);
@@ -479,6 +495,9 @@ int main(int argc, char *argv[]) {
 
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Processing finished or shutdown signal received.");
+
+  // State saving is disabled for now
+  // if (current_config->state_persistence_enabled) { ... }
 
   alert_manager_instance.flush_all_alerts();
 
