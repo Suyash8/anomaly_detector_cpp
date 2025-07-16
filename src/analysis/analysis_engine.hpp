@@ -19,6 +19,26 @@ struct TopIpInfo {
   std::string metric;
 };
 
+struct EngineStateMetrics {
+  size_t total_ip_states = 0;
+  size_t total_path_states = 0;
+  size_t total_session_states = 0;
+
+  // Aggregated counts from all PerIpState objects
+  size_t total_ip_req_window_elements = 0;
+  size_t total_ip_failed_login_window_elements = 0;
+  size_t total_ip_html_req_window_elements = 0;
+  size_t total_ip_asset_req_window_elements = 0;
+  size_t total_ip_ua_window_elements = 0;
+  size_t total_ip_paths_seen_elements = 0;
+  size_t total_ip_historical_ua_elements = 0;
+
+  // Aggregated counts from all PerSessionState objects
+  size_t total_session_req_window_elements = 0;
+  size_t total_session_unique_paths = 0;
+  size_t total_session_unique_user_agents = 0;
+};
+
 class AnalysisEngine {
 public:
   AnalysisEngine(const Config::AppConfig &cfg);
@@ -41,6 +61,7 @@ public:
 
   std::vector<TopIpInfo> get_top_n_by_metric(size_t n,
                                              const std::string &metric_name);
+  EngineStateMetrics get_internal_state_metrics() const;
 
 private:
   Config::AppConfig app_config;

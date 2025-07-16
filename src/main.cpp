@@ -203,6 +203,40 @@ int main(int argc, char *argv[]) {
   auto *session_states_gauge = MetricsManager::instance().register_gauge(
       "ad_active_session_states",
       "Current number of Session states held in memory.");
+  auto *ip_req_window_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"ip_request_window\"}",
+      "Total number of events across all IP request rate sliding windows.");
+  auto *ip_login_window_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"ip_failed_login_window\"}",
+      "Total number of events across all IP failed login sliding windows.");
+  auto *ip_html_window_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"ip_html_request_window\"}",
+      "Total number of events across all IP HTML request sliding windows.");
+  auto *ip_asset_window_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"ip_asset_request_window\"}",
+      "Total number of events across all IP asset request sliding windows.");
+  auto *ip_ua_window_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"ip_ua_window\"}",
+      "Total number of events across all IP User-Agent sliding windows.");
+  auto *ip_paths_set_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"ip_paths_seen_set\"}",
+      "Total number of unique paths stored across all IP states.");
+  auto *ip_historical_ua_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"ip_historical_ua_set\"}",
+      "Total number of unique historical User-Agents stored across all IP "
+      "states.");
+  auto *session_req_window_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"session_request_window\"}",
+      "Total number of events across all Session request rate sliding "
+      "windows.");
+  auto *session_unique_paths_gauge = MetricsManager::instance().register_gauge(
+      "ad_state_elements_total{type=\"session_unique_paths\"}",
+      "Total number of unique paths stored across all Session states.");
+  auto *session_unique_user_agents_gauge =
+      MetricsManager::instance().register_gauge(
+          "ad_state_elements_total{type=\"session_unique_user_agents\"}",
+          "Total number of unique User-Agents stored across all Session "
+          "states.");
 
   // --- Log Reader Factory ---
   std::unique_ptr<ILogReader> log_reader;
@@ -307,10 +341,31 @@ int main(int argc, char *argv[]) {
       if (!log_batch.empty()) {
         ScopedTimer timer(*batch_processing_timer);
 
-        ip_states_gauge->set(analysis_engine_instance.get_ip_state_count());
-        path_states_gauge->set(analysis_engine_instance.get_path_state_count());
-        session_states_gauge->set(
-            analysis_engine_instance.get_session_state_count());
+        if (total_processed_count % 100 == 0) { // Every 100 logs
+          const auto state_metrics =
+              analysis_engine_instance.get_internal_state_metrics();
+          ip_states_gauge->set(state_metrics.total_ip_states);
+          path_states_gauge->set(state_metrics.total_path_states);
+          session_states_gauge->set(state_metrics.total_session_states);
+
+          ip_req_window_gauge->set(state_metrics.total_ip_req_window_elements);
+          ip_login_window_gauge->set(
+              state_metrics.total_ip_failed_login_window_elements);
+          ip_html_window_gauge->set(
+              state_metrics.total_ip_html_req_window_elements);
+          ip_asset_window_gauge->set(
+              state_metrics.total_ip_asset_req_window_elements);
+          ip_ua_window_gauge->set(state_metrics.total_ip_ua_window_elements);
+          ip_paths_set_gauge->set(state_metrics.total_ip_paths_seen_elements);
+          ip_historical_ua_gauge->set(
+              state_metrics.total_ip_historical_ua_elements);
+          session_req_window_gauge->set(
+              state_metrics.total_session_req_window_elements);
+          session_unique_paths_gauge->set(
+              state_metrics.total_session_unique_paths);
+          session_unique_user_agents_gauge->set(
+              state_metrics.total_session_unique_user_agents);
+        }
 
         for (auto log_entry : log_batch) {
           total_processed_count++;
@@ -324,15 +379,6 @@ int main(int argc, char *argv[]) {
           // TODO: Count skipped entries from the DB if parsing fails
 
           // --- Periodic Tasks ---
-          if (current_config->state_pruning_enabled &&
-              current_config->state_prune_interval_events > 0 &&
-              total_processed_count %
-                      current_config->state_prune_interval_events ==
-                  0) {
-            analysis_engine_instance.run_pruning(
-                analysis_engine_instance.get_max_timestamp_seen());
-          }
-
           if (current_config->state_persistence_enabled &&
               current_config->state_save_interval_events > 0 &&
               total_processed_count %
@@ -340,6 +386,15 @@ int main(int argc, char *argv[]) {
                   0) {
             analysis_engine_instance.save_state(
                 current_config->state_file_path);
+          }
+
+          if (current_config->state_pruning_enabled &&
+              current_config->state_prune_interval_events > 0 &&
+              total_processed_count %
+                      current_config->state_prune_interval_events ==
+                  0) {
+            analysis_engine_instance.run_pruning(
+                analysis_engine_instance.get_max_timestamp_seen());
           }
 
           if (current_config->log_source_type != "stdin" &&

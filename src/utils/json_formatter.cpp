@@ -1,6 +1,5 @@
 #include "json_formatter.hpp"
 
-#include <iomanip>
 #include <sstream>
 #include <string_view>
 
@@ -30,10 +29,12 @@ std::string JsonFormatter::escape_json_value(std::string_view input) {
       o << "\\t";
       break;
     default:
-      if ('\x00' <= c && c <= '\x1f')
-        o << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-          << static_cast<int>(static_cast<unsigned char>(c));
-      else
+      // if (('\x00' <= c && c <= '\x1f') || (c >= '\x80' && c <= '\xff'))
+      //   o << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+      //     << static_cast<int>(static_cast<unsigned char>(c));
+      // else
+      //   o << c;
+      if (c >= 32 && c <= 126)
         o << c;
     }
   return o.str();
@@ -50,32 +51,34 @@ nlohmann::json JsonFormatter::alert_to_json_object(const Alert &alert_data) {
   };
 
   // === Core Alert Info ===
+
+  // All string values are escaped for JSON safety
   j["timestamp_ms"] = alert_data.event_timestamp_ms;
-  j["alert_reason"] = alert_data.alert_reason;
+  j["alert_reason"] = escape_json_value(alert_data.alert_reason);
   j["detection_tier"] =
       alert_tier_to_string_representation(alert_data.detection_tier);
-  j["suggested_action"] = alert_data.suggested_action;
+  j["suggested_action"] = escape_json_value(alert_data.suggested_action);
   j["action_code"] = alert_action_to_string(alert_data.action_code);
   j["anomaly_score"] = alert_data.normalized_score;
-  j["offending_key"] = alert_data.offending_key_identifier;
+  j["offending_key"] = escape_json_value(alert_data.offending_key_identifier);
   j["ml_contributing_factors"] = alert_data.ml_feature_contribution;
 
   // === Log Context (The Raw Log Fields) ===
   nlohmann::json j_log;
-  j_log["source_ip"] = log_context.ip_address;
+  j_log["source_ip"] = escape_json_value(log_context.ip_address);
   j_log["line_number"] = log_context.original_line_number;
-  j_log["host"] = log_context.host;
-  j_log["timestamp_str"] = log_context.timestamp_str;
-  j_log["request_method"] = log_context.request_method;
-  j_log["request_path"] = log_context.request_path;
-  j_log["request_protocol"] = log_context.request_protocol;
+  j_log["host"] = escape_json_value(log_context.host);
+  j_log["timestamp_str"] = escape_json_value(log_context.timestamp_str);
+  j_log["request_method"] = escape_json_value(log_context.request_method);
+  j_log["request_path"] = escape_json_value(log_context.request_path);
+  j_log["request_protocol"] = escape_json_value(log_context.request_protocol);
   j_log["status_code"] = get_opt(log_context.http_status_code, 0);
   j_log["bytes_sent"] = get_opt(log_context.bytes_sent, (uint64_t)0);
   j_log["request_time_s"] = get_opt(log_context.request_time_s, 0.0);
-  j_log["user_agent"] = log_context.user_agent;
-  j_log["referer"] = log_context.referer;
-  j_log["country_code"] = log_context.country_code;
-  j_log["x_request_id"] = log_context.x_request_id;
+  j_log["user_agent"] = escape_json_value(log_context.user_agent);
+  j_log["referer"] = escape_json_value(log_context.referer);
+  j_log["country_code"] = escape_json_value(log_context.country_code);
+  j_log["x_request_id"] = escape_json_value(log_context.x_request_id);
   j["log_context"] = j_log;
 
   // === Analysis Context (The Rich, Calculated Data) ===
@@ -142,7 +145,7 @@ nlohmann::json JsonFormatter::alert_to_json_object(const Alert &alert_data) {
   j["analysis_context"] = j_analysis;
 
   // Add the raw log line itself for full context
-  j["raw_log_line"] = log_context.raw_log_line;
+  j["raw_log_line"] = escape_json_value(log_context.raw_log_line);
 
   return j;
 }

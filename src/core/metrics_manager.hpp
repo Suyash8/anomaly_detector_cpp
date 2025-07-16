@@ -71,7 +71,7 @@ private:
   std::atomic<uint64_t> cumulative_count_{0};
 
   mutable std::mutex mtx;
-  static constexpr size_t MAX_OBSERVATIONS = 2000;
+  static constexpr size_t MAX_OBSERVATIONS = 200;
 };
 
 struct TimeWindowCounter {

@@ -21,6 +21,11 @@ __pycache__/
 venv/
 .env
 
+# Vite
+src/io/web/ui/node_modules/
+src/io/web/ui/dist/
+src/io/web/ui/.vite/
+
 # Build files (if any specific to your IDE/environment)
 .cache/
 *.swp
