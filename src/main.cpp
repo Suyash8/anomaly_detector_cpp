@@ -12,6 +12,7 @@
 #include "io/web/web_server.hpp"
 #include "models/model_manager.hpp"
 #include "utils/scoped_timer.hpp"
+#include "utils/thread_safe_queue.hpp"
 
 #include <atomic>
 #include <cerrno>
@@ -21,9 +22,11 @@
 #include <iostream>
 #include <istream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <sys/types.h>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
@@ -78,6 +81,24 @@ struct TerminalManager {
   }
 };
 #endif
+
+// --- Reader thread function ---
+void log_reader_thread(ILogReader &reader, ThreadSafeQueue<LogEntry> &queue,
+                       const std::atomic<bool> &shutdown_flag) {
+  LOG(LogLevel::INFO, LogComponent::IO_READER, "Log reader thread started.");
+  while (!shutdown_flag) {
+    std::vector<LogEntry> log_batch = reader.get_next_batch();
+    if (!log_batch.empty())
+      for (auto &entry : log_batch)
+        queue.push(std::move(entry));
+    else
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  }
+
+  LOG(LogLevel::INFO, LogComponent::IO_READER,
+      "Log reader thread shutting down.");
+  queue.shutdown();
+}
 
 // --- Keyboard listener thread function ---
 void keyboard_listener_thread() {
@@ -269,6 +290,12 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  // --- Central Log Queue ---
+  ThreadSafeQueue<LogEntry> log_queue;
+  std::thread reader_thread(log_reader_thread, std::ref(*log_reader),
+                            std::ref(log_queue),
+                            std::ref(g_shutdown_requested));
+
   // Load state on startup
   if (current_config->state_persistence_enabled) {
     if (analysis_engine_instance.load_state(current_config->state_file_path))
@@ -336,93 +363,83 @@ int main(int argc, char *argv[]) {
 
     // --- State-Specific Action Block ---
     if (current_state == ServiceState::RUNNING) {
-      std::vector<LogEntry> log_batch = log_reader->get_next_batch();
+      std::optional<LogEntry> log_entry_opt = log_queue.wait_and_pop();
 
-      if (!log_batch.empty()) {
-        ScopedTimer timer(*batch_processing_timer);
-
-        if (total_processed_count % 100 == 0) { // Every 100 logs
-          const auto state_metrics =
-              analysis_engine_instance.get_internal_state_metrics();
-          ip_states_gauge->set(state_metrics.total_ip_states);
-          path_states_gauge->set(state_metrics.total_path_states);
-          session_states_gauge->set(state_metrics.total_session_states);
-
-          ip_req_window_gauge->set(state_metrics.total_ip_req_window_elements);
-          ip_login_window_gauge->set(
-              state_metrics.total_ip_failed_login_window_elements);
-          ip_html_window_gauge->set(
-              state_metrics.total_ip_html_req_window_elements);
-          ip_asset_window_gauge->set(
-              state_metrics.total_ip_asset_req_window_elements);
-          ip_ua_window_gauge->set(state_metrics.total_ip_ua_window_elements);
-          ip_paths_set_gauge->set(state_metrics.total_ip_paths_seen_elements);
-          ip_historical_ua_gauge->set(
-              state_metrics.total_ip_historical_ua_elements);
-          session_req_window_gauge->set(
-              state_metrics.total_session_req_window_elements);
-          session_unique_paths_gauge->set(
-              state_metrics.total_session_unique_paths);
-          session_unique_user_agents_gauge->set(
-              state_metrics.total_session_unique_user_agents);
+      if (!log_entry_opt) {
+        if (g_shutdown_requested) {
+          LOG(LogLevel::INFO, LogComponent::CORE,
+              "Log queue is empty and shutdown is requested. Exiting loop.");
+          break;
         }
+        continue;
+      }
 
-        for (auto log_entry : log_batch) {
-          total_processed_count++;
-          logs_processed_twc->record_event();
+      LogEntry &log_entry = *log_entry_opt;
 
-          if (log_entry.successfully_parsed_structure) {
-            auto analyzed_event =
-                analysis_engine_instance.process_and_analyze(log_entry);
-            rule_engine_instance.evaluate_rules(analyzed_event);
-          }
-          // TODO: Count skipped entries from the DB if parsing fails
+      ScopedTimer timer(*batch_processing_timer);
 
-          // --- Periodic Tasks ---
-          if (current_config->state_persistence_enabled &&
-              current_config->state_save_interval_events > 0 &&
-              total_processed_count %
-                      current_config->state_save_interval_events ==
-                  0) {
-            analysis_engine_instance.save_state(
-                current_config->state_file_path);
-          }
+      if (total_processed_count % 100 == 0) { // Every 100 logs
+        const auto state_metrics =
+            analysis_engine_instance.get_internal_state_metrics();
+        ip_states_gauge->set(state_metrics.total_ip_states);
+        path_states_gauge->set(state_metrics.total_path_states);
+        session_states_gauge->set(state_metrics.total_session_states);
 
-          if (current_config->state_pruning_enabled &&
-              current_config->state_prune_interval_events > 0 &&
-              total_processed_count %
-                      current_config->state_prune_interval_events ==
-                  0) {
-            analysis_engine_instance.run_pruning(
-                analysis_engine_instance.get_max_timestamp_seen());
-          }
+        ip_req_window_gauge->set(state_metrics.total_ip_req_window_elements);
+        ip_login_window_gauge->set(
+            state_metrics.total_ip_failed_login_window_elements);
+        ip_html_window_gauge->set(
+            state_metrics.total_ip_html_req_window_elements);
+        ip_asset_window_gauge->set(
+            state_metrics.total_ip_asset_req_window_elements);
+        ip_ua_window_gauge->set(state_metrics.total_ip_ua_window_elements);
+        ip_paths_set_gauge->set(state_metrics.total_ip_paths_seen_elements);
+        ip_historical_ua_gauge->set(
+            state_metrics.total_ip_historical_ua_elements);
+        session_req_window_gauge->set(
+            state_metrics.total_session_req_window_elements);
+        session_unique_paths_gauge->set(
+            state_metrics.total_session_unique_paths);
+        session_unique_user_agents_gauge->set(
+            state_metrics.total_session_unique_user_agents);
+      }
 
-          if (current_config->log_source_type != "stdin" &&
-              total_processed_count % 1000 == 0) {
-            LOG(LogLevel::DEBUG, LogComponent::CORE,
-                "Progress: Read "
-                    << total_processed_count << " lines ("
-                    << (total_processed_count * 1000 /
-                        std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::high_resolution_clock::now() -
-                            time_start)
-                            .count())
-                    << " lines/sec).");
-          }
-        }
-      } else {
-        // End of File (or closed stdin) reached
-        if (current_config->live_monitoring_enabled) {
-          LOG(LogLevel::TRACE, LogComponent::IO_READER,
-              "No new logs found. Sleeping for "
-                  << current_config->live_monitoring_sleep_seconds << "s.");
-          current_state = ServiceState::PAUSED;
-        } else {
-          LOG(LogLevel::INFO, LogComponent::IO_READER,
-              "End of log source reached and live monitoring is disabled. "
-              "Shutting down.");
-          g_shutdown_requested = true;
-        }
+      total_processed_count++;
+      logs_processed_twc->record_event();
+
+      if (log_entry.successfully_parsed_structure) {
+        auto analyzed_event =
+            analysis_engine_instance.process_and_analyze(log_entry);
+        rule_engine_instance.evaluate_rules(analyzed_event);
+      }
+      // TODO: Count skipped entries from the DB if parsing fails
+
+      // --- Periodic Tasks ---
+      if (current_config->state_persistence_enabled &&
+          current_config->state_save_interval_events > 0 &&
+          total_processed_count % current_config->state_save_interval_events ==
+              0) {
+        analysis_engine_instance.save_state(current_config->state_file_path);
+      }
+
+      if (current_config->state_pruning_enabled &&
+          current_config->state_prune_interval_events > 0 &&
+          total_processed_count % current_config->state_prune_interval_events ==
+              0) {
+        analysis_engine_instance.run_pruning(
+            analysis_engine_instance.get_max_timestamp_seen());
+      }
+
+      if (current_config->log_source_type != "stdin" &&
+          total_processed_count % 1000 == 0) {
+        LOG(LogLevel::DEBUG, LogComponent::CORE,
+            "Progress: Read "
+                << total_processed_count << " lines ("
+                << (total_processed_count * 1000 /
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::high_resolution_clock::now() - time_start)
+                        .count())
+                << " lines/sec).");
       }
     } else if (current_state == ServiceState::PAUSED) {
       // --- Efficient Sleep State ---
@@ -439,6 +456,9 @@ int main(int argc, char *argv[]) {
   }
 
   // --- Final Save on Graceful Exit ---
+  if (reader_thread.joinable())
+    reader_thread.join();
+
   if (keyboard_thread.joinable()) {
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
     pthread_kill(keyboard_thread.native_handle(), SIGCONT);
