@@ -14,26 +14,15 @@ public:
     cond_.notify_one();
   }
 
-  // A non-blocking try_pop
-  std::optional<T> try_pop() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (queue_.empty())
-      return std::nullopt;
-    T value = std::move(queue_.front());
-    queue_.pop();
-    return value;
-  }
-
-  // A blocking wait_and_pop that returns false on shutdown
-  bool wait_and_pop(T &value) {
+  std::optional<T> wait_and_pop() {
     std::unique_lock<std::mutex> lock(mutex_);
     cond_.wait(lock, [this] { return !queue_.empty() || shutdown_requested_; });
     if (shutdown_requested_ && queue_.empty())
-      return false;
+      return std::nullopt;
 
-    value = std::move(queue_.front());
+    T value = std::move(queue_.front());
     queue_.pop();
-    return true;
+    return value;
   }
 
   // Notify all waiting threads to wake up for shutdown

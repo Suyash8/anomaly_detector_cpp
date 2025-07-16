@@ -11,6 +11,7 @@
 #include <ctime>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 
 AlertManager::AlertManager() : output_alerts_to_stdout(true) {
@@ -177,4 +178,26 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
 
   formatted_alert += "----------------------------------------";
   return formatted_alert;
+}
+
+void AlertManager::dispatcher_loop() {
+  while (!shutdown_flag_) {
+    std::optional<Alert> alert_opt = alert_queue_.wait_and_pop();
+
+    if (!alert_opt) {
+      if (shutdown_flag_)
+        break;
+      continue;
+    }
+
+    const Alert &alert_to_dispatch = *alert_opt;
+
+    if (output_alerts_to_stdout)
+      std::cout << format_alert_to_human_readable(alert_to_dispatch)
+                << std::endl;
+
+    for (const auto &dispatcher : dispatchers_)
+      if (dispatcher)
+        dispatcher->dispatch(alert_to_dispatch);
+  }
 }
