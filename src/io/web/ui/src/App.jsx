@@ -16,14 +16,14 @@ export default function App() {
       <Header activeView={activeView} setActiveView={setActiveView} />
       <main className="container">
         {isLoading && !performanceData && <div>Loading initial data...</div>}
-        {error && <div>Error fetching data: {error.message}</div>}
+        {/* {error && <div>Error fetching data: {error.message}</div>} */}
 
         <div className={activeView === "performance" ? "view active" : "view"}>
-          {performanceData && <PerformanceView data={performanceData} />}
+          <PerformanceView data={performanceData} />
         </div>
 
         <div className={activeView === "operations" ? "view active" : "view"}>
-          {operationsData && <OperationsView data={operationsData} />}
+          <OperationsView data={operationsData} />
         </div>
       </main>
     </>

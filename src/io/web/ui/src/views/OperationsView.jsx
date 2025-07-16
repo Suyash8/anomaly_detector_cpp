@@ -3,10 +3,56 @@ import AlertsTable from "../components/AlertsTable";
 import WidgetCard from "../components/WidgetCard";
 
 export default function OperationsView({ data }) {
-  const { alerts, state } = data;
+  const { alerts, state } = data || { alerts: [], state: null };
 
   const formattedWidgets = useMemo(() => {
-    if (!state) return {};
+    if (!state)
+      return {
+        activeIps: [
+          {
+            label: "0.0.0.0",
+            value: 1,
+          },
+          {
+            label: "192.168.1.1",
+            value: 2,
+          },
+          {
+            label: "10.0.0.1",
+            value: 3,
+          },
+          {
+            label: "172.16.0.1",
+            value: 4,
+          },
+          {
+            label: "192.168.0.1",
+            value: 5,
+          },
+        ],
+        errorIps: [
+          {
+            label: "0.0.0.0",
+            value: 0.5021,
+          },
+          {
+            label: "192.168.1.1",
+            value: 0.2183,
+          },
+          {
+            label: "10.0.0.1",
+            value: 0.3008,
+          },
+          {
+            label: "172.16.0.1",
+            value: 0.6721,
+          },
+          {
+            label: "192.168.0.1",
+            value: 0.7601,
+          },
+        ],
+      };
     return {
       activeIps: (state.top_active_ips || []).map((item) => ({
         label: item.ip,

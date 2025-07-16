@@ -1,29 +1,41 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import KpiCard from "../components/KpiCard";
+import WidgetCard from "../components/WidgetCard";
 import ChartCard from "../components/ChartCard";
+import { useRuntime } from "../hooks/useRuntime";
+import { usePerformanceMetrics } from "../hooks/usePerformanceMetrics";
 
-const chartOptions = {
+import { createInitialLineChartData } from "../utils/chartUtils";
+
+// Common chart options
+const commonChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
   scales: {
-    x: { ticks: { color: "#aaa" }, grid: { color: "#444" } },
+    x: {
+      ticks: {
+        color: "#aaa",
+        maxRotation: 0,
+        autoSkip: true,
+        maxTicksLimit: 10,
+      },
+      grid: { color: "#444" },
+    },
     y: { ticks: { color: "#aaa" }, grid: { color: "#444" }, beginAtZero: true },
   },
-  plugins: { legend: { labels: { color: "#e0e0e0" } } },
-  animation: { duration: 250 },
+  plugins: {
+    legend: {
+      labels: { color: "#e0e0e0", boxWidth: 12, padding: 15 },
+      position: "bottom",
+    },
+  },
+  animation: { duration: 0 },
 };
 
 export default function PerformanceView({ data }) {
-  const [runtimeSeconds, setRuntimeSeconds] = useState(0);
-
-  // Chart history state
-  const [latencyHistory, setLatencyHistory] = useState([]);
-  const [latencyLabels, setLatencyLabels] = useState([]);
-
-  const [memoryHistory, setMemoryHistory] = useState([]);
-  const [memoryLabels, setMemoryLabels] = useState([]);
-
-  const [breakdownData, setBreakdownData] = useState([0, 0, 0]);
+  const [runtimeSeconds, setRuntimeSeconds] = useState(
+    data?.app_runtime_seconds
+  );
 
   // Sync runtime on data update
   useEffect(() => {
@@ -40,187 +52,239 @@ export default function PerformanceView({ data }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Update chart histories on new data
+  // --- State and Hooks ---
+  const { formattedRuntime } = useRuntime(runtimeSeconds);
+  const processed = usePerformanceMetrics(data, runtimeSeconds);
+
+  // State for historical line charts
+  const [latencyChartData, setLatencyChartData] = useState(
+    createInitialLineChartData([
+      { label: "p99", borderColor: "#ff6384", tension: 0.2, pointRadius: 0 },
+      { label: "p90", borderColor: "#00aaff", tension: 0.2, pointRadius: 0 },
+      { label: "p50", borderColor: "#ffce56", tension: 0.2, pointRadius: 0 },
+    ])
+  );
+  const [memoryChartData, setMemoryChartData] = useState(
+    createInitialLineChartData([
+      {
+        label: "Memory RSS (MB)",
+        borderColor: "#4bc0c0",
+        backgroundColor: "rgba(75, 192, 192, 0.2)",
+        fill: true,
+        tension: 0.2,
+        pointRadius: 0,
+      },
+    ])
+  );
+  const [stateElementsChartData, setStateElementsChartData] = useState(
+    createInitialLineChartData([
+      { label: "IP Asset Request", borderColor: "#ff6384" },
+      { label: "IP Failed Login", borderColor: "#36a2eb" },
+      { label: "IP HTML Request", borderColor: "#ffce56" },
+      { label: "IP Paths Seen", borderColor: "#4bc0c0" },
+      { label: "IP User Agents", borderColor: "#9966ff" },
+      { label: "Session Request", borderColor: "#ff9f40" },
+      { label: "Session Unique Paths", borderColor: "#00c853" },
+      { label: "Session Unique UA", borderColor: "#8d6e63" },
+    ])
+  );
+
+  // Effect to update historical chart data when new data arrives
   useEffect(() => {
     if (!data) return;
-
-    const nowLabel = new Date().toLocaleTimeString();
     const MAX_HISTORY = 30;
+    const nowLabel = new Date().toLocaleTimeString();
 
-    const { histograms, gauges } = data;
+    // Update Latency Chart
+    const latencyStats =
+      data.histograms?.ad_batch_processing_duration_seconds
+        ?.recent_observations || [];
+    const sortedLatency = latencyStats.map((o) => o[1]).sort((a, b) => a - b);
+    const p99 =
+      (sortedLatency[Math.floor(sortedLatency.length * 0.99)] || 0) * 1000;
+    const p90 =
+      (sortedLatency[Math.floor(sortedLatency.length * 0.9)] || 0) * 1000;
+    const p50 =
+      (sortedLatency[Math.floor(sortedLatency.length * 0.5)] || 0) * 1000;
 
-    const getHistogramStats = (metricName) => {
-      const obs = histograms?.[metricName]?.recent_observations || [];
-      if (obs.length === 0) return { avg: 0, p50: 0, p90: 0, p99: 0 };
-      const values = obs.map((o) => o[1]).sort((a, b) => a - b);
-      const sum = values.reduce((acc, v) => acc + v, 0);
-      return {
-        avg: sum / values.length,
-        p50: values[Math.floor(values.length * 0.5)] || 0,
-        p90: values[Math.floor(values.length * 0.9)] || 0,
-        p99: values[Math.floor(values.length * 0.99)] || 0,
-      };
-    };
+    setLatencyChartData((prev) => ({
+      labels: [...prev.labels, nowLabel].slice(-MAX_HISTORY),
+      datasets: [
+        {
+          ...prev.datasets[0],
+          data: [...prev.datasets[0].data, p99].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[1],
+          data: [...prev.datasets[1].data, p90].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[2],
+          data: [...prev.datasets[2].data, p50].slice(-MAX_HISTORY),
+        },
+      ],
+    }));
 
-    const latencyStats = getHistogramStats(
-      "ad_batch_processing_duration_seconds"
-    );
-    setLatencyHistory((prev) =>
-      [
-        ...prev,
-        [
-          latencyStats.p99 * 1000,
-          latencyStats.p90 * 1000,
-          latencyStats.p50 * 1000,
-        ],
-      ].slice(-MAX_HISTORY)
-    );
-    setLatencyLabels((prev) => [...prev, nowLabel].slice(-MAX_HISTORY));
+    // Update Memory Chart
+    const memoryMB =
+      (data.gauges?.ad_process_memory_rss_bytes || 0) / 1024 / 1024;
+    setMemoryChartData((prev) => ({
+      labels: [...prev.labels, nowLabel].slice(-MAX_HISTORY),
+      datasets: [
+        {
+          ...prev.datasets[0],
+          data: [...prev.datasets[0].data, memoryMB].slice(-MAX_HISTORY),
+        },
+      ],
+    }));
 
-    setMemoryHistory((prev) =>
-      [...prev, (gauges?.ad_process_memory_rss_bytes || 0) / 1024 / 1024].slice(
-        -MAX_HISTORY
-      )
-    );
-    setMemoryLabels((prev) => [...prev, nowLabel].slice(-MAX_HISTORY));
-
-    const readerKey = Object.keys(histograms || {}).find((k) =>
-      k.startsWith("ad_log_reader")
-    );
-    setBreakdownData([
-      getHistogramStats(readerKey).avg * 1000,
-      getHistogramStats("ad_analysis_engine_process_duration_seconds").avg *
-        1000,
-      getHistogramStats("ad_rule_engine_evaluation_duration_seconds").avg *
-        1000,
-    ]);
+    // Update State Elements Chart
+    const stateElements = data.gauges?.ad_state_elements_total || {};
+    setStateElementsChartData((prev) => ({
+      labels: [...prev.labels, nowLabel].slice(-MAX_HISTORY),
+      datasets: [
+        {
+          ...prev.datasets[0],
+          data: [
+            ...prev.datasets[0].data,
+            stateElements.ip_request_window || 0,
+          ].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[1],
+          data: [
+            ...prev.datasets[1].data,
+            stateElements.ip_failed_login_window || 0,
+          ].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[2],
+          data: [
+            ...prev.datasets[2].data,
+            stateElements.ip_html_request_window || 0,
+          ].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[3],
+          data: [
+            ...prev.datasets[3].data,
+            stateElements.ip_paths_seen_set || 0,
+          ].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[4],
+          data: [
+            ...prev.datasets[4].data,
+            stateElements.ip_user_agents_set || 0,
+          ].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[5],
+          data: [
+            ...prev.datasets[5].data,
+            stateElements.session_request_window || 0,
+          ].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[6],
+          data: [
+            ...prev.datasets[6].data,
+            stateElements.session_unique_paths_set || 0,
+          ].slice(-MAX_HISTORY),
+        },
+        {
+          ...prev.datasets[7],
+          data: [
+            ...prev.datasets[7].data,
+            stateElements.session_unique_ua_set || 0,
+          ].slice(-MAX_HISTORY),
+        },
+      ],
+    }));
   }, [data]);
 
-  // KPIs
-  const processed = useMemo(() => {
-    if (!data) return null;
-    const { time_window_counters, gauges, histograms } = data;
-
-    const totalLogs = time_window_counters?.ad_logs_processed?.["total"] || 0;
-    const logsPerSec = totalLogs / runtimeSeconds;
-
-    const totalAlerts =
-      time_window_counters?.ad_alerts_generated?.["total"] || 0;
-    const alertsPerMin = (totalAlerts / runtimeSeconds) * 60.0;
-
-    const latencyObs =
-      histograms?.ad_batch_processing_duration_seconds?.recent_observations ||
-      [];
-    const values = latencyObs.map((obs) => obs[1]).sort((a, b) => a - b);
-    const p90Latency = values[Math.floor(values.length * 0.9)] || 0;
-
-    const memoryMB = (gauges?.ad_process_memory_rss_bytes || 0) / 1024 / 1024;
-
-    const hours = String(Math.floor(runtimeSeconds / 3600)).padStart(2, "0");
-    const minutes = String(Math.floor((runtimeSeconds % 3600) / 60)).padStart(
-      2,
-      "0"
-    );
-    const seconds = String(Math.floor(runtimeSeconds % 60)).padStart(2, "0");
-    const runtime = `${hours}:${minutes}:${seconds}`;
-
-    return { logsPerSec, alertsPerMin, p90Latency, memoryMB, runtime };
-  }, [data, runtimeSeconds]);
-
-  if (!processed) return null;
+  // if (!processed)
+  //   return <div className="view active">Loading performance data...</div>;
 
   return (
     <div className="view active" id="performance-view">
       <div className="kpi-container">
-        <KpiCard title="LOGS / SEC" value={processed.logsPerSec.toFixed(1)} />
-        <KpiCard
-          title="ALERTS / MIN"
-          value={processed.alertsPerMin.toFixed(1)}
-        />
+        <KpiCard title="LOGS / SEC" value={processed.kpis.logsPerSec} />
+        <KpiCard title="ALERTS / MIN" value={processed.kpis.alertsPerMin} />
         <KpiCard
           title="P90 LATENCY"
-          value={(processed.p90Latency * 1000).toFixed(2)}
+          value={processed.kpis.p90Latency}
           unit="ms"
         />
-        <KpiCard
-          title="MEMORY"
-          value={processed.memoryMB.toFixed(1)}
-          unit="MB"
-        />
-        <KpiCard title="RUNTIME" value={processed.runtime} />
+        <KpiCard title="MEMORY" value={processed.kpis.memoryMB} unit="MB" />
+        <KpiCard title="RUNTIME" value={formattedRuntime} />
       </div>
 
-      <ChartCard
-        title="Latency Over Time"
-        type="line"
-        options={chartOptions}
-        data={{
-          labels: latencyLabels,
-          datasets: [
-            {
-              label: "p99",
-              data: latencyHistory.map((row) => row[0]),
-              borderColor: "#ff6384",
-              tension: 0.2,
-              pointRadius: 0,
-            },
-            {
-              label: "p90",
-              data: latencyHistory.map((row) => row[1]),
-              borderColor: "#00aaff",
-              tension: 0.2,
-              pointRadius: 0,
-            },
-            {
-              label: "p50",
-              data: latencyHistory.map((row) => row[2]),
-              borderColor: "#ffce56",
-              tension: 0.2,
-              pointRadius: 0,
-            },
-          ],
-        }}
-      />
-
-      <ChartCard
-        title="Latency Breakdown"
-        type="bar"
-        options={{
-          ...chartOptions,
-          indexAxis: "y",
-          plugins: { legend: { display: false } },
-        }}
-        data={{
-          labels: ["Log Reader", "Analysis", "Rules"],
-          datasets: [
-            {
-              label: "Avg Latency (ms)",
-              data: breakdownData,
-              backgroundColor: ["#ff6384", "#00aaff", "#ffce56"],
-            },
-          ],
-        }}
-      />
-
-      <ChartCard
-        title="Memory Usage"
-        type="line"
-        options={chartOptions}
-        data={{
-          labels: memoryLabels,
-          datasets: [
-            {
-              label: "Memory RSS (MB)",
-              data: memoryHistory,
-              borderColor: "#4bc0c0",
-              backgroundColor: "rgba(75, 192, 192, 0.2)",
-              fill: true,
-              tension: 0.2,
-              pointRadius: 0,
-            },
-          ],
-        }}
-      />
+      <div className="performance-grid">
+        <div className="main-charts">
+          <ChartCard
+            title="Batch Processing Latency"
+            type="line"
+            data={latencyChartData}
+            options={commonChartOptions}
+          />
+          <ChartCard
+            title="Average Latency Breakdown"
+            type="bar"
+            data={processed.charts.breakdownChartData}
+            options={{
+              ...commonChartOptions,
+              indexAxis: "y",
+              plugins: { legend: { display: false } },
+            }}
+          />
+        </div>
+        <div className="side-panel">
+          <WidgetCard
+            title="Active States Overview"
+            data={processed.widgets.stateOverviewMetrics}
+            valueFormatter={processed.widgets.formatValue}
+          />
+          <WidgetCard
+            title="Total State Elements in Memory"
+            data={processed.widgets.stateElementMetrics}
+            valueFormatter={processed.widgets.formatValue}
+          />
+          <ChartCard
+            title="State Element Counts"
+            type="line"
+            data={stateElementsChartData}
+            options={{
+              ...commonChartOptions,
+              scales: {
+                ...commonChartOptions.scales,
+                y: { ...commonChartOptions.scales.y, type: "logarithmic" },
+              },
+            }}
+          />
+          <ChartCard
+            title="Process Memory Usage"
+            type="line"
+            data={memoryChartData}
+            options={{
+              ...commonChartOptions,
+              plugins: { legend: { display: false } },
+            }}
+          />
+          {processed.charts.isDeepDiveEnabled && (
+            <ChartCard
+              title="Fine-Grained Latency (µs)"
+              type="bar"
+              data={processed.charts.deepDiveChartData}
+              options={{
+                ...commonChartOptions,
+                indexAxis: "y",
+                plugins: { legend: { display: false } },
+              }}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
