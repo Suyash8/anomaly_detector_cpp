@@ -11,7 +11,6 @@
 #include "io/log_readers/mongo_log_reader.hpp"
 #include "io/web/web_server.hpp"
 #include "models/model_manager.hpp"
-#include "utils/scoped_timer.hpp"
 #include "utils/thread_safe_queue.hpp"
 
 #include <algorithm>
@@ -19,12 +18,14 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <istream>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <sys/types.h>
 #include <thread>
 #include <utility>
@@ -209,6 +210,8 @@ int main(int argc, char *argv[]) {
   web_server.start();
 
   // --- Metrics Registration ---
+  // TODO: Update metrics for multithreaded context
+  /*
   auto *logs_processed_twc =
       MetricsManager::instance().register_time_window_counter(
           "ad_logs_processed", "Timestamped counter for processed logs to "
@@ -259,6 +262,7 @@ int main(int argc, char *argv[]) {
           "ad_state_elements_total{type=\"session_unique_user_agents\"}",
           "Total number of unique User-Agents stored across all Session "
           "states.");
+  */
 
   // --- Log Reader Factory ---
   std::unique_ptr<ILogReader> log_reader;
@@ -389,65 +393,21 @@ int main(int argc, char *argv[]) {
 
       LogEntry &log_entry = *log_entry_opt;
 
-      ScopedTimer timer(*batch_processing_timer);
-
-      if (total_processed_count % 100 == 0) { // Every 100 logs
-        const auto state_metrics =
-            analysis_engine_instance.get_internal_state_metrics();
-        ip_states_gauge->set(state_metrics.total_ip_states);
-        path_states_gauge->set(state_metrics.total_path_states);
-        session_states_gauge->set(state_metrics.total_session_states);
-
-        ip_req_window_gauge->set(state_metrics.total_ip_req_window_elements);
-        ip_login_window_gauge->set(
-            state_metrics.total_ip_failed_login_window_elements);
-        ip_html_window_gauge->set(
-            state_metrics.total_ip_html_req_window_elements);
-        ip_asset_window_gauge->set(
-            state_metrics.total_ip_asset_req_window_elements);
-        ip_ua_window_gauge->set(state_metrics.total_ip_ua_window_elements);
-        ip_paths_set_gauge->set(state_metrics.total_ip_paths_seen_elements);
-        ip_historical_ua_gauge->set(
-            state_metrics.total_ip_historical_ua_elements);
-        session_req_window_gauge->set(
-            state_metrics.total_session_req_window_elements);
-        session_unique_paths_gauge->set(
-            state_metrics.total_session_unique_paths);
-        session_unique_user_agents_gauge->set(
-            state_metrics.total_session_unique_user_agents);
+      // --- Dispatcher Logic ---
+      if (!log_entry.ip_address.empty()) {
+        std::hash<std::string_view> hasher;
+        size_t worker_index = hasher(log_entry.ip_address) % num_workers;
+        worker_queues[worker_index]->push(std::move(log_entry));
       }
 
       total_processed_count++;
-      logs_processed_twc->record_event();
-
-      if (log_entry.successfully_parsed_structure) {
-        auto analyzed_event =
-            analysis_engine_instance.process_and_analyze(log_entry);
-        rule_engine_instance.evaluate_rules(analyzed_event);
-      }
-      // TODO: Count skipped entries from the DB if parsing fails
 
       // --- Periodic Tasks ---
-      if (current_config->state_persistence_enabled &&
-          current_config->state_save_interval_events > 0 &&
-          total_processed_count % current_config->state_save_interval_events ==
-              0) {
-        analysis_engine_instance.save_state(current_config->state_file_path);
-      }
-
-      if (current_config->state_pruning_enabled &&
-          current_config->state_prune_interval_events > 0 &&
-          total_processed_count % current_config->state_prune_interval_events ==
-              0) {
-        analysis_engine_instance.run_pruning(
-            analysis_engine_instance.get_max_timestamp_seen());
-      }
-
       if (current_config->log_source_type != "stdin" &&
-          total_processed_count % 1000 == 0) {
+          total_processed_count % 10000 == 0) {
         LOG(LogLevel::DEBUG, LogComponent::CORE,
-            "Progress: Read "
-                << total_processed_count << " lines ("
+            "Progress: Dispatched "
+                << total_processed_count << " logs to workers ("
                 << (total_processed_count * 1000 /
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::high_resolution_clock::now() - time_start)
@@ -464,9 +424,14 @@ int main(int argc, char *argv[]) {
 
       std::this_thread::sleep_for(
           std::chrono::seconds(current_config->live_monitoring_sleep_seconds));
-      // std::chrono::milliseconds(100));
     }
   }
+
+  // --- Shutdown Notification for Workers ---
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Main dispatch loop finished. Notifying worker queues to shut down...");
+  for (auto &queue : worker_queues)
+    queue->shutdown();
 
   // --- Final Save on Graceful Exit ---
   if (reader_thread.joinable())
