@@ -12,6 +12,7 @@
 #include "io/web/web_server.hpp"
 #include "models/model_manager.hpp"
 #include "utils/scoped_timer.hpp"
+#include "utils/thread_safe_queue.hpp"
 
 #include <atomic>
 #include <cerrno>
@@ -24,6 +25,7 @@
 #include <string>
 #include <sys/types.h>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
@@ -78,6 +80,24 @@ struct TerminalManager {
   }
 };
 #endif
+
+// --- Reader thread function ---
+void log_reader_thread(ILogReader &reader, ThreadSafeQueue<LogEntry> &queue,
+                       const std::atomic<bool> &shutdown_flag) {
+  LOG(LogLevel::INFO, LogComponent::IO_READER, "Log reader thread started.");
+  while (!shutdown_flag) {
+    std::vector<LogEntry> log_batch = reader.get_next_batch();
+    if (!log_batch.empty())
+      for (auto &entry : log_batch)
+        queue.push(std::move(entry));
+    else
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  }
+
+  LOG(LogLevel::INFO, LogComponent::IO_READER,
+      "Log reader thread shutting down.");
+  queue.shutdown();
+}
 
 // --- Keyboard listener thread function ---
 void keyboard_listener_thread() {
@@ -269,6 +289,12 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  // --- Central Log Queue ---
+  ThreadSafeQueue<LogEntry> log_queue;
+  std::thread reader_thread(log_reader_thread, std::ref(*log_reader),
+                            std::ref(log_queue),
+                            std::ref(g_shutdown_requested));
+
   // Load state on startup
   if (current_config->state_persistence_enabled) {
     if (analysis_engine_instance.load_state(current_config->state_file_path))
@@ -439,6 +465,9 @@ int main(int argc, char *argv[]) {
   }
 
   // --- Final Save on Graceful Exit ---
+  if (reader_thread.joinable())
+    reader_thread.join();
+
   if (keyboard_thread.joinable()) {
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
     pthread_kill(keyboard_thread.native_handle(), SIGCONT);
