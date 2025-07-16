@@ -11,16 +11,24 @@
 #include <ctime>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 
 AlertManager::AlertManager() : output_alerts_to_stdout(true) {
   std::cout << "AlertManager created" << std::endl;
 }
 
-AlertManager::~AlertManager() { flush_all_alerts(); }
+AlertManager::~AlertManager() {
+  shutdown_flag_ = true;
+  alert_queue_.shutdown();
+  if (dispatcher_thread_.joinable())
+    dispatcher_thread_.join();
+  flush_all_alerts();
+}
 
 void AlertManager::initialize(const Config::AppConfig &app_config) {
   reconfigure(app_config);
+  dispatcher_thread_ = std::thread(&AlertManager::dispatcher_loop, this);
 }
 
 void AlertManager::reconfigure(const Config::AppConfig &new_config) {
@@ -74,9 +82,8 @@ void AlertManager::record_alert(const Alert &new_alert) {
           (alert_throttle_max_intervening_alerts_ > 0) &&
           (intervening_alerts >= alert_throttle_max_intervening_alerts_);
 
-      if (is_in_time_window && !has_exceeded_intervening_limit) {
+      if (is_in_time_window && !has_exceeded_intervening_limit)
         return; // Suppress the alert
-      }
     }
 
     // If we are here, the alert will be recorded
@@ -88,16 +95,11 @@ void AlertManager::record_alert(const Alert &new_alert) {
   {
     std::lock_guard<std::mutex> lock(recent_alerts_mutex_);
     recent_alerts_.push_front(new_alert);
-    if (recent_alerts_.size() > MAX_RECENT_ALERTS) {
+    if (recent_alerts_.size() > MAX_RECENT_ALERTS)
       recent_alerts_.pop_back();
-    }
   }
 
-  if (output_alerts_to_stdout)
-    std::cout << format_alert_to_human_readable(new_alert) << std::endl;
-
-  for (const auto &dispatcher : dispatchers_)
-    dispatcher->dispatch(new_alert);
+  alert_queue_.push(new_alert);
 }
 
 std::vector<Alert> AlertManager::get_recent_alerts(size_t limit) const {
@@ -176,4 +178,26 @@ AlertManager::format_alert_to_human_readable(const Alert &alert_data) const {
 
   formatted_alert += "----------------------------------------";
   return formatted_alert;
+}
+
+void AlertManager::dispatcher_loop() {
+  while (!shutdown_flag_) {
+    std::optional<Alert> alert_opt = alert_queue_.wait_and_pop();
+
+    if (!alert_opt) {
+      if (shutdown_flag_)
+        break;
+      continue;
+    }
+
+    const Alert &alert_to_dispatch = *alert_opt;
+
+    if (output_alerts_to_stdout)
+      std::cout << format_alert_to_human_readable(alert_to_dispatch)
+                << std::endl;
+
+    for (const auto &dispatcher : dispatchers_)
+      if (dispatcher)
+        dispatcher->dispatch(alert_to_dispatch);
+  }
 }
