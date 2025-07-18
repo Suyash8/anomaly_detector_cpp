@@ -11,19 +11,21 @@
 #include "io/log_readers/mongo_log_reader.hpp"
 #include "io/web/web_server.hpp"
 #include "models/model_manager.hpp"
-#include "utils/scoped_timer.hpp"
 #include "utils/thread_safe_queue.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <istream>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <sys/types.h>
 #include <thread>
 #include <utility>
@@ -100,6 +102,34 @@ void log_reader_thread(ILogReader &reader, ThreadSafeQueue<LogEntry> &queue,
   queue.shutdown();
 }
 
+// --- Worker thread function ---
+void worker_thread(int worker_id, ThreadSafeQueue<LogEntry> &queue,
+                   AnalysisEngine &analysis_engine, RuleEngine &rule_engine,
+                   const std::atomic<bool> &shutdown_flag) {
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Worker thread " << worker_id << " started.");
+
+  while (!shutdown_flag) {
+    std::optional<LogEntry> log_entry_opt = queue.wait_and_pop();
+
+    if (!log_entry_opt) {
+      if (shutdown_flag || queue.empty()) {
+        LOG(LogLevel::INFO, LogComponent::CORE,
+            "Worker " << worker_id << " shutting down.");
+        break;
+      }
+      continue;
+    }
+
+    LogEntry &log_entry = *log_entry_opt;
+
+    if (log_entry.successfully_parsed_structure) {
+      auto analyzed_event = analysis_engine.process_and_analyze(log_entry);
+      rule_engine.evaluate_rules(analyzed_event);
+    }
+  }
+}
+
 // --- Keyboard listener thread function ---
 void keyboard_listener_thread() {
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
@@ -114,7 +144,7 @@ void keyboard_listener_thread() {
 
     if (bytes_read > 0)
       switch (c) {
-      // case 3: // Ctrl+C
+      case 3: // Ctrl+C
       case 4: // Ctrl+D
         g_shutdown_requested = true;
         break;
@@ -192,27 +222,19 @@ int main(int argc, char *argv[]) {
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
   LOG(LogLevel::DEBUG, LogComponent::CORE, "PID: " << getpid());
 #endif
+
   // --- Initialize Core Components ---
   AlertManager alert_manager_instance;
   alert_manager_instance.initialize(*current_config);
 
-  AnalysisEngine analysis_engine_instance(*current_config);
-  RuleEngine rule_engine_instance(alert_manager_instance, *current_config,
-                                  model_manager);
-
-  // --- Initialize Web Server ---
-  WebServer web_server(config_manager.get_config()->monitoring.web_server_host,
-                       config_manager.get_config()->monitoring.web_server_port,
-                       MetricsManager::instance(), alert_manager_instance,
-                       analysis_engine_instance);
-  web_server.start();
-
   // --- Metrics Registration ---
+  // TODO: Update metrics for multithreaded context
   auto *logs_processed_twc =
       MetricsManager::instance().register_time_window_counter(
           "ad_logs_processed", "Timestamped counter for processed logs to "
                                "calculate windowed rates.");
 
+  /*
   auto *batch_processing_timer = MetricsManager::instance().register_histogram(
       "ad_batch_processing_duration_seconds",
       "Latency of processing a batch of logs.");
@@ -258,6 +280,7 @@ int main(int argc, char *argv[]) {
           "ad_state_elements_total{type=\"session_unique_user_agents\"}",
           "Total number of unique User-Agents stored across all Session "
           "states.");
+  */
 
   // --- Log Reader Factory ---
   std::unique_ptr<ILogReader> log_reader;
@@ -296,16 +319,42 @@ int main(int argc, char *argv[]) {
                             std::ref(log_queue),
                             std::ref(g_shutdown_requested));
 
-  // Load state on startup
-  if (current_config->state_persistence_enabled) {
-    if (analysis_engine_instance.load_state(current_config->state_file_path))
-      LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
-          "Successfully loaded previous engine state.");
-    else
-      LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
-          "No previous state file found or file was invalid. Starting with a "
-          "fresh state.");
+  // --- Worker Pool Setup ---
+  const unsigned int num_workers =
+      std::max(1u, std::thread::hardware_concurrency() - 2);
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Initializing with " << num_workers << " worker threads.");
+  std::vector<std::unique_ptr<ThreadSafeQueue<LogEntry>>> worker_queues;
+  std::vector<std::unique_ptr<AnalysisEngine>> analysis_engines;
+  std::vector<std::unique_ptr<RuleEngine>> rule_engines;
+  std::vector<std::thread> worker_threads;
+
+  for (unsigned int i = 0; i < num_workers; ++i) {
+    worker_queues.push_back(std::make_unique<ThreadSafeQueue<LogEntry>>());
+    auto analysis_engine = std::make_unique<AnalysisEngine>(*current_config);
+    auto rule_engine = std::make_unique<RuleEngine>(
+        alert_manager_instance, *current_config, model_manager);
+    analysis_engines.push_back(std::move(analysis_engine));
+    rule_engines.push_back(std::move(rule_engine));
   }
+
+  // --- Web Server Initialization ---
+  WebServer web_server(current_config->monitoring.web_server_host,
+                       current_config->monitoring.web_server_port,
+                       MetricsManager::instance(), alert_manager_instance,
+                       *analysis_engines[0]);
+  web_server.start();
+
+  // --- Launch Worker Threads ---
+  for (unsigned int i = 0; i < num_workers; ++i) {
+    worker_threads.emplace_back(worker_thread, i, std::ref(*worker_queues[i]),
+                                std::ref(*analysis_engines[i]),
+                                std::ref(*rule_engines[i]),
+                                std::ref(g_shutdown_requested));
+  }
+
+  // State loading must happen after engines are created but before workers
+  // (current_config->state_persistence_enabled) { ... }
 
   uint64_t total_processed_count = 0;
   auto time_start = std::chrono::high_resolution_clock::now();
@@ -315,9 +364,11 @@ int main(int argc, char *argv[]) {
   while (!g_shutdown_requested) {
     // --- Signal Polling and State Transition Block ---
     if (g_reset_state_requested.exchange(false)) {
-      LOG(LogLevel::INFO, LogComponent::CORE,
-          "SIGUSR1 or Ctrl+E detected. Resetting engine state...");
-      analysis_engine_instance.reset_in_memory_state();
+      LOG(LogLevel::WARN, LogComponent::CORE,
+          "SIGUSR1 or Ctrl+E detected. Resetting all worker engine states...");
+      for (auto &engine : analysis_engines)
+        engine->reset_in_memory_state();
+
       if (current_config->state_persistence_enabled)
         if (std::remove(current_config->state_file_path.c_str()) == 0)
           LOG(LogLevel::INFO, LogComponent::STATE_PERSIST,
@@ -336,8 +387,12 @@ int main(int argc, char *argv[]) {
         LOG(LogLevel::INFO, LogComponent::CONFIG,
             "Logger has been reconfigured.");
         alert_manager_instance.reconfigure(*current_config);
-        rule_engine_instance.reconfigure(*current_config);
-        analysis_engine_instance.reconfigure(*current_config);
+
+        // Reconfigure all worker engines
+        for (auto &engine : analysis_engines)
+          engine->reconfigure(*current_config);
+        for (auto &engine : rule_engines)
+          engine->reconfigure(*current_config);
         LOG(LogLevel::INFO, LogComponent::CONFIG,
             "All components reconfigured successfully.");
       } else
@@ -368,7 +423,8 @@ int main(int argc, char *argv[]) {
       if (!log_entry_opt) {
         if (g_shutdown_requested) {
           LOG(LogLevel::INFO, LogComponent::CORE,
-              "Log queue is empty and shutdown is requested. Exiting loop.");
+              "Log queue is empty and shutdown is requested. Exiting dispatch "
+              "loop.");
           break;
         }
         continue;
@@ -376,65 +432,23 @@ int main(int argc, char *argv[]) {
 
       LogEntry &log_entry = *log_entry_opt;
 
-      ScopedTimer timer(*batch_processing_timer);
+      // --- Dispatcher Logic ---
+      logs_processed_twc->record_event();
 
-      if (total_processed_count % 100 == 0) { // Every 100 logs
-        const auto state_metrics =
-            analysis_engine_instance.get_internal_state_metrics();
-        ip_states_gauge->set(state_metrics.total_ip_states);
-        path_states_gauge->set(state_metrics.total_path_states);
-        session_states_gauge->set(state_metrics.total_session_states);
-
-        ip_req_window_gauge->set(state_metrics.total_ip_req_window_elements);
-        ip_login_window_gauge->set(
-            state_metrics.total_ip_failed_login_window_elements);
-        ip_html_window_gauge->set(
-            state_metrics.total_ip_html_req_window_elements);
-        ip_asset_window_gauge->set(
-            state_metrics.total_ip_asset_req_window_elements);
-        ip_ua_window_gauge->set(state_metrics.total_ip_ua_window_elements);
-        ip_paths_set_gauge->set(state_metrics.total_ip_paths_seen_elements);
-        ip_historical_ua_gauge->set(
-            state_metrics.total_ip_historical_ua_elements);
-        session_req_window_gauge->set(
-            state_metrics.total_session_req_window_elements);
-        session_unique_paths_gauge->set(
-            state_metrics.total_session_unique_paths);
-        session_unique_user_agents_gauge->set(
-            state_metrics.total_session_unique_user_agents);
+      if (!log_entry.ip_address.empty()) {
+        std::hash<std::string_view> hasher;
+        size_t worker_index = hasher(log_entry.ip_address) % num_workers;
+        worker_queues[worker_index]->push(std::move(log_entry));
       }
 
       total_processed_count++;
-      logs_processed_twc->record_event();
-
-      if (log_entry.successfully_parsed_structure) {
-        auto analyzed_event =
-            analysis_engine_instance.process_and_analyze(log_entry);
-        rule_engine_instance.evaluate_rules(analyzed_event);
-      }
-      // TODO: Count skipped entries from the DB if parsing fails
 
       // --- Periodic Tasks ---
-      if (current_config->state_persistence_enabled &&
-          current_config->state_save_interval_events > 0 &&
-          total_processed_count % current_config->state_save_interval_events ==
-              0) {
-        analysis_engine_instance.save_state(current_config->state_file_path);
-      }
-
-      if (current_config->state_pruning_enabled &&
-          current_config->state_prune_interval_events > 0 &&
-          total_processed_count % current_config->state_prune_interval_events ==
-              0) {
-        analysis_engine_instance.run_pruning(
-            analysis_engine_instance.get_max_timestamp_seen());
-      }
-
       if (current_config->log_source_type != "stdin" &&
-          total_processed_count % 1000 == 0) {
+          total_processed_count % 10000 == 0) {
         LOG(LogLevel::DEBUG, LogComponent::CORE,
-            "Progress: Read "
-                << total_processed_count << " lines ("
+            "Progress: Dispatched "
+                << total_processed_count << " logs to workers ("
                 << (total_processed_count * 1000 /
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::high_resolution_clock::now() - time_start)
@@ -451,13 +465,24 @@ int main(int argc, char *argv[]) {
 
       std::this_thread::sleep_for(
           std::chrono::seconds(current_config->live_monitoring_sleep_seconds));
-      // std::chrono::milliseconds(100));
     }
   }
+
+  // --- Shutdown Notification for Workers ---
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Main dispatch loop finished. Notifying worker queues to shut down...");
+  for (auto &queue : worker_queues)
+    queue->shutdown();
 
   // --- Final Save on Graceful Exit ---
   if (reader_thread.joinable())
     reader_thread.join();
+
+  LOG(LogLevel::INFO, LogComponent::CORE, "Joining worker threads...");
+  for (auto &t : worker_threads)
+    if (t.joinable())
+      t.join();
+  LOG(LogLevel::INFO, LogComponent::CORE, "Worker threads joined.");
 
   if (keyboard_thread.joinable()) {
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
@@ -471,10 +496,8 @@ int main(int argc, char *argv[]) {
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Processing finished or shutdown signal received.");
 
-  if (current_config->state_persistence_enabled) {
-    LOG(LogLevel::INFO, LogComponent::CORE, "Saving final engine state...");
-    analysis_engine_instance.save_state(current_config->state_file_path);
-  }
+  // State saving is disabled for now
+  // if (current_config->state_persistence_enabled) { ... }
 
   alert_manager_instance.flush_all_alerts();
 
@@ -485,12 +508,12 @@ int main(int argc, char *argv[]) {
 
   LOG(LogLevel::INFO, LogComponent::CORE, "---Processing Summary---");
   LOG(LogLevel::INFO, LogComponent::CORE,
-      "Total entries processed: " << total_processed_count);
+      "Total entries dispatched: " << total_processed_count);
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Total processing time: " << duration_ms << " ms");
   if (duration_ms > 0 && total_processed_count > 0)
     LOG(LogLevel::INFO, LogComponent::CORE,
-        "Processing rate: " << (total_processed_count * 1000 / duration_ms)
-                            << " lines/sec");
+        "Dispatch rate: " << (total_processed_count * 1000 / duration_ms)
+                          << " lines/sec");
   LOG(LogLevel::INFO, LogComponent::CORE, "Anomaly Detection Engine finished.");
 }
