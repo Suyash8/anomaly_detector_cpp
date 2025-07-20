@@ -1,14 +1,20 @@
 #include "web_server.hpp"
 #include "core/logger.hpp"
+#include "core/metrics_registry.hpp"
 #include "utils/json_formatter.hpp"
+
 #include <chrono>
+#include <prometheus/gauge.h>
+#include <prometheus/text_serializer.h>
 
 WebServer::WebServer(const std::string &host, int port,
-                     MetricsManager &metrics_manager,
+                     MetricsRegistry &metrics_registry,
                      AlertManager &alert_manager,
-                     AnalysisEngine &analysis_engine)
-    : host_(host), port_(port), metrics_manager_(metrics_manager),
-      alert_manager_(alert_manager), analysis_engine_(analysis_engine) {
+                     AnalysisEngine &analysis_engine,
+                     prometheus::Gauge &memory_gauge)
+    : host_(host), port_(port), metrics_registry_(metrics_registry),
+      alert_manager_(alert_manager), analysis_engine_(analysis_engine),
+      memory_gauge_(memory_gauge) {
   server_ = std::make_unique<httplib::Server>();
 
   const char *ui_path = "./src/io/web/ui/dist";
@@ -17,17 +23,28 @@ WebServer::WebServer(const std::string &host, int port,
         "Failed to set mount point for UI. UI will not be available.");
   }
 
-  server_->Get(
-      "/metrics", [this](const httplib::Request &, httplib::Response &res) {
-        std::string metrics_data = metrics_manager_.expose_as_prometheus_text();
-        res.set_content(metrics_data, "text/plain; version=0.0.4");
-      });
+  server_->Get("/metrics", [this](const httplib::Request &req,
+                                  httplib::Response &res) {
+    LOG(LogLevel::DEBUG, LogComponent::CORE,
+        "WebServer: Received request for /metrics from " << req.remote_addr);
+    prometheus::TextSerializer serializer;
+    auto collected_metrics = metrics_registry_.get_registry()->Collect();
+    res.set_content(serializer.Serialize(collected_metrics),
+                    "text/plain; version=0.0.4");
+    LOG(LogLevel::DEBUG, LogComponent::CORE,
+        "WebServer: Responded to /metrics");
+  });
 
-  server_->Get("/api/v1/metrics/performance",
-               [this](const httplib::Request &, httplib::Response &res) {
-                 std::string json_data = metrics_manager_.expose_as_json();
-                 res.set_content(json_data, "application/json");
-               });
+  server_->Get(
+      "/api/v1/metrics/performance",
+      [this](const httplib::Request &req, httplib::Response &res) {
+        LOG(LogLevel::DEBUG, LogComponent::CORE,
+            "WebServer: Received request for /api/v1/metrics/performance from "
+                << req.remote_addr);
+        res.set_content("{}", "application/json"); // Placeholder
+        LOG(LogLevel::DEBUG, LogComponent::CORE,
+            "WebServer: Responded to /api/v1/metrics/performance (deprecated)");
+      });
 
   server_->Get("/api/v1/operations/alerts",
                [this](const httplib::Request &, httplib::Response &res) {
@@ -103,15 +120,13 @@ void WebServer::run() {
 
 #if defined(__linux__)
 void WebServer::monitor_memory() {
-  Gauge *memory_gauge = metrics_manager_.register_gauge(
-      "ad_process_memory_rss_bytes", "Resident Set Size (RSS) memory usage.");
   while (!shutdown_flag_) {
     std::ifstream statm("/proc/self/statm");
     if (statm.is_open()) {
       long long size, resident, share, text, lib, data, dt;
       statm >> size >> resident >> share >> text >> lib >> data >> dt;
       long page_size = getpagesize();
-      memory_gauge->set(static_cast<double>(resident * page_size));
+      memory_gauge_.Set(static_cast<double>(resident * page_size));
     }
 
     for (int i = 0; i < 150; ++i) {
