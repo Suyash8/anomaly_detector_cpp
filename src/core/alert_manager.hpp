@@ -3,7 +3,6 @@
 
 #include "config.hpp"
 #include "io/alert_dispatch/base_dispatcher.hpp"
-#include "prometheus_metrics_exporter.hpp"
 #include "utils/thread_safe_queue.hpp"
 
 #include <atomic>
@@ -18,6 +17,10 @@
 
 struct Alert;
 
+namespace prometheus {
+class PrometheusMetricsExporter;
+}
+
 namespace Config {
 struct AppConfig;
 }
@@ -30,7 +33,8 @@ public:
   void record_alert(const Alert &new_alert);
   void flush_all_alerts();
   void reconfigure(const Config::AppConfig &new_config);
-  void set_metrics_exporter(std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
+  void set_metrics_exporter(
+      std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
 
   std::vector<Alert> get_recent_alerts(size_t limit) const;
 
@@ -57,8 +61,10 @@ private:
       recent_alert_timestamps_;
 
   // Metrics tracking
-  std::unordered_map<std::string, std::atomic<size_t>> dispatcher_success_counts_;
-  std::unordered_map<std::string, std::atomic<size_t>> dispatcher_failure_counts_;
+  std::unordered_map<std::string, std::atomic<size_t>>
+      dispatcher_success_counts_;
+  std::unordered_map<std::string, std::atomic<size_t>>
+      dispatcher_failure_counts_;
 
   mutable std::mutex recent_alerts_mutex_;
   std::deque<Alert> recent_alerts_;

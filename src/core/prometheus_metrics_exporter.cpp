@@ -1,7 +1,12 @@
 #include "prometheus_metrics_exporter.hpp"
+#include "analysis/analysis_engine.hpp"
+#include "core/alert_manager.hpp"
+#include "core/logger.hpp"
+#include "utils/json_formatter.hpp"
 
 #include <algorithm>
 #include <iomanip>
+#include <nlohmann/json.hpp>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -125,7 +130,7 @@ void PrometheusMetricsExporter::increment_counter(
   }
 
   // Atomic add for double using compare-and-swap
-  auto& atomic_value = counter.values[labels];
+  auto &atomic_value = counter.values[labels];
   double expected = atomic_value.load();
   while (!atomic_value.compare_exchange_weak(expected, expected + value)) {
     // Loop until successful
@@ -216,7 +221,8 @@ void PrometheusMetricsExporter::observe_histogram(
   // Update sum and count
   // Atomic add for double using compare-and-swap
   double expected_sum = series.sum.load();
-  while (!series.sum.compare_exchange_weak(expected_sum, expected_sum + value)) {
+  while (
+      !series.sum.compare_exchange_weak(expected_sum, expected_sum + value)) {
     // Loop until successful
   }
   series.count.fetch_add(1);
@@ -416,14 +422,58 @@ void PrometheusMetricsExporter::setup_http_handlers() {
                [this](const httplib::Request &req, httplib::Response &res) {
                  handle_health_request(req, res);
                });
+
+  // Add API endpoints when configured to replace the web server
+  if (config_.replace_web_server) {
+    // Mount UI static files if available
+    const char *ui_path = "./src/io/web/ui/dist";
+    if (!server_->set_mount_point("/", ui_path)) {
+      LOG(LogLevel::WARN, LogComponent::CORE,
+          "Failed to set mount point for UI. UI will not be available.");
+    }
+
+    // Add API endpoints for alerts and state
+    server_->Get("/api/v1/operations/alerts",
+                 [this](const httplib::Request &req, httplib::Response &res) {
+                   handle_alerts_request(req, res);
+                 });
+
+    server_->Get("/api/v1/operations/state",
+                 [this](const httplib::Request &req, httplib::Response &res) {
+                   handle_state_request(req, res);
+                 });
+
+    // Add legacy endpoint for backward compatibility
+    server_->Get("/api/v1/metrics/performance",
+                 [this](const httplib::Request &req, httplib::Response &res) {
+                   LOG(LogLevel::DEBUG, LogComponent::CORE,
+                       "Received request for /api/v1/metrics/performance from "
+                           << req.remote_addr);
+                   res.set_content("{}", "application/json"); // Placeholder
+                   LOG(LogLevel::DEBUG, LogComponent::CORE,
+                       "Responded to /api/v1/metrics/performance (deprecated)");
+                 });
+  }
 }
 
 void PrometheusMetricsExporter::handle_metrics_request(
     [[maybe_unused]] const httplib::Request &req, httplib::Response &res) {
   try {
     std::string metrics = generate_metrics_output();
+    // Set proper Prometheus content-type header
     res.set_content(metrics, "text/plain; version=0.0.4; charset=utf-8");
     res.status = 200;
+
+    // Add CORS headers to allow Grafana to access the metrics
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type");
+
+    // Add cache control headers to prevent caching
+    res.set_header("Cache-Control",
+                   "no-store, no-cache, must-revalidate, max-age=0");
+    res.set_header("Pragma", "no-cache");
+    res.set_header("Expires", "0");
   } catch (const std::exception &e) {
     res.set_content("Error generating metrics: " + std::string(e.what()),
                     "text/plain");
@@ -433,8 +483,93 @@ void PrometheusMetricsExporter::handle_metrics_request(
 
 void PrometheusMetricsExporter::handle_health_request(
     [[maybe_unused]] const httplib::Request &req, httplib::Response &res) {
+  // Simple health check that returns system status
   res.set_content("OK", "text/plain");
   res.status = 200;
+
+  // Add CORS headers
+  res.set_header("Access-Control-Allow-Origin", "*");
+  res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.set_header("Access-Control-Allow-Headers", "Content-Type");
 }
 
 } // namespace prometheus
+
+void prometheus::PrometheusMetricsExporter::set_alert_manager(
+    std::shared_ptr<AlertManager> alert_manager) {
+  alert_manager_ = alert_manager;
+}
+
+void prometheus::PrometheusMetricsExporter::set_analysis_engine(
+    std::shared_ptr<AnalysisEngine> analysis_engine) {
+  analysis_engine_ = analysis_engine;
+}
+
+void prometheus::PrometheusMetricsExporter::handle_alerts_request(
+    [[maybe_unused]] const httplib::Request &req, httplib::Response &res) {
+  if (!alert_manager_) {
+    res.set_content("{\"error\": \"Alert manager not initialized\"}",
+                    "application/json");
+    res.status = 500;
+    return;
+  }
+
+  try {
+    auto alerts = alert_manager_->get_recent_alerts(50);
+    auto j = nlohmann::json::array();
+    for (const auto &alert : alerts) {
+      j.push_back(JsonFormatter::alert_to_json_object(alert));
+    }
+    res.set_content(j.dump(2), "application/json");
+    res.status = 200;
+
+    // Add CORS headers
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type");
+  } catch (const std::exception &e) {
+    res.set_content("{\"error\": \"" + std::string(e.what()) + "\"}",
+                    "application/json");
+    res.status = 500;
+  }
+}
+
+void prometheus::PrometheusMetricsExporter::handle_state_request(
+    [[maybe_unused]] const httplib::Request &req, httplib::Response &res) {
+  if (!analysis_engine_) {
+    res.set_content("{\"error\": \"Analysis engine not initialized\"}",
+                    "application/json");
+    res.status = 500;
+    return;
+  }
+
+  try {
+    nlohmann::json j_state;
+
+    auto top_active = analysis_engine_->get_top_n_by_metric(10, "request_rate");
+    nlohmann::json j_top_active = nlohmann::json::array();
+    for (const auto &info : top_active) {
+      j_top_active.push_back({{"ip", info.ip}, {"value", info.value}});
+    }
+    j_state["top_active_ips"] = j_top_active;
+
+    auto top_error = analysis_engine_->get_top_n_by_metric(10, "error_rate");
+    nlohmann::json j_top_error = nlohmann::json::array();
+    for (const auto &info : top_error) {
+      j_top_error.push_back({{"ip", info.ip}, {"value", info.value}});
+    }
+    j_state["top_error_ips"] = j_top_error;
+
+    res.set_content(j_state.dump(2), "application/json");
+    res.status = 200;
+
+    // Add CORS headers
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type");
+  } catch (const std::exception &e) {
+    res.set_content("{\"error\": \"" + std::string(e.what()) + "\"}",
+                    "application/json");
+    res.status = 500;
+  }
+}

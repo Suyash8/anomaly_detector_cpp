@@ -12,6 +12,10 @@
 #include <unordered_map>
 #include <vector>
 
+// Forward declarations to avoid circular dependencies
+class AlertManager;
+class AnalysisEngine;
+
 namespace prometheus {
 
 // Forward declarations for metric types
@@ -33,10 +37,12 @@ public:
     std::string metrics_path;
     std::string health_path;
     std::chrono::seconds scrape_interval;
+    bool replace_web_server;
 
     Config()
         : host("0.0.0.0"), port(9090), metrics_path("/metrics"),
-          health_path("/health"), scrape_interval(std::chrono::seconds(15)) {}
+          health_path("/health"), scrape_interval(std::chrono::seconds(15)),
+          replace_web_server(false) {}
   };
 
   explicit PrometheusMetricsExporter(const Config &config = Config{});
@@ -78,6 +84,10 @@ public:
 
   // Metrics export
   std::string generate_metrics_output() const;
+
+  // Set dependencies for API handlers
+  void set_alert_manager(std::shared_ptr<AlertManager> alert_manager);
+  void set_analysis_engine(std::shared_ptr<AnalysisEngine> analysis_engine);
 
 private:
   struct CounterMetric {
@@ -143,6 +153,10 @@ private:
   std::unique_ptr<std::thread> server_thread_;
   std::atomic<bool> server_running_{false};
 
+  // Dependencies for API handlers
+  std::shared_ptr<AlertManager> alert_manager_;
+  std::shared_ptr<AnalysisEngine> analysis_engine_;
+
   // Helper methods
   std::vector<double> get_default_histogram_buckets() const;
   std::string escape_label_value(const std::string &value) const;
@@ -157,6 +171,12 @@ private:
                               httplib::Response &res);
   void handle_health_request(const httplib::Request &req,
                              httplib::Response &res);
+
+  // API handlers for web server replacement
+  void handle_alerts_request(const httplib::Request &req,
+                             httplib::Response &res);
+  void handle_state_request(const httplib::Request &req,
+                            httplib::Response &res);
 };
 
 } // namespace prometheus

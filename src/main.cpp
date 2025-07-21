@@ -225,8 +225,8 @@ int main(int argc, char *argv[]) {
 #endif
 
   // --- Initialize Core Components ---
-  AlertManager alert_manager_instance;
-  alert_manager_instance.initialize(*current_config);
+  auto alert_manager_instance = std::make_shared<AlertManager>();
+  alert_manager_instance->initialize(*current_config);
 
   // --- Metrics Registration ---
   // TODO: Update metrics for multithreaded context
@@ -334,18 +334,113 @@ int main(int argc, char *argv[]) {
     worker_queues.push_back(std::make_unique<ThreadSafeQueue<LogEntry>>());
     auto analysis_engine = std::make_unique<AnalysisEngine>(*current_config);
     auto rule_engine = std::make_unique<RuleEngine>(
-        alert_manager_instance, *current_config, model_manager);
+        *alert_manager_instance, *current_config, model_manager);
     analysis_engines.push_back(std::move(analysis_engine));
     rule_engines.push_back(std::move(rule_engine));
   }
 
+  // --- Prometheus Metrics Exporter Initialization ---
+  std::shared_ptr<prometheus::PrometheusMetricsExporter> metrics_exporter;
+  if (current_config->prometheus.enabled) {
+    prometheus::PrometheusMetricsExporter::Config prometheus_config;
+    prometheus_config.host = current_config->prometheus.host;
+    prometheus_config.port = current_config->prometheus.port;
+    prometheus_config.metrics_path = current_config->prometheus.metrics_path;
+    prometheus_config.health_path = current_config->prometheus.health_path;
+    prometheus_config.scrape_interval = std::chrono::seconds(
+        current_config->prometheus.scrape_interval_seconds);
+    prometheus_config.replace_web_server =
+        current_config->prometheus.replace_web_server;
+
+    metrics_exporter = std::make_shared<prometheus::PrometheusMetricsExporter>(
+        prometheus_config);
+
+    // Set metrics exporter for alert manager
+    alert_manager_instance->set_metrics_exporter(metrics_exporter);
+
+    // If configured to replace web server, set up the necessary dependencies
+    if (current_config->prometheus.replace_web_server) {
+      // Set the alert manager for the metrics exporter
+      metrics_exporter->set_alert_manager(alert_manager_instance);
+
+      // Create a non-owning shared_ptr to the first analysis engine
+      // This is safe because the analysis_engines vector owns the engine and
+      // outlives the metrics_exporter
+      auto analysis_engine_ptr = std::shared_ptr<AnalysisEngine>(
+          analysis_engines[0].get(), [](AnalysisEngine *) {});
+      metrics_exporter->set_analysis_engine(analysis_engine_ptr);
+
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "Prometheus metrics exporter configured to replace web server with "
+          "endpoints:"
+          "\n  - "
+              << current_config->prometheus.metrics_path
+              << " (metrics)"
+                 "\n  - "
+              << current_config->prometheus.health_path
+              << " (health check)"
+                 "\n  - /api/v1/operations/alerts (alerts API)"
+                 "\n  - /api/v1/operations/state (state API)");
+    }
+
+    // Start the Prometheus metrics server
+    if (metrics_exporter->start_server()) {
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "Prometheus metrics exporter started on "
+              << current_config->prometheus.host << ":"
+              << current_config->prometheus.port << " with metrics path "
+              << current_config->prometheus.metrics_path << " and health path "
+              << current_config->prometheus.health_path);
+    } else {
+      LOG(LogLevel::ERROR, LogComponent::CORE,
+          "Failed to start Prometheus metrics exporter");
+    }
+  }
+
   // --- Web Server Initialization ---
-  auto& memory_gauge = MetricsRegistry::instance().create_gauge("memory_usage_bytes", "Memory usage in bytes");
-  WebServer web_server(current_config->monitoring.web_server_host,
-                       current_config->monitoring.web_server_port,
-                       MetricsRegistry::instance(), alert_manager_instance,
-                       *analysis_engines[0], memory_gauge);
-  web_server.start();
+  std::unique_ptr<WebServer> web_server;
+  if (!current_config->prometheus.enabled ||
+      (current_config->prometheus.enabled &&
+       !current_config->prometheus.replace_web_server)) {
+    // Only start the web server if Prometheus is not enabled or if it's enabled
+    // but not configured to replace the web server
+    auto &memory_gauge = MetricsRegistry::instance().create_gauge(
+        "memory_usage_bytes", "Memory usage in bytes");
+
+    // Check if we need to use a different port when both systems are running
+    int web_server_port = current_config->monitoring.web_server_port;
+    if (current_config->prometheus.enabled &&
+        current_config->prometheus.port == web_server_port) {
+      // Use a different port to avoid conflict
+      web_server_port++;
+      LOG(LogLevel::WARN, LogComponent::CORE,
+          "Web server port conflicts with Prometheus port. Using port "
+              << web_server_port << " instead.");
+    }
+
+    web_server = std::make_unique<WebServer>(
+        current_config->monitoring.web_server_host, web_server_port,
+        MetricsRegistry::instance(), *alert_manager_instance,
+        *analysis_engines[0], memory_gauge);
+    web_server->start();
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Web server started on " << current_config->monitoring.web_server_host
+                                 << ":" << web_server_port);
+  } else {
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Custom web server disabled as Prometheus metrics exporter is "
+        "configured to replace it");
+  }
+
+  // --- Set metrics exporter for worker components ---
+  if (metrics_exporter) {
+    for (unsigned int i = 0; i < num_workers; ++i) {
+      analysis_engines[i]->set_metrics_exporter(metrics_exporter);
+      rule_engines[i]->set_metrics_exporter(metrics_exporter);
+    }
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Prometheus metrics exporter set for all worker components");
+  }
 
   // --- Launch Worker Threads ---
   for (unsigned int i = 0; i < num_workers; ++i) {
@@ -388,7 +483,7 @@ int main(int argc, char *argv[]) {
         LogManager::instance().configure(current_config->logging);
         LOG(LogLevel::INFO, LogComponent::CONFIG,
             "Logger has been reconfigured.");
-        alert_manager_instance.reconfigure(*current_config);
+        alert_manager_instance->reconfigure(*current_config);
 
         // Reconfigure all worker engines
         for (auto &engine : analysis_engines)
@@ -493,7 +588,17 @@ int main(int argc, char *argv[]) {
     keyboard_thread.join();
   }
 
-  web_server.stop();
+  // Stop web server or Prometheus exporter
+  if (web_server) {
+    web_server->stop();
+    LOG(LogLevel::INFO, LogComponent::CORE, "Web server stopped");
+  }
+
+  if (metrics_exporter) {
+    metrics_exporter->stop_server();
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Prometheus metrics exporter stopped");
+  }
 
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Processing finished or shutdown signal received.");
@@ -501,7 +606,7 @@ int main(int argc, char *argv[]) {
   // State saving is disabled for now
   // if (current_config->state_persistence_enabled) { ... }
 
-  alert_manager_instance.flush_all_alerts();
+  alert_manager_instance->flush_all_alerts();
 
   auto time_end = std::chrono::high_resolution_clock::now();
   auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
