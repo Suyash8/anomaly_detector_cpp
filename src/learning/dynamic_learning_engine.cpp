@@ -181,4 +181,26 @@ void DynamicLearningEngine::process_analyzed_event(const AnalyzedEvent &event) {
   // --- Per-Session (skipped: no session_id available) ---
 }
 
+void DynamicLearningEngine::set_manual_override(const std::string &entity_type,
+                                                const std::string &entity_id,
+                                                double threshold) {
+  auto baseline = get_baseline(entity_type, entity_id);
+  baseline->manual_override_threshold = threshold;
+  baseline->manual_override_active = true;
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_STATS,
+      "Manual override set for [" << entity_type << ":" << entity_id << "] to "
+                                  << threshold);
+}
+
+void DynamicLearningEngine::clear_manual_override(
+    const std::string &entity_type, const std::string &entity_id) {
+  auto baseline = get_baseline(entity_type, entity_id);
+  baseline->manual_override_active = false;
+  baseline->manual_override_threshold =
+      std::numeric_limits<double>::quiet_NaN();
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_STATS,
+      "Manual override cleared for [" << entity_type << ":" << entity_id
+                                      << "]");
+}
+
 } // namespace learning

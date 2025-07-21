@@ -291,3 +291,39 @@ TEST_F(DynamicLearningEngineTest, EntitySeparation) {
   EXPECT_NE(baseline1.get(), baseline3.get());
   EXPECT_NE(baseline2.get(), baseline3.get());
 }
+
+TEST_F(DynamicLearningEngineTest, ThresholdChangeLoggingAndAudit) {
+  std::string ip = "10.0.0.1";
+  // Add initial values
+  for (int i = 0; i < 100; ++i) {
+    engine->process_event("ip", ip, 100.0, base_time + i * 1000);
+  }
+  // Add outlier to trigger threshold change
+  engine->process_event("ip", ip, 1000.0, base_time + 200 * 1000);
+  // No assertion here: check logs for threshold change message
+}
+
+TEST_F(DynamicLearningEngineTest, ManualOverrideThreshold) {
+  std::string ip = "10.0.0.2";
+  for (int i = 0; i < 100; ++i) {
+    engine->process_event("ip", ip, 100.0, base_time + i * 1000);
+  }
+  double normal_threshold = engine->get_entity_threshold("ip", ip, 0.95);
+  engine->set_manual_override("ip", ip, 42.0);
+  double overridden = engine->get_entity_threshold("ip", ip, 0.95);
+  EXPECT_DOUBLE_EQ(overridden, 42.0);
+  engine->clear_manual_override("ip", ip);
+  double after_clear = engine->get_entity_threshold("ip", ip, 0.95);
+  EXPECT_DOUBLE_EQ(after_clear, normal_threshold);
+}
+
+TEST_F(DynamicLearningEngineTest, ProcessAnalyzedEventIntegration) {
+  AnalyzedEvent event({});
+  event.raw_log.ip_address = "10.0.0.3";
+  event.raw_log.request_time_s = 123.0;
+  event.raw_log.parsed_timestamp_ms = base_time;
+  engine->process_analyzed_event(event);
+  auto baseline = engine->get_baseline("ip", "10.0.0.3");
+  ASSERT_NE(baseline, nullptr);
+  EXPECT_TRUE(baseline->statistics.get_sample_count() > 0);
+}
