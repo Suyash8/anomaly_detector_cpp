@@ -6,6 +6,7 @@
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
 #include "core/metrics_manager.hpp"
+#include "core/prometheus_metrics_exporter.hpp"
 #include "io/threat_intel/intel_manager.hpp"
 #include "models/model_manager.hpp"
 #include "rules/scoring.hpp"
@@ -98,6 +99,9 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
                 "ad_rules_tier3_duration_seconds",
                 "Latency of evaluating Tier 3 (ML) rules.")
           : nullptr;
+
+  // Prometheus metrics for rule evaluation
+  // auto start_time = std::chrono::high_resolution_clock::now();
 
   // --- Pre-checks: Threat Intel and Allowlist ---
   uint32_t event_ip_u32 =
@@ -257,6 +261,107 @@ void RuleEngine::create_and_record_alert(const AnalyzedEvent &event,
         "Score is <= 0.0, not creating alert for reason: " << reason);
     return;
   }
+
+  // Extract rule name from reason for metrics tracking
+  std::string rule_name;
+  if (reason.find("High request rate") != std::string::npos) {
+    rule_name = "tier1_requests_per_ip";
+  } else if (reason.find("Multiple failed login attempts") !=
+             std::string::npos) {
+    rule_name = "tier1_failed_logins";
+  } else if (reason.find("Request path contains a suspicious pattern") !=
+             std::string::npos) {
+    rule_name = "tier1_suspicious_string";
+  } else if (reason.find("User-Agent contains a suspicious pattern") !=
+             std::string::npos) {
+    rule_name = "tier1_suspicious_string";
+  } else if (reason.find("missing User-Agent") != std::string::npos ||
+             reason.find("known malicious User-Agent") != std::string::npos ||
+             reason.find("headless browser") != std::string::npos ||
+             reason.find("outdated browser") != std::string::npos ||
+             reason.find("cycling through different User-Agents") !=
+                 std::string::npos) {
+    rule_name = "tier1_user_agent";
+  } else if (reason.find("Low Asset-to-HTML request ratio") !=
+             std::string::npos) {
+    rule_name = "tier1_asset_ratio";
+  } else if (reason.find("failed logins within a single session") !=
+                 std::string::npos ||
+             reason.find("high request rate within a single session") !=
+                 std::string::npos ||
+             reason.find("User-Agent changed") != std::string::npos) {
+    rule_name = "tier1_session";
+  } else if (reason.find("Anomalous IP") != std::string::npos) {
+    rule_name = "tier2_ip_zscore";
+  } else if (reason.find("Anomalous") != std::string::npos &&
+             reason.find("for path") != std::string::npos) {
+    rule_name = "tier2_path_zscore";
+  } else if (reason.find("Newly seen IP immediately accessed") !=
+                 std::string::npos ||
+             reason.find("high error rate") != std::string::npos) {
+    rule_name = "tier1_new_seen";
+  } else if (reason.find("Sudden performance degradation") !=
+             std::string::npos) {
+    rule_name = "tier2_historical_comparison";
+  } else if (reason.find("ML model") != std::string::npos) {
+    rule_name = "tier3_ml";
+  } else {
+    rule_name = "unknown_rule";
+  }
+
+  // Track rule hit for metrics
+  if (!rule_name.empty()) {
+    track_rule_hit(rule_name);
+  }
+
+  // Track alert metrics by tier
+  if (metrics_exporter_) {
+    std::string tier_str;
+    switch (tier) {
+    case AlertTier::TIER1_HEURISTIC:
+      tier_str = "tier1";
+      break;
+    case AlertTier::TIER2_STATISTICAL:
+      tier_str = "tier2";
+      break;
+    case AlertTier::TIER3_ML:
+      tier_str = "tier3";
+      break;
+    default:
+      tier_str = "unknown";
+    }
+
+    std::string action_str_metric;
+    switch (action) {
+    case AlertAction::NO_ACTION:
+      action_str_metric = "no_action";
+      break;
+    case AlertAction::LOG:
+      action_str_metric = "log";
+      break;
+    case AlertAction::CHALLENGE:
+      action_str_metric = "challenge";
+      break;
+    case AlertAction::RATE_LIMIT:
+      action_str_metric = "rate_limit";
+      break;
+    case AlertAction::BLOCK:
+      action_str_metric = "block";
+      break;
+    default:
+      action_str_metric = "unknown";
+    }
+
+    metrics_exporter_->increment_counter("ad_alerts_generated_total",
+                                         {{"tier", tier_str},
+                                          {"action", action_str_metric},
+                                          {"rule", rule_name}});
+
+    // Track alert score distribution
+    metrics_exporter_->observe_histogram("ad_alert_score_distribution", score,
+                                         {{"tier", tier_str}});
+  }
+
   LOG(LogLevel::INFO, LogComponent::RULES_EVAL,
       "Creating alert for IP " << event.raw_log.ip_address << " with score "
                                << score << ". Reason: " << reason);
@@ -272,6 +377,7 @@ void RuleEngine::create_and_record_alert(const AnalyzedEvent &event,
 void RuleEngine::check_requests_per_ip_rule(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T1_HEURISTIC,
       "Checking 'requests_per_ip' rule...");
+  track_rule_evaluation("tier1_requests_per_ip");
   if (event.current_ip_request_count_in_window &&
       *event.current_ip_request_count_in_window >
           app_config.tier1.max_requests_per_ip_in_window) {
@@ -303,6 +409,7 @@ void RuleEngine::check_requests_per_ip_rule(const AnalyzedEvent &event) {
 void RuleEngine::check_failed_logins_rule(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T1_HEURISTIC,
       "Checking 'failed_logins' rule...");
+  track_rule_evaluation("tier1_failed_logins");
   if (event.current_ip_failed_login_count_in_window &&
       *event.current_ip_failed_login_count_in_window >
           app_config.tier1.max_failed_logins_per_ip) {
@@ -334,6 +441,7 @@ void RuleEngine::check_failed_logins_rule(const AnalyzedEvent &event) {
 void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T1_HEURISTIC,
       "Checking 'suspicious_string' rules...");
+  track_rule_evaluation("tier1_suspicious_string");
   if (suspicious_path_matcher_) {
     auto matches =
         suspicious_path_matcher_->find_all(event.raw_log.request_path);
@@ -370,6 +478,7 @@ void RuleEngine::check_suspicious_string_rules(const AnalyzedEvent &event) {
 void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T1_HEURISTIC,
       "Checking 'user_agent' rules...");
+  track_rule_evaluation("tier1_user_agent");
   if (!app_config.tier1.check_user_agent_anomalies)
     return;
 
@@ -427,6 +536,7 @@ void RuleEngine::check_user_agent_rules(const AnalyzedEvent &event) {
 void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T1_HEURISTIC,
       "Checking 'asset_ratio' rule...");
+  track_rule_evaluation("tier1_asset_ratio");
   const auto &cfg = app_config.tier1;
 
   if (static_cast<size_t>(event.ip_html_requests_in_window) <
@@ -467,6 +577,7 @@ void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
 void RuleEngine::check_session_rules(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T1_HEURISTIC,
       "Checking 'session' rules...");
+  track_rule_evaluation("tier1_session");
   if (!event.raw_session_state)
     return;
 
@@ -532,6 +643,7 @@ void RuleEngine::check_session_rules(const AnalyzedEvent &event) {
 void RuleEngine::check_ip_zscore_rules(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T2_STATISTICAL,
       "Checking 'ip_zscore' rules...");
+  track_rule_evaluation("tier2_ip_zscore");
   const double threshold = app_config.tier2.z_score_threshold;
   std::string action_str = "Investigate IP for anomalous statistical behavior.";
 
@@ -559,6 +671,7 @@ void RuleEngine::check_ip_zscore_rules(const AnalyzedEvent &event) {
 void RuleEngine::check_path_zscore_rules(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T2_STATISTICAL,
       "Checking 'path_zscore' rules...");
+  track_rule_evaluation("tier2_path_zscore");
   const double threshold = app_config.tier2.z_score_threshold;
   std::string action_str = "Investigate path for anomalous statistical "
                            "behaviour (e.g., performance issue, data exfil).";
@@ -587,6 +700,7 @@ void RuleEngine::check_path_zscore_rules(const AnalyzedEvent &event) {
 void RuleEngine::check_new_seen_rules(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T1_HEURISTIC,
       "Checking 'new_seen' rules...");
+  track_rule_evaluation("tier1_new_seen");
   if (event.is_first_request_from_ip) {
     for (const auto &sensitive : app_config.tier1.sensitive_path_substrings) {
       if (event.raw_log.request_path.find(sensitive) != std::string::npos) {
@@ -630,6 +744,7 @@ void RuleEngine::check_new_seen_rules(const AnalyzedEvent &event) {
 void RuleEngine::check_historical_comparison_rules(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T2_STATISTICAL,
       "Checking 'historical_comparison' rules...");
+  track_rule_evaluation("tier2_historical_comparison");
   const auto &cfg = app_config.tier2;
   const size_t min_samples = cfg.min_samples_for_z_score;
 
@@ -671,6 +786,7 @@ void RuleEngine::check_historical_comparison_rules(const AnalyzedEvent &event) {
 
 void RuleEngine::check_ml_rules(const AnalyzedEvent &event) {
   LOG(LogLevel::TRACE, LogComponent::RULES_T3_ML, "Checking 'ml' rules...");
+  track_rule_evaluation("tier3_ml");
   if (event.feature_vector.empty()) {
     LOG(LogLevel::TRACE, LogComponent::RULES_T3_ML,
         "Skipping ML check, feature vector is empty.");
@@ -713,4 +829,115 @@ void RuleEngine::check_ml_rules(const AnalyzedEvent &event) {
 
     alert_mgr.record_alert(ml_alert);
   }
+}
+void RuleEngine::set_metrics_exporter(
+    std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter) {
+  metrics_exporter_ = exporter;
+  if (metrics_exporter_) {
+    register_rule_engine_metrics();
+  }
+}
+
+void RuleEngine::register_rule_engine_metrics() {
+  if (!metrics_exporter_)
+    return;
+
+  // Register detection metrics by tier
+  metrics_exporter_->register_counter(
+      "ad_rule_evaluations_total", "Total number of rule evaluations performed",
+      {"tier", "rule"});
+
+  metrics_exporter_->register_counter("ad_rule_hits_total",
+                                      "Total number of rule hits/triggers",
+                                      {"tier", "rule"});
+
+  metrics_exporter_->register_gauge("ad_rule_hit_rate",
+                                    "Hit rate for each rule (hits/evaluations)",
+                                    {"tier", "rule"});
+
+  // Register processing time metrics
+  metrics_exporter_->register_histogram(
+      "ad_rule_processing_time_seconds", "Time taken to evaluate rules",
+      {0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0}, {"tier"});
+
+  // Register effectiveness metrics
+  metrics_exporter_->register_gauge("ad_rule_effectiveness_score",
+                                    "Effectiveness score for each rule (0-100)",
+                                    {"tier", "rule"});
+
+  // Register alert generation metrics by tier
+  metrics_exporter_->register_counter(
+      "ad_alerts_generated_by_tier_total",
+      "Total number of alerts generated by each detection tier",
+      {"tier", "action", "rule"});
+
+  // Register alert score distribution
+  metrics_exporter_->register_histogram(
+      "ad_alert_score_distribution", "Distribution of alert scores",
+      {10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 95.0, 99.0},
+      {"tier"});
+}
+
+void RuleEngine::track_rule_evaluation(const std::string &rule_name) {
+  if (!metrics_exporter_)
+    return;
+
+  // Extract tier from rule name
+  std::string tier = "unknown";
+  if (rule_name.find("tier1_") == 0) {
+    tier = "tier1";
+  } else if (rule_name.find("tier2_") == 0) {
+    tier = "tier2";
+  } else if (rule_name.find("tier3_") == 0) {
+    tier = "tier3";
+  }
+
+  // Increment evaluation counter
+  metrics_exporter_->increment_counter("ad_rule_evaluations_total",
+                                       {{"tier", tier}, {"rule", rule_name}});
+
+  // Update internal tracking
+  rule_evaluation_counts_[rule_name]++;
+
+  // Update hit rate
+  double hit_rate = 0.0;
+  if (rule_evaluation_counts_[rule_name] > 0) {
+    hit_rate = static_cast<double>(rule_hit_counts_[rule_name]) /
+               static_cast<double>(rule_evaluation_counts_[rule_name]);
+  }
+
+  metrics_exporter_->set_gauge("ad_rule_hit_rate", hit_rate,
+                               {{"tier", tier}, {"rule", rule_name}});
+}
+
+void RuleEngine::track_rule_hit(const std::string &rule_name) {
+  if (!metrics_exporter_)
+    return;
+
+  // Extract tier from rule name
+  std::string tier = "unknown";
+  if (rule_name.find("tier1_") == 0) {
+    tier = "tier1";
+  } else if (rule_name.find("tier2_") == 0) {
+    tier = "tier2";
+  } else if (rule_name.find("tier3_") == 0) {
+    tier = "tier3";
+  }
+
+  // Increment hit counter
+  metrics_exporter_->increment_counter("ad_rule_hits_total",
+                                       {{"tier", tier}, {"rule", rule_name}});
+
+  // Update internal tracking
+  rule_hit_counts_[rule_name]++;
+
+  // Update hit rate
+  double hit_rate = 0.0;
+  if (rule_evaluation_counts_[rule_name] > 0) {
+    hit_rate = static_cast<double>(rule_hit_counts_[rule_name]) /
+               static_cast<double>(rule_evaluation_counts_[rule_name]);
+  }
+
+  metrics_exporter_->set_gauge("ad_rule_hit_rate", hit_rate,
+                               {{"tier", tier}, {"rule", rule_name}});
 }

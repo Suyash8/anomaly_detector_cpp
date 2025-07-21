@@ -26,13 +26,28 @@ FileDispatcher::~FileDispatcher() {
   }
 }
 
-void FileDispatcher::dispatch(const Alert &alert) {
+bool FileDispatcher::dispatch(const Alert &alert) {
   if (alert_file_stream_.is_open()) {
-    // Use the shared formatter to get the JSON string
-    std::string json_output = JsonFormatter::format_alert_to_json(alert);
-    alert_file_stream_ << json_output << std::endl; // endl also flushes
-    LOG(LogLevel::TRACE, LogComponent::IO_DISPATCH,
-        "Alert dispatched to file: " << alert_file_output_path_
-                                     << " | Alert: " << json_output);
+    try {
+      // Use the shared formatter to get the JSON string
+      std::string json_output = JsonFormatter::format_alert_to_json(alert);
+      alert_file_stream_ << json_output << std::endl; // endl also flushes
+      
+      if (alert_file_stream_.good()) {
+        LOG(LogLevel::TRACE, LogComponent::IO_DISPATCH,
+            "Alert dispatched to file: " << alert_file_output_path_
+                                       << " | Alert: " << json_output);
+        return true;
+      } else {
+        LOG(LogLevel::ERROR, LogComponent::IO_DISPATCH,
+            "Failed to write alert to file: " << alert_file_output_path_);
+        return false;
+      }
+    } catch (const std::exception& e) {
+      LOG(LogLevel::ERROR, LogComponent::IO_DISPATCH,
+          "Exception while dispatching alert to file: " << e.what());
+      return false;
+    }
   }
+  return false;
 }

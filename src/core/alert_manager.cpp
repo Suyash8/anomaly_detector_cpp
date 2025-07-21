@@ -4,6 +4,7 @@
 #include "io/alert_dispatch/file_dispatcher.hpp"
 #include "io/alert_dispatch/http_dispatcher.hpp"
 #include "io/alert_dispatch/syslog_dispatcher.hpp"
+#include "prometheus_metrics_exporter.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -63,6 +64,8 @@ void AlertManager::reconfigure(const Config::AppConfig &new_config) {
 }
 
 void AlertManager::record_alert(const Alert &new_alert) {
+  alerts_processed_++;
+
   if (throttle_duration_ms_ > 0) {
     std::string throttle_key =
         new_alert.source_ip + ":" + new_alert.alert_reason;
@@ -82,8 +85,54 @@ void AlertManager::record_alert(const Alert &new_alert) {
           (alert_throttle_max_intervening_alerts_ > 0) &&
           (intervening_alerts >= alert_throttle_max_intervening_alerts_);
 
-      if (is_in_time_window && !has_exceeded_intervening_limit)
+      if (is_in_time_window && !has_exceeded_intervening_limit) {
+        // Track throttled alerts
+        alerts_throttled_++;
+
+        // Update metrics
+        if (metrics_exporter_) {
+          // Track throttled alerts with reason
+          std::string throttle_reason = is_in_time_window ? "time_window" : "intervening_limit";
+          metrics_exporter_->increment_counter("ad_alerts_throttled_total", 
+                                              {{"reason", throttle_reason}});
+
+          // Track suppressed alerts by tier
+          std::string tier_str;
+          switch (new_alert.detection_tier) {
+          case AlertTier::TIER1_HEURISTIC:
+            tier_str = "tier1";
+            break;
+          case AlertTier::TIER2_STATISTICAL:
+            tier_str = "tier2";
+            break;
+          case AlertTier::TIER3_ML:
+            tier_str = "tier3";
+            break;
+          default:
+            tier_str = "unknown";
+          }
+          
+          metrics_exporter_->increment_counter("ad_alerts_suppressed_total", 
+                                              {{"reason", throttle_reason}, 
+                                               {"tier", tier_str}});
+
+          // Update throttling ratio
+          double throttle_ratio =
+              static_cast<double>(alerts_throttled_.load()) /
+              static_cast<double>(alerts_processed_.load());
+          metrics_exporter_->set_gauge("ad_alert_throttling_ratio",
+                                       throttle_ratio);
+                                       
+          // Update suppression ratio by tier
+          // We need to calculate this based on tier-specific counts
+          // For now, we'll use the overall ratio as an approximation
+          metrics_exporter_->set_gauge("ad_alert_suppression_ratio_by_tier",
+                                      throttle_ratio,
+                                      {{"tier", tier_str}});
+        }
+
         return; // Suppress the alert
+      }
     }
 
     // If we are here, the alert will be recorded
@@ -97,9 +146,63 @@ void AlertManager::record_alert(const Alert &new_alert) {
     recent_alerts_.push_front(new_alert);
     if (recent_alerts_.size() > MAX_RECENT_ALERTS)
       recent_alerts_.pop_back();
+
+    // Update recent alerts count metric
+    if (metrics_exporter_) {
+      metrics_exporter_->set_gauge("ad_recent_alerts_count",
+                                   static_cast<double>(recent_alerts_.size()));
+    }
+  }
+
+  // Track alert metrics by tier and action
+  if (metrics_exporter_) {
+    std::string tier_str;
+    switch (new_alert.detection_tier) {
+    case AlertTier::TIER1_HEURISTIC:
+      tier_str = "tier1";
+      break;
+    case AlertTier::TIER2_STATISTICAL:
+      tier_str = "tier2";
+      break;
+    case AlertTier::TIER3_ML:
+      tier_str = "tier3";
+      break;
+    default:
+      tier_str = "unknown";
+    }
+
+    std::string action_str;
+    switch (new_alert.action_code) {
+    case AlertAction::NO_ACTION:
+      action_str = "no_action";
+      break;
+    case AlertAction::LOG:
+      action_str = "log";
+      break;
+    case AlertAction::CHALLENGE:
+      action_str = "challenge";
+      break;
+    case AlertAction::RATE_LIMIT:
+      action_str = "rate_limit";
+      break;
+    case AlertAction::BLOCK:
+      action_str = "block";
+      break;
+    default:
+      action_str = "unknown";
+    }
+
+    metrics_exporter_->increment_counter(
+        "ad_alerts_total", {{"tier", tier_str}, {"action", action_str}});
   }
 
   alert_queue_.push(new_alert);
+
+  // Update queue size metric
+  if (metrics_exporter_) {
+    metrics_exporter_->set_gauge("ad_alert_queue_size",
+                                 static_cast<double>(alert_queue_.size()));
+  }
 }
 
 std::vector<Alert> AlertManager::get_recent_alerts(size_t limit) const {
@@ -196,8 +299,163 @@ void AlertManager::dispatcher_loop() {
       std::cout << format_alert_to_human_readable(alert_to_dispatch)
                 << std::endl;
 
-    for (const auto &dispatcher : dispatchers_)
-      if (dispatcher)
-        dispatcher->dispatch(alert_to_dispatch);
+    for (const auto &dispatcher : dispatchers_) {
+      if (dispatcher) {
+        std::string dispatcher_type = dispatcher->get_dispatcher_type();
+
+        // Track dispatch attempt
+        if (metrics_exporter_) {
+          metrics_exporter_->increment_counter(
+              "ad_alert_dispatch_attempts_total",
+              {{"dispatcher_type", dispatcher_type}});
+        }
+
+        // Get tier string for metrics
+        std::string tier_str;
+        switch (alert_to_dispatch.detection_tier) {
+        case AlertTier::TIER1_HEURISTIC:
+          tier_str = "tier1";
+          break;
+        case AlertTier::TIER2_STATISTICAL:
+          tier_str = "tier2";
+          break;
+        case AlertTier::TIER3_ML:
+          tier_str = "tier3";
+          break;
+        default:
+          tier_str = "unknown";
+        }
+
+        // Measure dispatch latency
+        auto start_time = std::chrono::high_resolution_clock::now();
+        bool success = dispatcher->dispatch(alert_to_dispatch);
+        auto end_time = std::chrono::high_resolution_clock::now();
+        
+        // Calculate latency in seconds
+        double latency_seconds = std::chrono::duration<double>(end_time - start_time).count();
+
+        // Track dispatch success/failure
+        if (metrics_exporter_) {
+          if (success) {
+            metrics_exporter_->increment_counter(
+                "ad_alert_dispatch_success_total",
+                {{"dispatcher_type", dispatcher_type}, {"tier", tier_str}});
+            dispatcher_success_counts_[dispatcher_type]++;
+            
+            // Track dispatch latency on success
+            metrics_exporter_->observe_histogram(
+                "ad_alert_dispatch_latency_seconds",
+                latency_seconds,
+                {{"dispatcher_type", dispatcher_type}});
+          } else {
+            // Determine error type based on dispatcher type
+            std::string error_type = "unknown";
+            if (dispatcher_type == "http") {
+              error_type = "network_error"; // Default error type for HTTP
+            } else if (dispatcher_type == "file") {
+              error_type = "file_write_error"; // Default error type for file
+            } else if (dispatcher_type == "syslog") {
+              error_type = "syslog_error"; // Default error type for syslog
+            }
+            
+            metrics_exporter_->increment_counter(
+                "ad_alert_dispatch_failure_total",
+                {{"dispatcher_type", dispatcher_type}, {"error_type", error_type}});
+            dispatcher_failure_counts_[dispatcher_type]++;
+          }
+
+          // Calculate and update success rate
+          size_t success_count =
+              dispatcher_success_counts_[dispatcher_type].load();
+          size_t failure_count =
+              dispatcher_failure_counts_[dispatcher_type].load();
+          size_t total_count = success_count + failure_count;
+
+          double success_rate = (total_count > 0)
+                                    ? static_cast<double>(success_count) /
+                                          static_cast<double>(total_count)
+                                    : 1.0;
+
+          metrics_exporter_->set_gauge("ad_alert_dispatch_success_rate",
+                                       success_rate,
+                                       {{"dispatcher_type", dispatcher_type}});
+        }
+      }
+    }
+
+    // Update queue size metric after processing
+    if (metrics_exporter_) {
+      metrics_exporter_->set_gauge("ad_alert_queue_size",
+                                   static_cast<double>(alert_queue_.size()));
+    }
   }
+}
+void AlertManager::set_metrics_exporter(
+    std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter) {
+  metrics_exporter_ = exporter;
+  if (metrics_exporter_) {
+    register_alert_manager_metrics();
+  }
+}
+
+void AlertManager::register_alert_manager_metrics() {
+  if (!metrics_exporter_)
+    return;
+
+  // Register alert generation metrics
+  metrics_exporter_->register_counter("ad_alerts_total",
+                                      "Total number of alerts generated",
+                                      {"tier", "action"});
+
+  // Register alert throttling metrics
+  metrics_exporter_->register_counter(
+      "ad_alerts_throttled_total",
+      "Total number of alerts suppressed by throttling",
+      {"reason"});
+
+  metrics_exporter_->register_gauge(
+      "ad_alert_throttling_ratio", "Ratio of throttled alerts to total alerts");
+      
+  // Register alert suppression metrics by type
+  metrics_exporter_->register_counter(
+      "ad_alerts_suppressed_total",
+      "Total number of alerts suppressed",
+      {"reason", "tier"});
+      
+  metrics_exporter_->register_gauge(
+      "ad_alert_suppression_ratio_by_tier",
+      "Ratio of suppressed alerts to total alerts by tier",
+      {"tier"});
+
+  // Register alert dispatcher metrics
+  metrics_exporter_->register_counter("ad_alert_dispatch_attempts_total",
+                                      "Total number of alert dispatch attempts",
+                                      {"dispatcher_type"});
+
+  metrics_exporter_->register_counter(
+      "ad_alert_dispatch_success_total",
+      "Total number of successful alert dispatches", 
+      {"dispatcher_type", "tier"});
+
+  metrics_exporter_->register_counter("ad_alert_dispatch_failure_total",
+                                      "Total number of failed alert dispatches", 
+                                      {"dispatcher_type", "error_type"});
+
+  metrics_exporter_->register_gauge(
+      "ad_alert_dispatch_success_rate",
+      "Success rate for alert dispatches (0.0-1.0)", 
+      {"dispatcher_type"});
+      
+  metrics_exporter_->register_histogram(
+      "ad_alert_dispatch_latency_seconds",
+      "Time taken to dispatch alerts",
+      {0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0},
+      {"dispatcher_type"});
+
+  // Register queue metrics
+  metrics_exporter_->register_gauge("ad_alert_queue_size",
+                                    "Current size of the alert queue");
+
+  metrics_exporter_->register_gauge(
+      "ad_recent_alerts_count", "Number of alerts in the recent alerts cache");
 }

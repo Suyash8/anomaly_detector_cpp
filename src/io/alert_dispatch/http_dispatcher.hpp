@@ -9,8 +9,9 @@
 class HttpDispatcher : public IAlertDispatcher {
 public:
   explicit HttpDispatcher(const std::string &webhook_url);
-  void dispatch(const Alert &alert) override;
+  bool dispatch(const Alert &alert) override;
   const char *get_name() const override { return "HttpDispatcher"; }
+  std::string get_dispatcher_type() const override { return "http"; }
 
 private:
   std::string host_;

@@ -8,8 +8,9 @@ public:
   SyslogDispatcher();
   ~SyslogDispatcher() override;
 
-  void dispatch(const Alert &alert) override;
+  bool dispatch(const Alert &alert) override;
   const char *get_name() const override { return "SyslogDispatcher"; }
+  std::string get_dispatcher_type() const override { return "syslog"; }
 };
 
 #endif // SYSLOG_DISPATCHER_HPP
