@@ -55,6 +55,38 @@ struct PerIpState {
     return historical_user_agents.size();
   }
 
+  // Memory footprint calculation
+  size_t calculate_memory_footprint() const {
+    size_t total = sizeof(PerIpState);
+
+    // Sliding windows memory
+    total += request_timestamps_window.get_event_count() * sizeof(uint64_t);
+    total +=
+        failed_login_timestamps_window.get_event_count() * sizeof(uint64_t);
+    total += html_request_timestamps.get_event_count() * sizeof(uint64_t);
+    total += asset_request_timestamps.get_event_count() * sizeof(uint64_t);
+
+    // UA window memory (strings are more complex)
+    for (const auto &pair : recent_unique_ua_window.get_raw_window_data()) {
+      total += pair.second.size() + sizeof(std::string);
+    }
+
+    // Paths seen memory
+    for (const auto &path : paths_seen_by_ip) {
+      total += path.size() + sizeof(std::string);
+    }
+
+    // Historical user agents memory
+    for (const auto &ua : historical_user_agents) {
+      total += ua.size() + sizeof(std::string);
+    }
+
+    // Last known user agent
+    total += last_known_user_agent.size();
+
+    return total;
+  }
+
   PerIpState(uint64_t current_timestamp_ms, uint64_t general_window_duration_ms,
              uint64_t login_window_duration_ms)
       : request_timestamps_window(general_window_duration_ms,

@@ -46,6 +46,40 @@ struct PerSessionState {
     return unique_user_agents.size();
   }
 
+  // Memory footprint calculation
+  size_t calculate_memory_footprint() const {
+    size_t total = sizeof(PerSessionState);
+
+    // Request history memory (deque of pairs)
+    total += request_history.size() * (sizeof(uint64_t) + sizeof(std::string));
+    for (const auto &pair : request_history) {
+      total += pair.second.size(); // String content
+    }
+
+    // Unique paths visited memory
+    for (const auto &path : unique_paths_visited) {
+      total += path.size() + sizeof(std::string);
+    }
+
+    // Unique user agents memory
+    for (const auto &ua : unique_user_agents) {
+      total += ua.size() + sizeof(std::string);
+    }
+
+    // HTTP method counts memory
+    for (const auto &pair : http_method_counts) {
+      total += pair.first.size() + sizeof(std::string) + sizeof(int);
+    }
+
+    // Sliding window memory
+    total += request_timestamps_window.get_event_count() * sizeof(uint64_t);
+
+    // StatsTracker objects (2 trackers with ~3 doubles each)
+    total += sizeof(double) * 3 * 2;
+
+    return total;
+  }
+
   PerSessionState()
       : session_start_timestamp_ms(0), last_seen_timestamp_ms(0),
         failed_login_attempts(0), error_4xx_count(0), error_5xx_count(0),
