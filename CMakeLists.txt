@@ -33,6 +33,7 @@ file(GLOB_RECURSE CORE_SOURCES
     "src/io/web/*.cpp"
     "src/models/*.cpp"
     "src/utils/*.cpp"
+    "src/learning/*.cpp"
 )
 
 # --- Define the Core Logic Library ---
