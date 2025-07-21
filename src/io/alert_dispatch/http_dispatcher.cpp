@@ -34,14 +34,15 @@ HttpDispatcher::HttpDispatcher(const std::string &webhook_url) {
   }
 }
 
-void HttpDispatcher::dispatch(const Alert &alert) {
+bool HttpDispatcher::dispatch(const Alert &alert) {
   // If the URL was invalid during construction, don't try to send
   if (host_.empty() || path_.empty()) {
     LOG(LogLevel::ERROR, LogComponent::IO_DISPATCH,
         "Cannot dispatch alert: Invalid host or path in HttpDispatcher.");
-    return;
+    return false;
   }
 
+  bool success = false;
   auto send_request = [&](auto &client) {
     // Disable certificate verification for ease of use.
     // This check ensures the method is only called if it exists (i.e., on
@@ -55,13 +56,20 @@ void HttpDispatcher::dispatch(const Alert &alert) {
     std::string json_body = JsonFormatter::format_alert_to_json(alert);
     auto res = client.Post(path_.c_str(), json_body, "application/json");
 
-    if (!res || res->status >= 400) {
+    if (res && res->status < 400) {
+      LOG(LogLevel::TRACE, LogComponent::IO_DISPATCH,
+          "Successfully dispatched alert via HTTP to "
+              << (is_https_ ? "https://" : "http://") << host_ << path_
+              << " | Status: " << res->status);
+      success = true;
+    } else {
       LOG(LogLevel::ERROR, LogComponent::IO_DISPATCH,
           "Failed to dispatch alert via HTTP to "
               << (is_https_ ? "https://" : "http://") << host_ << path_
               << " | Status: "
               << (res ? std::to_string(res->status) : "No response")
               << " | Body: " << (res ? res->body : "No response body"));
+      success = false;
     }
   };
 
@@ -72,4 +80,5 @@ void HttpDispatcher::dispatch(const Alert &alert) {
     httplib::Client cli(host_);
     send_request(cli);
   }
+  return success;
 }

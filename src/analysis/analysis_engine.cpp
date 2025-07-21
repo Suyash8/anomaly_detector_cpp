@@ -10,6 +10,7 @@
 #include "utils/utils.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -341,6 +342,358 @@ uint64_t AnalysisEngine::get_max_timestamp_seen() const {
   return max_timestamp_seen_;
 }
 
+void AnalysisEngine::export_analysis_metrics(const AnalyzedEvent &event) {
+  if (!metrics_exporter_ || !app_config.prometheus.enabled) {
+    return;
+  }
+
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+      "Exporting analysis metrics for event from IP: "
+          << event.raw_log.ip_address);
+
+  // Create label maps for this event
+  std::map<std::string, std::string> ip_labels;
+  ip_labels["ip"] = event.raw_log.ip_address;
+
+  std::map<std::string, std::string> path_labels;
+  path_labels["path"] = event.raw_log.request_path;
+
+  std::map<std::string, std::string> combined_labels;
+  combined_labels["ip"] = event.raw_log.ip_address;
+  combined_labels["path"] = event.raw_log.request_path;
+
+  // Add HTTP status code label if available
+  if (event.raw_log.http_status_code) {
+    combined_labels["status_code"] =
+        std::to_string(*event.raw_log.http_status_code);
+  } else {
+    combined_labels["status_code"] = "unknown";
+  }
+
+  // Add HTTP method label if available
+  if (!event.raw_log.request_method.empty()) {
+    combined_labels["method"] = std::string(event.raw_log.request_method);
+  } else {
+    combined_labels["method"] = "unknown";
+  }
+
+  // Increment logs processed counter with labels
+  metrics_exporter_->increment_counter("ad_analysis_logs_processed_total",
+                                       combined_labels);
+
+  // Track processing latency if available
+  if (event.raw_log.request_time_s) {
+    metrics_exporter_->observe_histogram(
+        "ad_analysis_request_time_ms",
+        static_cast<double>(*event.raw_log.request_time_s), combined_labels);
+  }
+
+  // Export request counts per IP
+  if (event.current_ip_request_count_in_window) {
+    metrics_exporter_->set_gauge(
+        "ad_analysis_ip_requests_in_window",
+        static_cast<double>(*event.current_ip_request_count_in_window),
+        ip_labels);
+  }
+
+  // Export failed login counts per IP
+  if (event.current_ip_failed_login_count_in_window) {
+    metrics_exporter_->set_gauge(
+        "ad_analysis_ip_failed_logins_in_window",
+        static_cast<double>(*event.current_ip_failed_login_count_in_window),
+        ip_labels);
+  }
+
+  // Export HTML and asset request counts
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_html_requests_in_window",
+      static_cast<double>(event.ip_html_requests_in_window), ip_labels);
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_asset_requests_in_window",
+      static_cast<double>(event.ip_asset_requests_in_window), ip_labels);
+
+  // Export assets per HTML ratio if available
+  if (event.ip_assets_per_html_ratio) {
+    metrics_exporter_->set_gauge("ad_analysis_ip_assets_per_html_ratio",
+                                 *event.ip_assets_per_html_ratio, ip_labels);
+  }
+
+  // Export Z-scores if available
+  if (event.ip_req_time_zscore) {
+    metrics_exporter_->set_gauge("ad_analysis_ip_request_time_zscore",
+                                 *event.ip_req_time_zscore, ip_labels);
+  }
+
+  if (event.ip_bytes_sent_zscore) {
+    metrics_exporter_->set_gauge("ad_analysis_ip_bytes_sent_zscore",
+                                 *event.ip_bytes_sent_zscore, ip_labels);
+  }
+
+  if (event.ip_error_event_zscore) {
+    metrics_exporter_->set_gauge("ad_analysis_ip_error_event_zscore",
+                                 *event.ip_error_event_zscore, ip_labels);
+  }
+
+  if (event.ip_req_vol_zscore) {
+    metrics_exporter_->set_gauge("ad_analysis_ip_request_volume_zscore",
+                                 *event.ip_req_vol_zscore, ip_labels);
+  }
+
+  // Export path-specific metrics
+  if (event.path_req_time_zscore) {
+    metrics_exporter_->set_gauge("ad_analysis_path_request_time_zscore",
+                                 *event.path_req_time_zscore, path_labels);
+  }
+
+  if (event.path_bytes_sent_zscore) {
+    metrics_exporter_->set_gauge("ad_analysis_path_bytes_sent_zscore",
+                                 *event.path_bytes_sent_zscore, path_labels);
+  }
+
+  if (event.path_error_event_zscore) {
+    metrics_exporter_->set_gauge("ad_analysis_path_error_event_zscore",
+                                 *event.path_error_event_zscore, path_labels);
+  }
+
+  // Export binary flags as metrics (0.0 or 1.0)
+  metrics_exporter_->set_gauge("ad_analysis_is_first_request_from_ip",
+                               event.is_first_request_from_ip ? 1.0 : 0.0,
+                               ip_labels);
+  metrics_exporter_->set_gauge("ad_analysis_is_path_new_for_ip",
+                               event.is_path_new_for_ip ? 1.0 : 0.0,
+                               combined_labels);
+
+  // Export UA anomaly metrics
+  std::map<std::string, std::string> ua_labels = ip_labels;
+  ua_labels["user_agent"] = event.raw_log.user_agent;
+
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ua_anomalies",
+      (event.is_ua_missing || event.is_ua_changed_for_ip ||
+       event.is_ua_known_bad || event.is_ua_outdated || event.is_ua_headless ||
+       event.is_ua_inconsistent || event.is_ua_cycling)
+          ? 1.0
+          : 0.0,
+      ua_labels);
+
+  // Export session metrics if available
+  if (event.raw_session_state) {
+    std::map<std::string, std::string> session_labels;
+    session_labels["ip"] = event.raw_log.ip_address;
+
+    metrics_exporter_->set_gauge(
+        "ad_analysis_session_request_count",
+        static_cast<double>(event.raw_session_state->request_count),
+        session_labels);
+    metrics_exporter_->set_gauge(
+        "ad_analysis_session_unique_paths",
+        static_cast<double>(event.raw_session_state->get_unique_paths_count()),
+        session_labels);
+    metrics_exporter_->set_gauge(
+        "ad_analysis_session_unique_user_agents",
+        static_cast<double>(
+            event.raw_session_state->get_unique_user_agents_count()),
+        session_labels);
+    metrics_exporter_->set_gauge(
+        "ad_analysis_session_error_4xx_count",
+        static_cast<double>(event.raw_session_state->error_4xx_count),
+        session_labels);
+    metrics_exporter_->set_gauge(
+        "ad_analysis_session_error_5xx_count",
+        static_cast<double>(event.raw_session_state->error_5xx_count),
+        session_labels);
+  }
+}
+
+void AnalysisEngine::export_state_metrics() {
+  if (!metrics_exporter_ || !app_config.prometheus.enabled) {
+    return;
+  }
+
+  LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
+      "Exporting state metrics");
+
+  // Get internal state metrics
+  EngineStateMetrics state_metrics = get_internal_state_metrics();
+
+  // Calculate sliding window metrics for request rates
+  uint64_t current_time = max_timestamp_seen_;
+  uint64_t window_duration_ms =
+      app_config.tier1.sliding_window_duration_seconds * 1000;
+  uint64_t window_start =
+      current_time > window_duration_ms ? current_time - window_duration_ms : 0;
+
+  // Calculate and export sliding window metrics for top IPs
+  std::map<std::string, size_t> ip_request_counts;
+  std::map<std::string, size_t> ip_error_counts;
+
+  // Count requests and errors in the sliding window for each IP
+  for (const auto &[ip, state] : ip_activity_trackers) {
+    // Count requests in window
+    size_t requests_in_window = 0;
+    for (const auto &[ts, _] :
+         state.request_timestamps_window.get_raw_window_data()) {
+      if (ts >= window_start) {
+        requests_in_window++;
+      }
+    }
+    ip_request_counts[ip] = requests_in_window;
+
+    // Count errors in window (check failed login window instead)
+    size_t errors_in_window = 0;
+    for (const auto &[ts, _] :
+         state.failed_login_timestamps_window.get_raw_window_data()) {
+      if (ts >= window_start) {
+        errors_in_window++;
+      }
+    }
+    ip_error_counts[ip] = errors_in_window;
+
+    // Export metrics for this IP
+    if (requests_in_window > 0) {
+      std::map<std::string, std::string> ip_labels;
+      ip_labels["ip"] = ip;
+
+      // Request rate (requests per second)
+      double request_rate = static_cast<double>(requests_in_window) /
+                            (app_config.tier1.sliding_window_duration_seconds);
+      metrics_exporter_->set_gauge("ad_analysis_ip_request_rate", request_rate,
+                                   ip_labels);
+
+      // Error rate (errors per second)
+      double error_rate = static_cast<double>(errors_in_window) /
+                          (app_config.tier1.sliding_window_duration_seconds);
+      metrics_exporter_->set_gauge("ad_analysis_ip_error_rate", error_rate,
+                                   ip_labels);
+
+      // Error percentage
+      double error_percentage =
+          requests_in_window > 0
+              ? (static_cast<double>(errors_in_window) / requests_in_window) *
+                    100.0
+              : 0.0;
+      metrics_exporter_->set_gauge("ad_analysis_ip_error_percentage",
+                                   error_percentage, ip_labels);
+    }
+  }
+
+  // Export state object counts
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_states_total",
+      static_cast<double>(state_metrics.total_ip_states));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_path_states_total",
+      static_cast<double>(state_metrics.total_path_states));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_session_states_total",
+      static_cast<double>(state_metrics.total_session_states));
+
+  // Export window element counts
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_req_window_elements_total",
+      static_cast<double>(state_metrics.total_ip_req_window_elements));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_failed_login_window_elements_total",
+      static_cast<double>(state_metrics.total_ip_failed_login_window_elements));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_html_req_window_elements_total",
+      static_cast<double>(state_metrics.total_ip_html_req_window_elements));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_asset_req_window_elements_total",
+      static_cast<double>(state_metrics.total_ip_asset_req_window_elements));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_ua_window_elements_total",
+      static_cast<double>(state_metrics.total_ip_ua_window_elements));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_paths_seen_elements_total",
+      static_cast<double>(state_metrics.total_ip_paths_seen_elements));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_ip_historical_ua_elements_total",
+      static_cast<double>(state_metrics.total_ip_historical_ua_elements));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_session_req_window_elements_total",
+      static_cast<double>(state_metrics.total_session_req_window_elements));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_session_unique_paths_total",
+      static_cast<double>(state_metrics.total_session_unique_paths));
+  metrics_exporter_->set_gauge(
+      "ad_analysis_session_unique_user_agents_total",
+      static_cast<double>(state_metrics.total_session_unique_user_agents));
+
+  // Export memory footprint metrics
+  size_t total_memory_footprint = 0;
+
+  // Calculate and export memory footprint for IP states
+  size_t ip_states_memory = 0;
+  for (const auto &[ip, state] : ip_activity_trackers) {
+    size_t state_memory = state.calculate_memory_footprint();
+    ip_states_memory += state_memory;
+
+    // Export per-IP memory footprint for top consumers
+    if (state_memory > 10000) { // Only export for IPs using more than 10KB
+      std::map<std::string, std::string> ip_labels;
+      ip_labels["ip"] = ip;
+      metrics_exporter_->set_gauge("ad_analysis_ip_state_memory_bytes",
+                                   static_cast<double>(state_memory),
+                                   ip_labels);
+
+      // Export detailed memory breakdown for large IP states
+      metrics_exporter_->set_gauge(
+          "ad_analysis_ip_req_window_memory_bytes",
+          static_cast<double>(
+              state.request_timestamps_window.get_event_count() *
+              sizeof(uint64_t)),
+          ip_labels);
+      metrics_exporter_->set_gauge(
+          "ad_analysis_ip_failed_login_window_memory_bytes",
+          static_cast<double>(
+              state.failed_login_timestamps_window.get_event_count() *
+              sizeof(uint64_t)),
+          ip_labels);
+      metrics_exporter_->set_gauge(
+          "ad_analysis_ip_html_req_window_memory_bytes",
+          static_cast<double>(state.html_request_timestamps.get_event_count() *
+                              sizeof(uint64_t)),
+          ip_labels);
+      metrics_exporter_->set_gauge(
+          "ad_analysis_ip_asset_req_window_memory_bytes",
+          static_cast<double>(state.asset_request_timestamps.get_event_count() *
+                              sizeof(uint64_t)),
+          ip_labels);
+      metrics_exporter_->set_gauge(
+          "ad_analysis_ip_paths_seen_memory_bytes",
+          static_cast<double>(state.paths_seen_by_ip.size() *
+                              sizeof(std::string)),
+          ip_labels);
+    }
+  }
+  metrics_exporter_->set_gauge("ad_analysis_ip_states_memory_bytes_total",
+                               static_cast<double>(ip_states_memory));
+  total_memory_footprint += ip_states_memory;
+
+  // Calculate and export memory footprint for path states
+  size_t path_states_memory = 0;
+  for (const auto &[path, state] : path_activity_trackers) {
+    path_states_memory += state.calculate_memory_footprint();
+  }
+  metrics_exporter_->set_gauge("ad_analysis_path_states_memory_bytes_total",
+                               static_cast<double>(path_states_memory));
+  total_memory_footprint += path_states_memory;
+
+  // Calculate and export memory footprint for session states
+  size_t session_states_memory = 0;
+  for (const auto &[session_key, state] : session_trackers) {
+    session_states_memory += state.calculate_memory_footprint();
+  }
+  metrics_exporter_->set_gauge("ad_analysis_session_states_memory_bytes_total",
+                               static_cast<double>(session_states_memory));
+  total_memory_footprint += session_states_memory;
+
+  // Export total memory footprint
+  metrics_exporter_->set_gauge("ad_analysis_memory_bytes_total",
+                               static_cast<double>(total_memory_footprint));
+}
+
 void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
   LOG(LogLevel::TRACE, LogComponent::STATE_PRUNE,
       "Entering run_pruning. Current time: " << current_timestamp_ms);
@@ -349,6 +702,11 @@ void AnalysisEngine::run_pruning(uint64_t current_timestamp_ms) {
     LOG(LogLevel::DEBUG, LogComponent::STATE_PRUNE,
         "State pruning is disabled or TTL is 0, skipping.");
     return;
+  }
+
+  // Export state metrics during pruning since this is called periodically
+  if (metrics_exporter_ && app_config.prometheus.enabled) {
+    export_state_metrics();
   }
 
   size_t ips_before = ip_activity_trackers.size();
@@ -429,11 +787,29 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
       MetricsManager::instance().register_histogram(
           "ad_analysis_engine_process_duration_seconds",
           "Latency of the entire AnalysisEngine::process_and_analyze "
-          "function.");
+          "function");
+
   ScopedTimer timer(*processing_timer);
+
+  // Start timing the processing for metrics
+  auto processing_start_time = std::chrono::high_resolution_clock::now();
+
+  // Create a component label for processing time metrics
+  std::map<std::string, std::string> component_labels;
+  component_labels["component"] = "analysis_engine";
+
   LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
       "Entering process_and_analyze for IP: " << raw_log.ip_address << " Path: "
                                               << raw_log.request_path);
+
+  // Increment total logs processed counter for Prometheus
+  if (metrics_exporter_ && app_config.prometheus.enabled) {
+    std::map<std::string, std::string> log_labels;
+    log_labels["ip"] = raw_log.ip_address;
+    log_labels["path"] = raw_log.request_path;
+    log_labels["method"] = std::string(raw_log.request_method);
+    metrics_exporter_->increment_counter("ad_logs_processed_total", log_labels);
+  }
 
   // --- Granular Timers ---
   static Histogram *state_lookup_timer =
@@ -893,6 +1269,37 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
 
   LOG(LogLevel::TRACE, LogComponent::ANALYSIS_LIFECYCLE,
       "Exiting process_and_analyze for IP: " << raw_log.ip_address);
+
+  // Calculate processing duration for metrics
+  auto processing_end_time = std::chrono::high_resolution_clock::now();
+  auto processing_duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          processing_end_time - processing_start_time)
+          .count() /
+      1000000.0;
+
+  // Export metrics for this event
+  if (metrics_exporter_ && app_config.prometheus.enabled) {
+    // Export event-specific metrics
+    export_analysis_metrics(event);
+
+    // Export processing latency
+    std::map<std::string, std::string> component_labels;
+    component_labels["component"] = "analysis_engine";
+    metrics_exporter_->observe_histogram(
+        "ad_analysis_processing_duration_seconds", processing_duration,
+        component_labels);
+
+    // Periodically export state metrics (not on every event to reduce overhead)
+    static uint64_t last_state_metrics_export_ts = 0;
+    uint64_t current_ts = event.raw_log.parsed_timestamp_ms.value_or(0);
+    if (current_ts - last_state_metrics_export_ts >
+        app_config.prometheus.scrape_interval_seconds * 1000) {
+      export_state_metrics();
+      last_state_metrics_export_ts = current_ts;
+    }
+  }
+
   return event;
 }
 
@@ -1050,4 +1457,462 @@ EngineStateMetrics AnalysisEngine::get_internal_state_metrics() const {
   }
 
   return metrics;
+}
+
+void AnalysisEngine::set_metrics_exporter(
+    std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter) {
+  metrics_exporter_ = exporter;
+
+  // Register metrics if exporter is provided
+  if (metrics_exporter_) {
+    // Register analysis metrics
+    metrics_exporter_->register_counter(
+        "ad_analysis_logs_processed_total",
+        "Total number of logs processed by the analysis engine",
+        {"ip", "path", "status_code", "method"});
+
+    metrics_exporter_->register_histogram(
+        "ad_analysis_request_time_ms",
+        "Request processing time in milliseconds",
+        {0.1, 1.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0},
+        {"ip", "path", "status_code", "method"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_requests_in_window",
+        "Number of requests from an IP in the current window", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_failed_logins_in_window",
+        "Number of failed logins from an IP in the current window", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_html_requests_in_window",
+        "Number of HTML requests from an IP in the current window", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_asset_requests_in_window",
+        "Number of asset requests from an IP in the current window", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_assets_per_html_ratio",
+        "Ratio of asset requests to HTML requests for an IP", {"ip"});
+
+    // Register Z-score metrics
+    metrics_exporter_->register_gauge("ad_analysis_ip_request_time_zscore",
+                                      "Z-score of request time for an IP",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_ip_bytes_sent_zscore",
+                                      "Z-score of bytes sent for an IP",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_ip_error_event_zscore",
+                                      "Z-score of error events for an IP",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_ip_request_volume_zscore",
+                                      "Z-score of request volume for an IP",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_path_request_time_zscore",
+                                      "Z-score of request time for a path",
+                                      {"path"});
+
+    metrics_exporter_->register_gauge("ad_analysis_path_bytes_sent_zscore",
+                                      "Z-score of bytes sent for a path",
+                                      {"path"});
+
+    metrics_exporter_->register_gauge("ad_analysis_path_error_event_zscore",
+                                      "Z-score of error events for a path",
+                                      {"path"});
+
+    // Register binary flag metrics
+    metrics_exporter_->register_gauge(
+        "ad_analysis_is_first_request_from_ip",
+        "Flag indicating if this is the first request from an IP", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_is_path_new_for_ip",
+        "Flag indicating if this path is new for an IP", {"ip", "path"});
+
+    // Register UA anomaly metrics
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ua_anomalies",
+        "Flag indicating if there are user agent anomalies",
+        {"ip", "user_agent"});
+
+    // Register session metrics
+    metrics_exporter_->register_gauge("ad_analysis_session_request_count",
+                                      "Number of requests in a session",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_session_unique_paths",
+                                      "Number of unique paths in a session",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_session_unique_user_agents",
+        "Number of unique user agents in a session", {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_session_error_4xx_count",
+                                      "Number of 4xx errors in a session",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_session_error_5xx_count",
+                                      "Number of 5xx errors in a session",
+                                      {"ip"});
+
+    // Register state metrics
+    metrics_exporter_->register_gauge("ad_analysis_ip_states_total",
+                                      "Total number of IP states");
+
+    metrics_exporter_->register_gauge("ad_analysis_path_states_total",
+                                      "Total number of path states");
+
+    metrics_exporter_->register_gauge("ad_analysis_session_states_total",
+                                      "Total number of session states");
+
+    // Register window element metrics
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_req_window_elements_total",
+        "Total number of elements in IP request windows");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_failed_login_window_elements_total",
+        "Total number of elements in IP failed login windows");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_html_req_window_elements_total",
+        "Total number of elements in IP HTML request windows");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_asset_req_window_elements_total",
+        "Total number of elements in IP asset request windows");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_ua_window_elements_total",
+        "Total number of elements in IP user agent windows");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_paths_seen_elements_total",
+        "Total number of paths seen by all IPs");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_historical_ua_elements_total",
+        "Total number of historical user agents for all IPs");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_session_req_window_elements_total",
+        "Total number of elements in session request windows");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_session_unique_paths_total",
+        "Total number of unique paths across all sessions");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_session_unique_user_agents_total",
+        "Total number of unique user agents across all sessions");
+
+    // Register memory metrics
+    metrics_exporter_->register_gauge("ad_analysis_ip_state_memory_bytes",
+                                      "Memory usage in bytes for an IP state",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_req_window_memory_bytes",
+        "Memory usage in bytes for an IP request window", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_failed_login_window_memory_bytes",
+        "Memory usage in bytes for an IP failed login window", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_html_req_window_memory_bytes",
+        "Memory usage in bytes for an IP HTML request window", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_asset_req_window_memory_bytes",
+        "Memory usage in bytes for an IP asset request window", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_paths_seen_memory_bytes",
+        "Memory usage in bytes for paths seen by an IP", {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_states_memory_bytes_total",
+        "Total memory usage in bytes for all IP states");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_path_states_memory_bytes_total",
+        "Total memory usage in bytes for all path states");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_session_states_memory_bytes_total",
+        "Total memory usage in bytes for all session states");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_memory_bytes_total",
+        "Total memory usage in bytes for the analysis engine");
+
+    // Register rate metrics
+    metrics_exporter_->register_gauge("ad_analysis_ip_request_rate",
+                                      "Request rate per second for an IP",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_error_rate", "Error rate per second for an IP", {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_ip_error_percentage",
+                                      "Error percentage for an IP", {"ip"});
+  }
+
+  if (!metrics_exporter_) {
+    return;
+  }
+
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "Registering metrics for AnalysisEngine");
+
+  // Register counters
+  metrics_exporter_->register_counter(
+      "ad_analysis_logs_processed_total",
+      "Total number of logs processed by the analysis engine",
+      {"ip", "path", "status_code"});
+
+  // Register gauges for state counts
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_states_total",
+      "Total number of IP state objects in memory");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_path_states_total",
+      "Total number of path state objects in memory");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_session_states_total",
+      "Total number of session state objects in memory");
+
+  // Register gauges for window element counts
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_req_window_elements_total",
+      "Total number of elements in all IP request windows");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_failed_login_window_elements_total",
+      "Total number of elements in all IP failed login windows");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_html_req_window_elements_total",
+      "Total number of elements in all IP HTML request windows");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_asset_req_window_elements_total",
+      "Total number of elements in all IP asset request windows");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_ua_window_elements_total",
+      "Total number of elements in all IP user agent windows");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_paths_seen_elements_total",
+      "Total number of unique paths seen across all IPs");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_historical_ua_elements_total",
+      "Total number of historical user agents across all IPs");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_session_req_window_elements_total",
+      "Total number of elements in all session request windows");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_session_unique_paths_total",
+      "Total number of unique paths across all sessions");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_session_unique_user_agents_total",
+      "Total number of unique user agents across all sessions");
+
+  // Register gauges for memory usage
+  metrics_exporter_->register_gauge(
+      "ad_analysis_memory_bytes_total",
+      "Total memory usage of the analysis engine in bytes");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_states_memory_bytes_total",
+      "Total memory usage of all IP state objects in bytes");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_path_states_memory_bytes_total",
+      "Total memory usage of all path state objects in bytes");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_session_states_memory_bytes_total",
+      "Total memory usage of all session state objects in bytes");
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_state_memory_bytes",
+      "Memory usage of a specific IP state object in bytes", {"ip"});
+
+  // Register gauges for per-IP metrics
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_requests_in_window",
+      "Number of requests from an IP in the current window", {"ip"});
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_failed_logins_in_window",
+      "Number of failed logins from an IP in the current window", {"ip"});
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_html_requests_in_window",
+      "Number of HTML requests from an IP in the current window", {"ip"});
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_asset_requests_in_window",
+      "Number of asset requests from an IP in the current window", {"ip"});
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ip_assets_per_html_ratio",
+      "Ratio of asset requests to HTML requests for an IP", {"ip"});
+
+  // Register gauges for Z-scores
+  metrics_exporter_->register_gauge("ad_analysis_ip_request_time_zscore",
+                                    "Z-score of request time for an IP",
+                                    {"ip"});
+
+  metrics_exporter_->register_gauge("ad_analysis_ip_bytes_sent_zscore",
+                                    "Z-score of bytes sent for an IP", {"ip"});
+
+  metrics_exporter_->register_gauge("ad_analysis_ip_error_event_zscore",
+                                    "Z-score of error events for an IP",
+                                    {"ip"});
+
+  metrics_exporter_->register_gauge("ad_analysis_ip_request_volume_zscore",
+                                    "Z-score of request volume for an IP",
+                                    {"ip"});
+
+  metrics_exporter_->register_gauge("ad_analysis_path_request_time_zscore",
+                                    "Z-score of request time for a path",
+                                    {"path"});
+
+  metrics_exporter_->register_gauge("ad_analysis_path_bytes_sent_zscore",
+                                    "Z-score of bytes sent for a path",
+                                    {"path"});
+
+  metrics_exporter_->register_gauge("ad_analysis_path_error_event_zscore",
+                                    "Z-score of error events for a path",
+                                    {"path"});
+
+  // Register gauges for binary flags
+  metrics_exporter_->register_gauge("ad_analysis_is_first_request_from_ip",
+                                    "Flag indicating if this is the first "
+                                    "request from an IP (1.0) or not (0.0)",
+                                    {"ip"});
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_is_path_new_for_ip",
+      "Flag indicating if this is a new path for an IP (1.0) or not (0.0)",
+      {"ip", "path"});
+
+  metrics_exporter_->register_gauge(
+      "ad_analysis_ua_anomalies",
+      "Flag indicating if there are user agent anomalies (1.0) or not (0.0)",
+      {"ip", "user_agent"});
+
+  // Register gauges for session metrics
+  metrics_exporter_->register_gauge("ad_analysis_session_request_count",
+                                    "Number of requests in a session", {"ip"});
+
+  metrics_exporter_->register_gauge("ad_analysis_session_unique_paths",
+                                    "Number of unique paths in a session",
+                                    {"ip"});
+
+  metrics_exporter_->register_gauge("ad_analysis_session_unique_user_agents",
+                                    "Number of unique user agents in a session",
+                                    {"ip"});
+
+  metrics_exporter_->register_gauge("ad_analysis_session_error_4xx_count",
+                                    "Number of 4xx errors in a session",
+                                    {"ip"});
+
+  metrics_exporter_->register_gauge("ad_analysis_session_error_5xx_count",
+                                    "Number of 5xx errors in a session",
+                                    {"ip"});
+
+  // Register histogram for processing time
+  metrics_exporter_->register_histogram(
+      "ad_analysis_processing_duration_seconds",
+      "Duration of processing a log entry in seconds",
+      {0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0}, {"component"});
+
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "Metrics registration complete");
+
+  if (metrics_exporter_) {
+    // Register all the metrics we'll be using
+
+    // Processing metrics
+    metrics_exporter_->register_histogram(
+        "ad_analysis_processing_duration_seconds",
+        "Time spent processing each log entry in the analysis engine",
+        {0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
+        {"component"});
+
+    metrics_exporter_->register_counter(
+        "ad_analysis_logs_processed_total",
+        "Total number of log entries processed by the analysis engine",
+        {"ip", "path", "status_code"});
+
+    // State object count metrics
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_states_total",
+        "Current number of IP state objects in memory");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_path_states_total",
+        "Current number of path state objects in memory");
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_session_states_total",
+        "Current number of session state objects in memory");
+
+    // Memory usage metrics
+    metrics_exporter_->register_gauge("ad_analysis_memory_usage_bytes",
+                                      "Memory usage by component",
+                                      {"component", "type"});
+
+    // Per-IP metrics with labels
+    metrics_exporter_->register_gauge("ad_analysis_ip_request_rate",
+                                      "Current request rate for IP addresses",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge("ad_analysis_ip_error_rate",
+                                      "Current error rate for IP addresses",
+                                      {"ip"});
+
+    metrics_exporter_->register_gauge(
+        "ad_analysis_ip_failed_login_rate",
+        "Current failed login rate for IP addresses", {"ip"});
+
+    // Per-path metrics with labels
+    metrics_exporter_->register_gauge("ad_analysis_path_request_rate",
+                                      "Current request rate for paths",
+                                      {"path"});
+
+    metrics_exporter_->register_gauge("ad_analysis_path_error_rate",
+                                      "Current error rate for paths", {"path"});
+
+    // Sliding window element counts
+    metrics_exporter_->register_gauge("ad_analysis_sliding_window_elements",
+                                      "Number of elements in sliding windows",
+                                      {"window_type", "entity_type"});
+
+    // Anomaly detection metrics
+    metrics_exporter_->register_counter("ad_analysis_anomalies_detected_total",
+                                        "Total number of anomalies detected",
+                                        {"anomaly_type", "ip", "path"});
+
+    LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+        "Prometheus metrics registered for AnalysisEngine");
+  }
 }

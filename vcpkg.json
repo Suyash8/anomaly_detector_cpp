@@ -9,6 +9,7 @@
       "features": ["openssl"]
     },
     "mongo-cxx-driver",
-    "gtest"
+    "gtest",
+    "prometheus-cpp"
   ]
 }

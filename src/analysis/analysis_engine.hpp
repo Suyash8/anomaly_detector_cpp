@@ -5,13 +5,16 @@
 #include "analyzed_event.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
+#include "core/prometheus_metrics_exporter.hpp"
 #include "models/feature_manager.hpp"
 #include "models/model_data_collector.hpp"
 #include "per_ip_state.hpp"
 #include "per_path_state.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <unordered_map>
 
 struct TopIpInfo {
   std::string ip;
@@ -63,6 +66,12 @@ public:
                                              const std::string &metric_name);
   EngineStateMetrics get_internal_state_metrics() const;
 
+  // Prometheus metrics integration
+  void set_metrics_exporter(
+      std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
+  void export_analysis_metrics(const AnalyzedEvent &event);
+  void export_state_metrics();
+
 private:
   Config::AppConfig app_config;
   std::unordered_map<std::string, PerIpState> ip_activity_trackers;
@@ -70,6 +79,7 @@ private:
   std::unordered_map<std::string, PerSessionState> session_trackers;
 
   std::unique_ptr<ModelDataCollector> data_collector_;
+  std::shared_ptr<prometheus::PrometheusMetricsExporter> metrics_exporter_;
 
   FeatureManager feature_manager_;
   uint64_t max_timestamp_seen_ = 0;

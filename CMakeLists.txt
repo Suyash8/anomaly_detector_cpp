@@ -13,7 +13,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # These commands instruct CMake to find the libraries that vcpkg has installed.
 # The `REQUIRED` keyword will cause CMake to fail if a library is not found.
 find_package(nlohmann_json REQUIRED)
-find_package(httplib REQUIRED)
+find_package(httplib CONFIG REQUIRED)
+find_package(prometheus-cpp CONFIG REQUIRED)
 find_package(mongocxx REQUIRED)
 find_package(Threads REQUIRED) # For pthread, which was a linker flag in the makefile
 
@@ -59,6 +60,8 @@ target_link_libraries(ad_core PUBLIC
     nlohmann_json::nlohmann_json
     onnxruntime
     httplib::httplib
+    prometheus-cpp::core
+    prometheus-cpp::pull
     mongo::mongocxx_static
     mongo::bsoncxx_static
     Threads::Threads

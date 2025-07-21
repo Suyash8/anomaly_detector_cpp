@@ -14,6 +14,18 @@ struct PerPathState {
 
   uint64_t last_seen_timestamp_ms;
 
+  // Memory footprint calculation
+  size_t calculate_memory_footprint() const {
+    size_t total = sizeof(PerPathState);
+
+    // StatsTracker objects contain internal data structures
+    // Each StatsTracker typically stores a running count, sum, sum_of_squares
+    // which are basic numeric types, so minimal additional memory
+    total += sizeof(double) * 3 * 4; // 4 StatsTrackers with ~3 doubles each
+
+    return total;
+  }
+
   PerPathState(uint64_t current_timestamp_ms)
       : last_seen_timestamp_ms(current_timestamp_ms) {}
 
