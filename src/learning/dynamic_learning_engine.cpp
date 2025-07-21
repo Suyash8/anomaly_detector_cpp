@@ -1,4 +1,6 @@
 #include "dynamic_learning_engine.hpp"
+#include "../analysis/analyzed_event.hpp"
+
 #include <cmath>
 #include <mutex>
 #include <shared_mutex>
@@ -103,6 +105,51 @@ void DynamicLearningEngine::cleanup_expired_baselines(uint64_t now_ms,
       ++it;
     }
   }
+}
+
+void DynamicLearningEngine::process_analyzed_event(const AnalyzedEvent &event) {
+  // Use parsed_timestamp_ms if available, else skip
+  if (!event.raw_log.parsed_timestamp_ms.has_value())
+    return;
+  uint64_t ts = event.raw_log.parsed_timestamp_ms.value();
+
+  // --- Per-IP ---
+  if (!event.raw_log.ip_address.empty() &&
+      event.raw_log.request_time_s.has_value()) {
+    process_event("ip", std::string(event.raw_log.ip_address),
+                  event.raw_log.request_time_s.value(), ts);
+  }
+  // Optionally, update with bytes sent
+  if (!event.raw_log.ip_address.empty() &&
+      event.raw_log.bytes_sent.has_value()) {
+    process_event("ip_bytes", std::string(event.raw_log.ip_address),
+                  static_cast<double>(event.raw_log.bytes_sent.value()), ts);
+  }
+  // Optionally, update with error rate if available
+  if (!event.raw_log.ip_address.empty() &&
+      event.ip_hist_error_rate_mean.has_value()) {
+    process_event("ip_error_rate", std::string(event.raw_log.ip_address),
+                  event.ip_hist_error_rate_mean.value(), ts);
+  }
+
+  // --- Per-Path ---
+  if (!event.raw_log.request_path.empty() &&
+      event.path_hist_req_time_mean.has_value()) {
+    process_event("path", event.raw_log.request_path,
+                  event.path_hist_req_time_mean.value(), ts);
+  }
+  if (!event.raw_log.request_path.empty() &&
+      event.path_hist_bytes_mean.has_value()) {
+    process_event("path_bytes", event.raw_log.request_path,
+                  event.path_hist_bytes_mean.value(), ts);
+  }
+  if (!event.raw_log.request_path.empty() &&
+      event.path_hist_error_rate_mean.has_value()) {
+    process_event("path_error_rate", event.raw_log.request_path,
+                  event.path_hist_error_rate_mean.value(), ts);
+  }
+
+  // --- Per-Session (skipped: no session_id available) ---
 }
 
 } // namespace learning

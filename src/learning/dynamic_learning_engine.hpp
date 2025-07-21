@@ -1,8 +1,10 @@
 #ifndef DYNAMIC_LEARNING_ENGINE_HPP
 #define DYNAMIC_LEARNING_ENGINE_HPP
 
+#include "../analysis/analyzed_event.hpp"
 #include "rolling_statistics.hpp"
 #include "seasonal_model.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <shared_mutex>
@@ -14,7 +16,7 @@ namespace learning {
 struct LearningBaseline {
   RollingStatistics statistics;
   SeasonalModel seasonal_model;
-  std::string entity_type; // "ip", "path", "session"
+  std::string entity_type;
   std::string entity_id;
   uint64_t created_at;
   uint64_t last_updated;
@@ -27,6 +29,7 @@ public:
   void process_event(const std::string &entity_type,
                      const std::string &entity_id, double value,
                      uint64_t timestamp_ms);
+  void process_analyzed_event(const struct AnalyzedEvent &event);
   bool is_anomalous(const std::string &entity_type,
                     const std::string &entity_id, double value,
                     double &anomaly_score) const;
