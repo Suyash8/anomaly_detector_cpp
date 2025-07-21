@@ -7,7 +7,7 @@ TEST(LogParsingTest, CorrectlyParsesValidLine) {
       "192.168.0.1|-|01/Jan/2023:12:00:01 +0000|0.120|0.100|GET /index.html "
       "HTTP/1.1|200|1024|https://example.com|Mozilla/5.0 (X11; Linux "
       "x86_64)|example.com|US|127.0.0.1:80|abc123|0.020";
-  auto entry_opt = LogEntry::parse_from_string(line, 1);
+  auto entry_opt = LogEntry::parse_from_string(std::move(line), 1);
 
   // Assert that parsing succeeded
   ASSERT_TRUE(entry_opt.has_value());
@@ -39,7 +39,7 @@ TEST(LogParsingTest, CorrectlyRejectsMalformedLine) {
   // A malformed sample line from the project's data
   std::string line =
       "1.2.3.4|this is a malformed log line with not enough fields";
-  auto entry_opt = LogEntry::parse_from_string(line, 2);
+  auto entry_opt = LogEntry::parse_from_string(std::move(line), 2);
 
   // Assert that parsing correctly failed and returned nullopt
   ASSERT_FALSE(entry_opt.has_value());
@@ -52,7 +52,7 @@ TEST(LogParsingTest, CorrectlyRejectsLineWithInvalidTimestamp) {
       "192.168.0.1|-|INVALID_TIMESTAMP|0.120|0.100|GET /index.html "
       "HTTP/1.1|200|1024|https://example.com|Mozilla/"
       "5.0|example.com|US|127.0.0.1:80|abc123|0.020";
-  auto entry_opt = LogEntry::parse_from_string(line, 3);
+  auto entry_opt = LogEntry::parse_from_string(std::move(line), 3);
 
   // Parsing should fail because the timestamp is critical for the engine's
   // operation
@@ -63,7 +63,7 @@ TEST(LogParsingTest, HandlesURLDecodingInPath) {
   std::string line =
       "192.168.0.1|-|01/Jan/2023:12:00:01 +0000|0.120|0.100|GET "
       "/some%2Fpath%20with%2Bspaces HTTP/1.1|200|1024|-|-|-|-|-|-|-";
-  auto entry_opt = LogEntry::parse_from_string(line, 4);
+  auto entry_opt = LogEntry::parse_from_string(std::move(line), 4);
 
   ASSERT_TRUE(entry_opt.has_value());
   EXPECT_EQ(entry_opt->request_path, "/some/path with+spaces");

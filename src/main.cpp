@@ -4,6 +4,7 @@
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
 #include "core/metrics_manager.hpp"
+#include "core/metrics_registry.hpp"
 #include "detection/rule_engine.hpp"
 #include "io/db/mongo_manager.hpp"
 #include "io/log_readers/base_log_reader.hpp"
@@ -339,10 +340,11 @@ int main(int argc, char *argv[]) {
   }
 
   // --- Web Server Initialization ---
+  auto& memory_gauge = MetricsRegistry::instance().create_gauge("memory_usage_bytes", "Memory usage in bytes");
   WebServer web_server(current_config->monitoring.web_server_host,
                        current_config->monitoring.web_server_port,
-                       MetricsManager::instance(), alert_manager_instance,
-                       *analysis_engines[0]);
+                       MetricsRegistry::instance(), alert_manager_instance,
+                       *analysis_engines[0], memory_gauge);
   web_server.start();
 
   // --- Launch Worker Threads ---
