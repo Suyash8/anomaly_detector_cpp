@@ -131,6 +131,47 @@ constexpr const char *LOGGING_DEFAULT_LEVEL = "default_level";
 constexpr const char *MONITORING_ENABLE_DEEP_TIMING = "enable_deep_timing";
 constexpr const char *MONITORING_WEB_SERVER_HOST = "web_server_host";
 constexpr const char *MONITORING_WEB_SERVER_PORT = "web_server_port";
+
+// Prometheus Settings
+constexpr const char *PROMETHEUS_ENABLED = "enabled";
+constexpr const char *PROMETHEUS_HOST = "host";
+constexpr const char *PROMETHEUS_PORT = "port";
+constexpr const char *PROMETHEUS_METRICS_PATH = "metrics_path";
+constexpr const char *PROMETHEUS_HEALTH_PATH = "health_path";
+constexpr const char *PROMETHEUS_SCRAPE_INTERVAL_SECONDS = "scrape_interval_seconds";
+constexpr const char *PROMETHEUS_REPLACE_WEB_SERVER = "replace_web_server";
+constexpr const char *PROMETHEUS_MAX_METRICS_AGE_SECONDS = "max_metrics_age_seconds";
+
+// Dynamic Learning Settings
+constexpr const char *DL_ENABLED = "enabled";
+constexpr const char *DL_LEARNING_WINDOW_HOURS = "learning_window_hours";
+constexpr const char *DL_CONFIDENCE_THRESHOLD = "confidence_threshold";
+constexpr const char *DL_MIN_SAMPLES_FOR_LEARNING = "min_samples_for_learning";
+constexpr const char *DL_SEASONAL_DETECTION_SENSITIVITY = "seasonal_detection_sensitivity";
+constexpr const char *DL_BASELINE_UPDATE_INTERVAL_SECONDS = "baseline_update_interval_seconds";
+constexpr const char *DL_ENABLE_MANUAL_OVERRIDES = "enable_manual_overrides";
+constexpr const char *DL_THRESHOLD_CHANGE_MAX_PERCENT = "threshold_change_max_percent";
+
+// Tier4 Settings
+constexpr const char *T4_ENABLED = "enabled";
+constexpr const char *T4_PROMETHEUS_URL = "prometheus_url";
+constexpr const char *T4_QUERY_TIMEOUT_SECONDS = "query_timeout_seconds";
+constexpr const char *T4_EVALUATION_INTERVAL_SECONDS = "evaluation_interval_seconds";
+constexpr const char *T4_MAX_CONCURRENT_QUERIES = "max_concurrent_queries";
+constexpr const char *T4_AUTH_TOKEN = "auth_token";
+constexpr const char *T4_ENABLE_CIRCUIT_BREAKER = "enable_circuit_breaker";
+constexpr const char *T4_CIRCUIT_BREAKER_FAILURE_THRESHOLD = "circuit_breaker_failure_threshold";
+constexpr const char *T4_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS = "circuit_breaker_recovery_timeout_seconds";
+
+// Memory Management Settings
+constexpr const char *MM_ENABLED = "enabled";
+constexpr const char *MM_MAX_MEMORY_USAGE_MB = "max_memory_usage_mb";
+constexpr const char *MM_MEMORY_PRESSURE_THRESHOLD_MB = "memory_pressure_threshold_mb";
+constexpr const char *MM_ENABLE_OBJECT_POOLING = "enable_object_pooling";
+constexpr const char *MM_EVICTION_CHECK_INTERVAL_SECONDS = "eviction_check_interval_seconds";
+constexpr const char *MM_EVICTION_THRESHOLD_PERCENT = "eviction_threshold_percent";
+constexpr const char *MM_ENABLE_MEMORY_COMPACTION = "enable_memory_compaction";
+constexpr const char *MM_STATE_OBJECT_TTL_SECONDS = "state_object_ttl_seconds";
 } // namespace Keys
 
 struct LoggingConfig {
@@ -225,6 +266,51 @@ struct MonitoringConfig {
   int web_server_port = 9090;
 };
 
+struct PrometheusConfig {
+  bool enabled = true;
+  std::string host = "0.0.0.0";
+  int port = 9090;
+  std::string metrics_path = "/metrics";
+  std::string health_path = "/health";
+  uint32_t scrape_interval_seconds = 15;
+  bool replace_web_server = false;
+  uint32_t max_metrics_age_seconds = 300;
+};
+
+struct DynamicLearningConfig {
+  bool enabled = true;
+  uint32_t learning_window_hours = 24;
+  double confidence_threshold = 0.95;
+  uint32_t min_samples_for_learning = 100;
+  double seasonal_detection_sensitivity = 0.8;
+  uint32_t baseline_update_interval_seconds = 300;
+  bool enable_manual_overrides = true;
+  double threshold_change_max_percent = 50.0;
+};
+
+struct Tier4Config {
+  bool enabled = false;
+  std::string prometheus_url = "http://localhost:9090";
+  uint32_t query_timeout_seconds = 30;
+  uint32_t evaluation_interval_seconds = 60;
+  uint32_t max_concurrent_queries = 10;
+  std::string auth_token = "";
+  bool enable_circuit_breaker = true;
+  uint32_t circuit_breaker_failure_threshold = 5;
+  uint32_t circuit_breaker_recovery_timeout_seconds = 60;
+};
+
+struct MemoryManagementConfig {
+  bool enabled = true;
+  size_t max_memory_usage_mb = 1024;
+  size_t memory_pressure_threshold_mb = 800;
+  bool enable_object_pooling = true;
+  uint32_t eviction_check_interval_seconds = 60;
+  double eviction_threshold_percent = 80.0;
+  bool enable_memory_compaction = true;
+  uint32_t state_object_ttl_seconds = 3600;
+};
+
 struct AppConfig {
   std::string log_source_type = "mongodb";
   std::string log_input_path = "data/sample_log.txt";
@@ -255,6 +341,10 @@ struct AppConfig {
   MongoLogSourceConfig mongo_log_source;
   LoggingConfig logging;
   MonitoringConfig monitoring;
+  PrometheusConfig prometheus;
+  DynamicLearningConfig dynamic_learning;
+  Tier4Config tier4;
+  MemoryManagementConfig memory_management;
 
   bool ml_data_collection_enabled = false;
   std::string ml_data_collection_path = "data/training_features.csv";
@@ -263,6 +353,13 @@ struct AppConfig {
 
   AppConfig() = default;
 };
+
+// Validation functions for configuration parameters
+bool validate_prometheus_config(const PrometheusConfig& config, std::vector<std::string>& errors);
+bool validate_dynamic_learning_config(const DynamicLearningConfig& config, std::vector<std::string>& errors);
+bool validate_tier4_config(const Tier4Config& config, std::vector<std::string>& errors);
+bool validate_memory_management_config(const MemoryManagementConfig& config, std::vector<std::string>& errors);
+bool validate_app_config(const AppConfig& config, std::vector<std::string>& errors);
 
 class ConfigManager {
 public:
