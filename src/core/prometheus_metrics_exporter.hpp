@@ -40,7 +40,7 @@ public:
   };
 
   explicit PrometheusMetricsExporter(const Config &config = Config{});
-  ~PrometheusMetricsExporter();
+  virtual ~PrometheusMetricsExporter();
 
   // Disable copy and move operations for thread safety
   PrometheusMetricsExporter(const PrometheusMetricsExporter &) = delete;
@@ -50,22 +50,26 @@ public:
   PrometheusMetricsExporter &operator=(PrometheusMetricsExporter &&) = delete;
 
   // Core metrics registration methods
-  void register_counter(const std::string &name, const std::string &help,
-                        const std::vector<std::string> &label_names = {});
-  void register_gauge(const std::string &name, const std::string &help,
-                      const std::vector<std::string> &label_names = {});
-  void register_histogram(const std::string &name, const std::string &help,
-                          const std::vector<double> &buckets = {},
-                          const std::vector<std::string> &label_names = {});
+  virtual void
+  register_counter(const std::string &name, const std::string &help,
+                   const std::vector<std::string> &label_names = {});
+  virtual void register_gauge(const std::string &name, const std::string &help,
+                              const std::vector<std::string> &label_names = {});
+  virtual void
+  register_histogram(const std::string &name, const std::string &help,
+                     const std::vector<double> &buckets = {},
+                     const std::vector<std::string> &label_names = {});
 
   // Metric update methods
-  void increment_counter(const std::string &name,
-                         const std::map<std::string, std::string> &labels = {},
-                         double value = 1.0);
-  void set_gauge(const std::string &name, double value,
-                 const std::map<std::string, std::string> &labels = {});
-  void observe_histogram(const std::string &name, double value,
+  virtual void
+  increment_counter(const std::string &name,
+                    const std::map<std::string, std::string> &labels = {},
+                    double value = 1.0);
+  virtual void set_gauge(const std::string &name, double value,
                          const std::map<std::string, std::string> &labels = {});
+  virtual void
+  observe_histogram(const std::string &name, double value,
+                    const std::map<std::string, std::string> &labels = {});
 
   // Server management
   bool start_server();
@@ -95,16 +99,16 @@ private:
   struct HistogramBucket {
     double upper_bound;
     std::atomic<uint64_t> count;
-    
+
     HistogramBucket(double bound) : upper_bound(bound), count(0) {}
-    
+
     // Delete copy constructor and assignment operator
-    HistogramBucket(const HistogramBucket&) = delete;
-    HistogramBucket& operator=(const HistogramBucket&) = delete;
-    
+    HistogramBucket(const HistogramBucket &) = delete;
+    HistogramBucket &operator=(const HistogramBucket &) = delete;
+
     // Delete move constructor and assignment operator
-    HistogramBucket(HistogramBucket&&) = delete;
-    HistogramBucket& operator=(HistogramBucket&&) = delete;
+    HistogramBucket(HistogramBucket &&) = delete;
+    HistogramBucket &operator=(HistogramBucket &&) = delete;
   };
 
   struct HistogramMetric {
