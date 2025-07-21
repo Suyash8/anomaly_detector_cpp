@@ -1,7 +1,9 @@
 #include "dynamic_learning_engine.hpp"
 #include "../analysis/analyzed_event.hpp"
+#include "../core/logger.hpp"
 
 #include <cmath>
+#include <limits>
 #include <mutex>
 #include <shared_mutex>
 
@@ -46,11 +48,22 @@ void DynamicLearningEngine::update_baseline(const std::string &entity_type,
                                             double value,
                                             uint64_t timestamp_ms) {
   auto baseline = get_baseline(entity_type, entity_id);
+  // Capture old threshold for audit
+  double old_threshold = baseline->statistics.get_percentile(0.95);
   baseline->statistics.add_value(value, timestamp_ms);
   baseline->seasonal_model.add_observation(value, timestamp_ms);
   baseline->last_updated = timestamp_ms;
   if (!baseline->is_established && baseline->statistics.is_established()) {
     baseline->is_established = true;
+  }
+  // Audit: log threshold change if significant
+  double new_threshold = baseline->statistics.get_percentile(0.95);
+  if (std::abs(new_threshold - old_threshold) >
+      0.01 * std::max(std::abs(old_threshold), 1.0)) {
+    LOG(LogLevel::INFO, LogComponent::ANALYSIS_STATS,
+        "Threshold change for [" << entity_type << ":" << entity_id << "] "
+                                 << "old: " << old_threshold << ", new: "
+                                 << new_threshold << ", ts: " << timestamp_ms);
   }
 }
 
@@ -77,6 +90,9 @@ bool DynamicLearningEngine::is_anomalous(const std::string &entity_type,
 double DynamicLearningEngine::calculate_dynamic_threshold(
     const LearningBaseline &baseline, uint64_t /* timestamp_ms */,
     double percentile) const {
+  if (baseline.manual_override_active) {
+    return baseline.manual_override_threshold;
+  }
   // Use rolling statistics percentile with seasonal adjustment if available
   double base_threshold = baseline.statistics.get_percentile(percentile);
 
@@ -88,6 +104,19 @@ double DynamicLearningEngine::calculate_dynamic_threshold(
   }
 
   return base_threshold;
+}
+
+double
+DynamicLearningEngine::get_entity_threshold(const std::string &entity_type,
+                                            const std::string &entity_id,
+                                            double percentile) const {
+  std::shared_lock<std::shared_mutex> lock(baselines_mutex_);
+  auto key = make_key(entity_type, entity_id);
+  auto it = baselines_.find(key);
+  if (it == baselines_.end() || !it->second->is_established)
+    return std::numeric_limits<double>::quiet_NaN();
+  return calculate_dynamic_threshold(*it->second, it->second->last_updated,
+                                     percentile);
 }
 
 size_t DynamicLearningEngine::get_baseline_count() const {
