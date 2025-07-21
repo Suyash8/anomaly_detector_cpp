@@ -68,172 +68,259 @@ bool string_to_bool(std::string &val_str_raw) {
 }
 
 // Validation functions for configuration parameters
-bool validate_prometheus_config(const PrometheusConfig& config, std::vector<std::string>& errors) {
+bool validate_prometheus_config(const PrometheusConfig &config,
+                                std::vector<std::string> &errors) {
   bool valid = true;
-  
+
   if (config.port < 1 || config.port > 65535) {
     errors.push_back("Prometheus port must be between 1 and 65535");
     valid = false;
   }
-  
-  if (config.scrape_interval_seconds < 1 || config.scrape_interval_seconds > 3600) {
-    errors.push_back("Prometheus scrape interval must be between 1 and 3600 seconds");
+
+  if (config.scrape_interval_seconds < 1 ||
+      config.scrape_interval_seconds > 3600) {
+    errors.push_back(
+        "Prometheus scrape interval must be between 1 and 3600 seconds");
     valid = false;
   }
-  
-  if (config.max_metrics_age_seconds < 60 || config.max_metrics_age_seconds > 86400) {
-    errors.push_back("Prometheus max metrics age must be between 60 and 86400 seconds");
+
+  if (config.max_metrics_age_seconds < 60 ||
+      config.max_metrics_age_seconds > 86400) {
+    errors.push_back(
+        "Prometheus max metrics age must be between 60 and 86400 seconds");
     valid = false;
   }
-  
+
   if (config.metrics_path.empty() || config.metrics_path[0] != '/') {
     errors.push_back("Prometheus metrics path must start with '/'");
     valid = false;
   }
-  
+
   if (config.health_path.empty() || config.health_path[0] != '/') {
     errors.push_back("Prometheus health path must start with '/'");
     valid = false;
   }
-  
+
   return valid;
 }
 
-bool validate_dynamic_learning_config(const DynamicLearningConfig& config, std::vector<std::string>& errors) {
+bool validate_dynamic_learning_config(const DynamicLearningConfig &config,
+                                      std::vector<std::string> &errors) {
   bool valid = true;
-  
-  if (config.learning_window_hours < 1 || config.learning_window_hours > 168) { // 1 week max
+
+  if (config.learning_window_hours < 1 ||
+      config.learning_window_hours > 168) { // 1 week max
     errors.push_back("Dynamic learning window must be between 1 and 168 hours");
     valid = false;
   }
-  
+
   if (config.confidence_threshold < 0.5 || config.confidence_threshold > 1.0) {
-    errors.push_back("Dynamic learning confidence threshold must be between 0.5 and 1.0");
+    errors.push_back(
+        "Dynamic learning confidence threshold must be between 0.5 and 1.0");
     valid = false;
   }
-  
-  if (config.min_samples_for_learning < 10 || config.min_samples_for_learning > 10000) {
-    errors.push_back("Dynamic learning minimum samples must be between 10 and 10000");
+
+  if (config.min_samples_for_learning < 10 ||
+      config.min_samples_for_learning > 10000) {
+    errors.push_back(
+        "Dynamic learning minimum samples must be between 10 and 10000");
     valid = false;
   }
-  
-  if (config.seasonal_detection_sensitivity < 0.1 || config.seasonal_detection_sensitivity > 1.0) {
-    errors.push_back("Dynamic learning seasonal detection sensitivity must be between 0.1 and 1.0");
+
+  if (config.seasonal_detection_sensitivity < 0.1 ||
+      config.seasonal_detection_sensitivity > 1.0) {
+    errors.push_back("Dynamic learning seasonal detection sensitivity must be "
+                     "between 0.1 and 1.0");
     valid = false;
   }
-  
-  if (config.baseline_update_interval_seconds < 60 || config.baseline_update_interval_seconds > 86400) {
-    errors.push_back("Dynamic learning baseline update interval must be between 60 and 86400 seconds");
+
+  if (config.baseline_update_interval_seconds < 60 ||
+      config.baseline_update_interval_seconds > 86400) {
+    errors.push_back("Dynamic learning baseline update interval must be "
+                     "between 60 and 86400 seconds");
     valid = false;
   }
-  
-  if (config.threshold_change_max_percent < 1.0 || config.threshold_change_max_percent > 500.0) {
-    errors.push_back("Dynamic learning threshold change max percent must be between 1.0 and 500.0");
+
+  if (config.threshold_change_max_percent < 1.0 ||
+      config.threshold_change_max_percent > 500.0) {
+    errors.push_back("Dynamic learning threshold change max percent must be "
+                     "between 1.0 and 500.0");
     valid = false;
   }
-  
+
+  // Enhanced adaptive threshold validation
+  if (config.default_percentile_95 < 0.5 ||
+      config.default_percentile_95 > 1.0) {
+    errors.push_back(
+        "Dynamic learning default 95th percentile must be between 0.5 and 1.0");
+    valid = false;
+  }
+
+  if (config.default_percentile_99 < 0.5 ||
+      config.default_percentile_99 > 1.0) {
+    errors.push_back(
+        "Dynamic learning default 99th percentile must be between 0.5 and 1.0");
+    valid = false;
+  }
+
+  if (config.default_percentile_95 >= config.default_percentile_99) {
+    errors.push_back(
+        "Dynamic learning 95th percentile must be less than 99th percentile");
+    valid = false;
+  }
+
+  if (config.threshold_cache_ttl_seconds < 10 ||
+      config.threshold_cache_ttl_seconds > 3600) {
+    errors.push_back("Dynamic learning threshold cache TTL must be between 10 "
+                     "and 3600 seconds");
+    valid = false;
+  }
+
+  if (config.security_critical_max_change_percent < 1.0 ||
+      config.security_critical_max_change_percent > 100.0) {
+    errors.push_back("Dynamic learning security critical max change percent "
+                     "must be between 1.0 and 100.0");
+    valid = false;
+  }
+
+  if (config.max_audit_entries_per_entity < 10 ||
+      config.max_audit_entries_per_entity > 1000) {
+    errors.push_back("Dynamic learning max audit entries per entity must be "
+                     "between 10 and 1000");
+    valid = false;
+  }
+
+  if (config.failed_login_threshold_for_critical < 1 ||
+      config.failed_login_threshold_for_critical > 100) {
+    errors.push_back("Dynamic learning failed login threshold for critical "
+                     "marking must be between 1 and 100");
+    valid = false;
+  }
+
   return valid;
 }
 
-bool validate_tier4_config(const Tier4Config& config, std::vector<std::string>& errors) {
+bool validate_tier4_config(const Tier4Config &config,
+                           std::vector<std::string> &errors) {
   bool valid = true;
-  
+
   if (config.enabled && config.prometheus_url.empty()) {
-    errors.push_back("Tier4 Prometheus URL cannot be empty when Tier4 is enabled");
+    errors.push_back(
+        "Tier4 Prometheus URL cannot be empty when Tier4 is enabled");
     valid = false;
   }
-  
+
   if (config.query_timeout_seconds < 1 || config.query_timeout_seconds > 300) {
     errors.push_back("Tier4 query timeout must be between 1 and 300 seconds");
     valid = false;
   }
-  
-  if (config.evaluation_interval_seconds < 10 || config.evaluation_interval_seconds > 3600) {
-    errors.push_back("Tier4 evaluation interval must be between 10 and 3600 seconds");
+
+  if (config.evaluation_interval_seconds < 10 ||
+      config.evaluation_interval_seconds > 3600) {
+    errors.push_back(
+        "Tier4 evaluation interval must be between 10 and 3600 seconds");
     valid = false;
   }
-  
-  if (config.max_concurrent_queries < 1 || config.max_concurrent_queries > 100) {
+
+  if (config.max_concurrent_queries < 1 ||
+      config.max_concurrent_queries > 100) {
     errors.push_back("Tier4 max concurrent queries must be between 1 and 100");
     valid = false;
   }
-  
-  if (config.circuit_breaker_failure_threshold < 1 || config.circuit_breaker_failure_threshold > 50) {
-    errors.push_back("Tier4 circuit breaker failure threshold must be between 1 and 50");
+
+  if (config.circuit_breaker_failure_threshold < 1 ||
+      config.circuit_breaker_failure_threshold > 50) {
+    errors.push_back(
+        "Tier4 circuit breaker failure threshold must be between 1 and 50");
     valid = false;
   }
-  
-  if (config.circuit_breaker_recovery_timeout_seconds < 10 || config.circuit_breaker_recovery_timeout_seconds > 3600) {
-    errors.push_back("Tier4 circuit breaker recovery timeout must be between 10 and 3600 seconds");
+
+  if (config.circuit_breaker_recovery_timeout_seconds < 10 ||
+      config.circuit_breaker_recovery_timeout_seconds > 3600) {
+    errors.push_back("Tier4 circuit breaker recovery timeout must be between "
+                     "10 and 3600 seconds");
     valid = false;
   }
-  
+
   return valid;
 }
 
-bool validate_memory_management_config(const MemoryManagementConfig& config, std::vector<std::string>& errors) {
+bool validate_memory_management_config(const MemoryManagementConfig &config,
+                                       std::vector<std::string> &errors) {
   bool valid = true;
-  
-  if (config.max_memory_usage_mb < 64 || config.max_memory_usage_mb > 32768) { // 64MB to 32GB
-    errors.push_back("Memory management max memory usage must be between 64 and 32768 MB");
+
+  if (config.max_memory_usage_mb < 64 ||
+      config.max_memory_usage_mb > 32768) { // 64MB to 32GB
+    errors.push_back(
+        "Memory management max memory usage must be between 64 and 32768 MB");
     valid = false;
   }
-  
+
   if (config.memory_pressure_threshold_mb >= config.max_memory_usage_mb) {
-    errors.push_back("Memory management pressure threshold must be less than max memory usage");
+    errors.push_back("Memory management pressure threshold must be less than "
+                     "max memory usage");
     valid = false;
   }
-  
-  if (config.eviction_check_interval_seconds < 10 || config.eviction_check_interval_seconds > 3600) {
-    errors.push_back("Memory management eviction check interval must be between 10 and 3600 seconds");
+
+  if (config.eviction_check_interval_seconds < 10 ||
+      config.eviction_check_interval_seconds > 3600) {
+    errors.push_back("Memory management eviction check interval must be "
+                     "between 10 and 3600 seconds");
     valid = false;
   }
-  
-  if (config.eviction_threshold_percent < 50.0 || config.eviction_threshold_percent > 95.0) {
-    errors.push_back("Memory management eviction threshold percent must be between 50.0 and 95.0");
+
+  if (config.eviction_threshold_percent < 50.0 ||
+      config.eviction_threshold_percent > 95.0) {
+    errors.push_back("Memory management eviction threshold percent must be "
+                     "between 50.0 and 95.0");
     valid = false;
   }
-  
-  if (config.state_object_ttl_seconds < 300 || config.state_object_ttl_seconds > 86400) {
-    errors.push_back("Memory management state object TTL must be between 300 and 86400 seconds");
+
+  if (config.state_object_ttl_seconds < 300 ||
+      config.state_object_ttl_seconds > 86400) {
+    errors.push_back("Memory management state object TTL must be between 300 "
+                     "and 86400 seconds");
     valid = false;
   }
-  
+
   return valid;
 }
 
-bool validate_app_config(const AppConfig& config, std::vector<std::string>& errors) {
+bool validate_app_config(const AppConfig &config,
+                         std::vector<std::string> &errors) {
   bool valid = true;
-  
+
   // Validate new configuration sections
   if (!validate_prometheus_config(config.prometheus, errors)) {
     valid = false;
   }
-  
+
   if (!validate_dynamic_learning_config(config.dynamic_learning, errors)) {
     valid = false;
   }
-  
+
   if (!validate_tier4_config(config.tier4, errors)) {
     valid = false;
   }
-  
+
   if (!validate_memory_management_config(config.memory_management, errors)) {
     valid = false;
   }
-  
+
   // Cross-component validation
-  if (config.prometheus.enabled && config.prometheus.replace_web_server && 
+  if (config.prometheus.enabled && config.prometheus.replace_web_server &&
       config.monitoring.web_server_port == config.prometheus.port) {
-    errors.push_back("Prometheus and monitoring cannot use the same port when replace_web_server is enabled");
+    errors.push_back("Prometheus and monitoring cannot use the same port when "
+                     "replace_web_server is enabled");
     valid = false;
   }
-  
+
   if (config.tier4.enabled && !config.prometheus.enabled) {
-    errors.push_back("Tier4 requires Prometheus to be enabled for metrics export");
+    errors.push_back(
+        "Tier4 requires Prometheus to be enabled for metrics export");
     valid = false;
   }
-  
+
   return valid;
 }
 
@@ -620,9 +707,8 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
         else if (key == Keys::PROMETHEUS_HOST)
           config.prometheus.host = value;
         else if (key == Keys::PROMETHEUS_PORT)
-          config.prometheus.port =
-              Utils::string_to_number<int>(value).value_or(
-                  config.prometheus.port);
+          config.prometheus.port = Utils::string_to_number<int>(value).value_or(
+              config.prometheus.port);
         else if (key == Keys::PROMETHEUS_METRICS_PATH)
           config.prometheus.metrics_path = value;
         else if (key == Keys::PROMETHEUS_HEALTH_PATH)
@@ -663,7 +749,8 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
               Utils::string_to_number<uint32_t>(value).value_or(
                   config.dynamic_learning.baseline_update_interval_seconds);
         else if (key == Keys::DL_ENABLE_MANUAL_OVERRIDES)
-          config.dynamic_learning.enable_manual_overrides = string_to_bool(value);
+          config.dynamic_learning.enable_manual_overrides =
+              string_to_bool(value);
         else if (key == Keys::DL_THRESHOLD_CHANGE_MAX_PERCENT)
           config.dynamic_learning.threshold_change_max_percent =
               Utils::string_to_number<double>(value).value_or(
@@ -713,7 +800,8 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
               Utils::string_to_number<size_t>(value).value_or(
                   config.memory_management.memory_pressure_threshold_mb);
         else if (key == Keys::MM_ENABLE_OBJECT_POOLING)
-          config.memory_management.enable_object_pooling = string_to_bool(value);
+          config.memory_management.enable_object_pooling =
+              string_to_bool(value);
         else if (key == Keys::MM_EVICTION_CHECK_INTERVAL_SECONDS)
           config.memory_management.eviction_check_interval_seconds =
               Utils::string_to_number<uint32_t>(value).value_or(
@@ -723,7 +811,8 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
               Utils::string_to_number<double>(value).value_or(
                   config.memory_management.eviction_threshold_percent);
         else if (key == Keys::MM_ENABLE_MEMORY_COMPACTION)
-          config.memory_management.enable_memory_compaction = string_to_bool(value);
+          config.memory_management.enable_memory_compaction =
+              string_to_bool(value);
         else if (key == Keys::MM_STATE_OBJECT_TTL_SECONDS)
           config.memory_management.state_object_ttl_seconds =
               Utils::string_to_number<uint32_t>(value).value_or(
@@ -761,7 +850,7 @@ bool ConfigManager::load_configuration(const std::string &filepath) {
   std::vector<std::string> validation_errors;
   if (!validate_app_config(*new_config, validation_errors)) {
     std::cerr << "Configuration validation failed:" << std::endl;
-    for (const auto& error : validation_errors) {
+    for (const auto &error : validation_errors) {
       std::cerr << "  - " << error << std::endl;
     }
     std::cerr << "Keeping existing settings." << std::endl;
@@ -771,8 +860,8 @@ bool ConfigManager::load_configuration(const std::string &filepath) {
   // Atomically swap the pointer
   std::lock_guard<std::mutex> lock(config_mutex_);
   current_config_ = new_config;
-  std::cout << "Configuration loaded and validated successfully from " << config_filepath_
-            << std::endl;
+  std::cout << "Configuration loaded and validated successfully from "
+            << config_filepath_ << std::endl;
   return true;
 }
 

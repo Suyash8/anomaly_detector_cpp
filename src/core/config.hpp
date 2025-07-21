@@ -138,38 +138,49 @@ constexpr const char *PROMETHEUS_HOST = "host";
 constexpr const char *PROMETHEUS_PORT = "port";
 constexpr const char *PROMETHEUS_METRICS_PATH = "metrics_path";
 constexpr const char *PROMETHEUS_HEALTH_PATH = "health_path";
-constexpr const char *PROMETHEUS_SCRAPE_INTERVAL_SECONDS = "scrape_interval_seconds";
+constexpr const char *PROMETHEUS_SCRAPE_INTERVAL_SECONDS =
+    "scrape_interval_seconds";
 constexpr const char *PROMETHEUS_REPLACE_WEB_SERVER = "replace_web_server";
-constexpr const char *PROMETHEUS_MAX_METRICS_AGE_SECONDS = "max_metrics_age_seconds";
+constexpr const char *PROMETHEUS_MAX_METRICS_AGE_SECONDS =
+    "max_metrics_age_seconds";
 
 // Dynamic Learning Settings
 constexpr const char *DL_ENABLED = "enabled";
 constexpr const char *DL_LEARNING_WINDOW_HOURS = "learning_window_hours";
 constexpr const char *DL_CONFIDENCE_THRESHOLD = "confidence_threshold";
 constexpr const char *DL_MIN_SAMPLES_FOR_LEARNING = "min_samples_for_learning";
-constexpr const char *DL_SEASONAL_DETECTION_SENSITIVITY = "seasonal_detection_sensitivity";
-constexpr const char *DL_BASELINE_UPDATE_INTERVAL_SECONDS = "baseline_update_interval_seconds";
+constexpr const char *DL_SEASONAL_DETECTION_SENSITIVITY =
+    "seasonal_detection_sensitivity";
+constexpr const char *DL_BASELINE_UPDATE_INTERVAL_SECONDS =
+    "baseline_update_interval_seconds";
 constexpr const char *DL_ENABLE_MANUAL_OVERRIDES = "enable_manual_overrides";
-constexpr const char *DL_THRESHOLD_CHANGE_MAX_PERCENT = "threshold_change_max_percent";
+constexpr const char *DL_THRESHOLD_CHANGE_MAX_PERCENT =
+    "threshold_change_max_percent";
 
 // Tier4 Settings
 constexpr const char *T4_ENABLED = "enabled";
 constexpr const char *T4_PROMETHEUS_URL = "prometheus_url";
 constexpr const char *T4_QUERY_TIMEOUT_SECONDS = "query_timeout_seconds";
-constexpr const char *T4_EVALUATION_INTERVAL_SECONDS = "evaluation_interval_seconds";
+constexpr const char *T4_EVALUATION_INTERVAL_SECONDS =
+    "evaluation_interval_seconds";
 constexpr const char *T4_MAX_CONCURRENT_QUERIES = "max_concurrent_queries";
 constexpr const char *T4_AUTH_TOKEN = "auth_token";
 constexpr const char *T4_ENABLE_CIRCUIT_BREAKER = "enable_circuit_breaker";
-constexpr const char *T4_CIRCUIT_BREAKER_FAILURE_THRESHOLD = "circuit_breaker_failure_threshold";
-constexpr const char *T4_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS = "circuit_breaker_recovery_timeout_seconds";
+constexpr const char *T4_CIRCUIT_BREAKER_FAILURE_THRESHOLD =
+    "circuit_breaker_failure_threshold";
+constexpr const char *T4_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS =
+    "circuit_breaker_recovery_timeout_seconds";
 
 // Memory Management Settings
 constexpr const char *MM_ENABLED = "enabled";
 constexpr const char *MM_MAX_MEMORY_USAGE_MB = "max_memory_usage_mb";
-constexpr const char *MM_MEMORY_PRESSURE_THRESHOLD_MB = "memory_pressure_threshold_mb";
+constexpr const char *MM_MEMORY_PRESSURE_THRESHOLD_MB =
+    "memory_pressure_threshold_mb";
 constexpr const char *MM_ENABLE_OBJECT_POOLING = "enable_object_pooling";
-constexpr const char *MM_EVICTION_CHECK_INTERVAL_SECONDS = "eviction_check_interval_seconds";
-constexpr const char *MM_EVICTION_THRESHOLD_PERCENT = "eviction_threshold_percent";
+constexpr const char *MM_EVICTION_CHECK_INTERVAL_SECONDS =
+    "eviction_check_interval_seconds";
+constexpr const char *MM_EVICTION_THRESHOLD_PERCENT =
+    "eviction_threshold_percent";
 constexpr const char *MM_ENABLE_MEMORY_COMPACTION = "enable_memory_compaction";
 constexpr const char *MM_STATE_OBJECT_TTL_SECONDS = "state_object_ttl_seconds";
 } // namespace Keys
@@ -286,6 +297,22 @@ struct DynamicLearningConfig {
   uint32_t baseline_update_interval_seconds = 300;
   bool enable_manual_overrides = true;
   double threshold_change_max_percent = 50.0;
+
+  // Enhanced adaptive threshold settings
+  bool enable_percentile_thresholds = true;
+  double default_percentile_95 = 0.95;
+  double default_percentile_99 = 0.99;
+  uint32_t threshold_cache_ttl_seconds = 60;
+  bool enable_security_critical_entities = true;
+  double security_critical_max_change_percent = 10.0;
+  uint32_t max_audit_entries_per_entity = 100;
+  bool enable_threshold_change_validation = true;
+
+  // Entity-specific threshold configuration
+  bool auto_mark_login_paths_critical = true;
+  bool auto_mark_admin_paths_critical = true;
+  bool auto_mark_high_failed_login_ips_critical = true;
+  uint32_t failed_login_threshold_for_critical = 5;
 };
 
 struct Tier4Config {
@@ -355,11 +382,16 @@ struct AppConfig {
 };
 
 // Validation functions for configuration parameters
-bool validate_prometheus_config(const PrometheusConfig& config, std::vector<std::string>& errors);
-bool validate_dynamic_learning_config(const DynamicLearningConfig& config, std::vector<std::string>& errors);
-bool validate_tier4_config(const Tier4Config& config, std::vector<std::string>& errors);
-bool validate_memory_management_config(const MemoryManagementConfig& config, std::vector<std::string>& errors);
-bool validate_app_config(const AppConfig& config, std::vector<std::string>& errors);
+bool validate_prometheus_config(const PrometheusConfig &config,
+                                std::vector<std::string> &errors);
+bool validate_dynamic_learning_config(const DynamicLearningConfig &config,
+                                      std::vector<std::string> &errors);
+bool validate_tier4_config(const Tier4Config &config,
+                           std::vector<std::string> &errors);
+bool validate_memory_management_config(const MemoryManagementConfig &config,
+                                       std::vector<std::string> &errors);
+bool validate_app_config(const AppConfig &config,
+                         std::vector<std::string> &errors);
 
 class ConfigManager {
 public:
