@@ -18,7 +18,9 @@ DynamicLearningEngine::DynamicLearningEngine() {
 
 DynamicLearningEngine::DynamicLearningEngine(
     const Config::DynamicLearningConfig &config)
-    : config_(config) {}
+    : config_(config) {
+  max_gradual_threshold_step_ = config.gradual_threshold_step;
+}
 
 std::string
 DynamicLearningEngine::make_key(const std::string &entity_type,
@@ -30,6 +32,33 @@ void DynamicLearningEngine::process_event(const std::string &entity_type,
                                           const std::string &entity_id,
                                           double value, uint64_t timestamp_ms) {
   update_baseline(entity_type, entity_id, value, timestamp_ms);
+  // Update contextual baselines
+  int hour = 0;
+  get_time_context(timestamp_ms, hour);
+  auto hourly_baseline = get_contextual_baseline(entity_type, entity_id,
+                                                 TimeContext::HOURLY, hour);
+  hourly_baseline->statistics.add_value(value, timestamp_ms);
+  hourly_baseline->seasonal_model.add_observation(value, timestamp_ms);
+  hourly_baseline->last_updated = timestamp_ms;
+  if (!hourly_baseline->is_established &&
+      hourly_baseline->statistics.is_established(
+          config_.min_samples_for_contextual_baseline))
+    hourly_baseline->is_established = true;
+
+  // Day-of-week context
+  time_t t = timestamp_ms / 1000;
+  struct tm tmval;
+  localtime_r(&t, &tmval);
+  int day = tmval.tm_wday;
+  auto daily_baseline =
+      get_contextual_baseline(entity_type, entity_id, TimeContext::DAILY, day);
+  daily_baseline->statistics.add_value(value, timestamp_ms);
+  daily_baseline->seasonal_model.add_observation(value, timestamp_ms);
+  daily_baseline->last_updated = timestamp_ms;
+  if (!daily_baseline->is_established &&
+      daily_baseline->statistics.is_established(
+          config_.min_samples_for_contextual_baseline))
+    daily_baseline->is_established = true;
 }
 
 std::shared_ptr<LearningBaseline>
@@ -48,6 +77,8 @@ DynamicLearningEngine::get_baseline(const std::string &entity_type,
   baseline->entity_id = entity_id;
   baseline->created_at = baseline->last_updated = 0;
   baseline->is_established = false;
+  new (&baseline->seasonal_model)
+      SeasonalModel(config_.min_samples_for_seasonal_pattern);
   baselines_[key] = baseline;
   return baseline;
 }
@@ -136,19 +167,47 @@ bool DynamicLearningEngine::is_anomalous(const std::string &entity_type,
 }
 
 double DynamicLearningEngine::calculate_dynamic_threshold(
-    const LearningBaseline &baseline, uint64_t /* timestamp_ms */,
+    const LearningBaseline &baseline, uint64_t timestamp_ms,
     double percentile) const {
+  // Use manual override if active
   if (baseline.manual_override_active) {
     return baseline.manual_override_threshold;
   }
-  // Use rolling statistics percentile with seasonal adjustment if available
+
+  // Use time-contextual baseline if available
+  int context_value = 0;
+  TimeContext context = get_time_context(timestamp_ms, context_value);
+  auto contextual_baseline =
+      const_cast<DynamicLearningEngine *>(this)->get_contextual_baseline(
+          baseline.entity_type, baseline.entity_id, context, context_value);
   double base_threshold = baseline.statistics.get_percentile(percentile);
+  double contextual_threshold =
+      contextual_baseline->statistics.get_percentile(percentile);
+  if (contextual_baseline->is_established) {
+    // Gradual adjustment between global and contextual threshold
+    double prev = base_threshold;
+    double target = contextual_threshold;
+    double max_step = max_gradual_threshold_step_;
+    double adjusted =
+        prev + std::clamp(target - prev, -std::abs(prev) * max_step,
+                          std::abs(prev) * max_step);
+    base_threshold = adjusted;
+  }
 
   // Apply seasonal factor if pattern is established
   if (baseline.seasonal_model.is_pattern_established()) {
-    // Note: timestamp_ms could be used here for seasonal adjustment
-    // For now, just return the base threshold
-    return base_threshold;
+    double seasonal_factor =
+        baseline.seasonal_model.get_seasonal_factor(timestamp_ms);
+    base_threshold *= seasonal_factor;
+  }
+
+  // Optionally, adjust by pattern confidence
+  double confidence =
+      baseline.seasonal_model.get_current_pattern().confidence_score;
+  if (confidence < 0.5) {
+    // If pattern is not confident, reduce adjustment effect
+    base_threshold = 0.5 * base_threshold +
+                     0.5 * baseline.statistics.get_percentile(percentile);
   }
 
   return base_threshold;
@@ -728,4 +787,40 @@ DynamicLearningEngine::get_cached_threshold(const LearningBaseline &baseline,
   return std::numeric_limits<double>::quiet_NaN();
 }
 
+DynamicLearningEngine::TimeContext
+DynamicLearningEngine::get_time_context(uint64_t timestamp_ms,
+                                        int &context_value) {
+  // Example: Use hour of day as primary context
+  time_t t = timestamp_ms / 1000;
+  struct tm tmval;
+  localtime_r(&t, &tmval);
+  context_value = tmval.tm_hour;
+  return TimeContext::HOURLY;
+}
+
+std::shared_ptr<LearningBaseline>
+DynamicLearningEngine::get_contextual_baseline(const std::string &entity_type,
+                                               const std::string &entity_id,
+                                               TimeContext context,
+                                               int context_value) {
+  ContextualKey key{entity_type, entity_id, context, context_value};
+  std::shared_lock<std::shared_mutex> lock(baselines_mutex_);
+  auto it = contextual_baselines_.find(key);
+  if (it != contextual_baselines_.end())
+    return it->second;
+  lock.unlock();
+  std::unique_lock<std::shared_mutex> ulock(baselines_mutex_);
+  auto baseline = std::make_shared<LearningBaseline>();
+  baseline->entity_type = entity_type;
+  baseline->entity_id = entity_id;
+  baseline->created_at = baseline->last_updated = 0;
+  baseline->is_established = false;
+  // Use config-driven alpha for contextual baselines
+  new (&baseline->statistics)
+      RollingStatistics(config_.contextual_statistics_alpha, 1000);
+  new (&baseline->seasonal_model)
+      SeasonalModel(config_.min_samples_for_seasonal_pattern);
+  contextual_baselines_[key] = baseline;
+  return baseline;
+}
 } // namespace learning

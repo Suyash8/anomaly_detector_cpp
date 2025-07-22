@@ -313,6 +313,15 @@ struct DynamicLearningConfig {
   bool auto_mark_admin_paths_critical = true;
   bool auto_mark_high_failed_login_ips_critical = true;
   uint32_t failed_login_threshold_for_critical = 5;
+
+  // Seasonal detection settings
+  double seasonal_pattern_learning_rate = 0.1; // For gradual pattern update
+  uint32_t min_samples_for_seasonal_pattern = 1000;
+  double gradual_threshold_step = 0.1; // 10% per update
+  // Contextual baseline minimum sample requirement
+  uint32_t min_samples_for_contextual_baseline = 1;
+  // Contextual baseline EWMA alpha (1.0 = no smoothing, 0.1 = slow adapt)
+  double contextual_statistics_alpha = 1.0;
 };
 
 struct Tier4Config {

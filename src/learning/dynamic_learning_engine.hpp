@@ -128,10 +128,45 @@ public:
   void clear_manual_override(const std::string &entity_type,
                              const std::string &entity_id);
 
+public:
+  enum class TimeContext { NONE, HOURLY, DAILY, WEEKLY };
+  std::shared_ptr<LearningBaseline>
+  get_contextual_baseline(const std::string &entity_type,
+                          const std::string &entity_id, TimeContext context,
+                          int context_value);
+
 private:
   mutable std::shared_mutex baselines_mutex_;
   std::unordered_map<std::string, std::shared_ptr<LearningBaseline>> baselines_;
   Config::DynamicLearningConfig config_;
+
+  // Time-contextual baseline support
+  struct ContextualKey {
+    std::string entity_type;
+    std::string entity_id;
+    TimeContext context;
+    int context_value; // hour (0-23), day (0-6), week (0-3)
+    bool operator==(const ContextualKey &other) const {
+      return entity_type == other.entity_type && entity_id == other.entity_id &&
+             context == other.context && context_value == other.context_value;
+    }
+  };
+  struct ContextualKeyHash {
+    std::size_t operator()(const ContextualKey &k) const {
+      return std::hash<std::string>()(k.entity_type) ^
+             std::hash<std::string>()(k.entity_id) ^
+             std::hash<int>()(static_cast<int>(k.context)) ^
+             std::hash<int>()(k.context_value);
+    }
+  };
+
+  // Contextual baselines: key is ContextualKey
+  std::unordered_map<ContextualKey, std::shared_ptr<LearningBaseline>,
+                     ContextualKeyHash>
+      contextual_baselines_;
+
+  // Gradual threshold adjustment config
+  double max_gradual_threshold_step_ = 0.1; // 10% per update
 
   std::string make_key(const std::string &entity_type,
                        const std::string &entity_id) const;
@@ -153,6 +188,10 @@ private:
   double get_cached_threshold(const LearningBaseline &baseline,
                               double percentile,
                               uint64_t current_time_ms) const;
+
+  // Helper for time context
+  static TimeContext get_time_context(uint64_t timestamp_ms,
+                                      int &context_value);
 };
 
 } // namespace learning

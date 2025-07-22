@@ -677,3 +677,75 @@ TEST_F(DynamicLearningEngineTest, ThresholdChangeValidationAndRejection) {
       "test", entity, reasonable_override, "admin", "Reasonable change");
   EXPECT_TRUE(manual_success);
 }
+
+TEST(DynamicLearningEngineTestConfig, SeasonalPatternDetectionAndConfidence) {
+  Config::DynamicLearningConfig config;
+  config.min_samples_for_seasonal_pattern = 1;
+  config.min_samples_for_learning = 1;
+  auto engine = std::make_unique<DynamicLearningEngine>(config);
+  std::string entity = "seasonal_test";
+  uint64_t base_time = 1720000000000;
+  for (int day = 0; day < 10; ++day) {
+    for (int hour = 0; hour < 24; ++hour) {
+      double value = (hour == 12) ? 200.0 : 50.0;
+      uint64_t ts = base_time + (day * 24 + hour) * 3600 * 1000;
+      engine->process_event("test", entity, value, ts);
+    }
+  }
+  auto baseline = engine->get_baseline("test", entity);
+  ASSERT_NE(baseline, nullptr);
+  baseline->seasonal_model.update_pattern();
+  EXPECT_TRUE(baseline->seasonal_model.is_pattern_established());
+  double confidence =
+      baseline->seasonal_model.get_current_pattern().confidence_score;
+  EXPECT_GT(confidence, 0.7);
+  time_t t = base_time / 1000;
+  struct tm tmval;
+  localtime_r(&t, &tmval);
+  tmval.tm_hour = 12;
+  uint64_t ts12 = mktime(&tmval) * 1000;
+  tmval.tm_hour = 0;
+  uint64_t ts0 = mktime(&tmval) * 1000;
+  double factor12 = baseline->seasonal_model.get_seasonal_factor(ts12);
+  double factor0 = baseline->seasonal_model.get_seasonal_factor(ts0);
+  EXPECT_GT(factor12, factor0);
+}
+
+TEST(DynamicLearningEngineTestConfig, TimeContextualBaselinesHourlyDaily) {
+  Config::DynamicLearningConfig config;
+  config.min_samples_for_seasonal_pattern = 1;
+  config.min_samples_for_learning = 1;
+  auto engine = std::make_unique<DynamicLearningEngine>(config);
+  std::string entity = "contextual_test";
+  uint64_t base_time = 1720000000000;
+  for (int i = 0; i < 50; ++i) {
+    time_t t = base_time / 1000;
+    struct tm tmval;
+    localtime_r(&t, &tmval);
+    tmval.tm_hour = 3;
+    tmval.tm_wday = 2;
+    uint64_t ts = mktime(&tmval) * 1000 + i * 24 * 3600 * 1000;
+    engine->process_event("test", entity, 100.0, ts);
+  }
+  for (int i = 0; i < 50; ++i) {
+    time_t t = base_time / 1000;
+    struct tm tmval;
+    localtime_r(&t, &tmval);
+    tmval.tm_hour = 15;
+    tmval.tm_wday = 5;
+    uint64_t ts = mktime(&tmval) * 1000 + i * 24 * 3600 * 1000;
+    engine->process_event("test", entity, 200.0, ts);
+  }
+  int hour = 3;
+  auto hourly_baseline = engine->get_contextual_baseline(
+      "test", entity, DynamicLearningEngine::TimeContext::HOURLY, hour);
+  ASSERT_NE(hourly_baseline, nullptr);
+  EXPECT_TRUE(hourly_baseline->is_established);
+  EXPECT_NEAR(hourly_baseline->statistics.get_mean(), 100.0, 1e-2);
+  int day = 5;
+  auto daily_baseline = engine->get_contextual_baseline(
+      "test", entity, DynamicLearningEngine::TimeContext::DAILY, day);
+  ASSERT_NE(daily_baseline, nullptr);
+  EXPECT_TRUE(daily_baseline->is_established);
+  EXPECT_NEAR(daily_baseline->statistics.get_mean(), 200.0, 1e-2);
+}
