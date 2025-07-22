@@ -33,6 +33,7 @@ struct LearningBaseline {
   uint64_t created_at;
   uint64_t last_updated;
   bool is_established;
+  uint64_t established_time = 0; // Time when baseline was established
 
   // Cached thresholds for different percentiles
   std::unordered_map<double, double> cached_thresholds;
@@ -91,6 +92,23 @@ public:
                                         const std::string &entity_id,
                                         double percentile,
                                         bool use_cache = true) const;
+
+  // Adaptive threshold system enhancements
+  double calculate_adaptive_threshold(const std::string &entity_type,
+                                      const std::string &entity_id,
+                                      uint64_t timestamp_ms,
+                                      double base_percentile = 0.95) const;
+
+  bool is_threshold_adaptation_needed(const LearningBaseline &baseline,
+                                      uint64_t current_time_ms) const;
+
+  void trigger_threshold_adaptation(const std::string &entity_type,
+                                    const std::string &entity_id,
+                                    uint64_t timestamp_ms);
+
+  double get_confidence_adjusted_threshold(const LearningBaseline &baseline,
+                                           double base_threshold,
+                                           uint64_t timestamp_ms) const;
 
   // Entity-specific threshold management
   void mark_entity_as_security_critical(const std::string &entity_type,

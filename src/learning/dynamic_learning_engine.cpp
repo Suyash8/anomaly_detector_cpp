@@ -42,8 +42,10 @@ void DynamicLearningEngine::process_event(const std::string &entity_type,
   hourly_baseline->last_updated = timestamp_ms;
   if (!hourly_baseline->is_established &&
       hourly_baseline->statistics.is_established(
-          config_.min_samples_for_contextual_baseline))
+          config_.min_samples_for_contextual_baseline)) {
     hourly_baseline->is_established = true;
+    hourly_baseline->established_time = timestamp_ms;
+  }
 
   // Day-of-week context
   time_t t = timestamp_ms / 1000;
@@ -57,8 +59,10 @@ void DynamicLearningEngine::process_event(const std::string &entity_type,
   daily_baseline->last_updated = timestamp_ms;
   if (!daily_baseline->is_established &&
       daily_baseline->statistics.is_established(
-          config_.min_samples_for_contextual_baseline))
+          config_.min_samples_for_contextual_baseline)) {
     daily_baseline->is_established = true;
+    daily_baseline->established_time = timestamp_ms;
+  }
 }
 
 std::shared_ptr<LearningBaseline>
@@ -100,6 +104,7 @@ void DynamicLearningEngine::update_baseline(const std::string &entity_type,
 
   if (!baseline->is_established && baseline->statistics.is_established()) {
     baseline->is_established = true;
+    baseline->established_time = timestamp_ms;
     LOG(LogLevel::INFO, LogComponent::ANALYSIS_STATS,
         "Baseline established for [" << entity_type << ":" << entity_id << "]");
   }
@@ -474,6 +479,7 @@ bool DynamicLearningEngine::update_baseline_with_threshold_check(
 
   if (!baseline->is_established && baseline->statistics.is_established()) {
     baseline->is_established = true;
+    baseline->established_time = timestamp_ms;
     LOG(LogLevel::INFO, LogComponent::ANALYSIS_STATS,
         "Baseline established for [" << entity_type << ":" << entity_id << "]");
   }
@@ -798,6 +804,184 @@ DynamicLearningEngine::get_time_context(uint64_t timestamp_ms,
   return TimeContext::HOURLY;
 }
 
+// Adaptive threshold system implementations
+
+double DynamicLearningEngine::calculate_adaptive_threshold(
+    const std::string &entity_type, const std::string &entity_id,
+    uint64_t timestamp_ms, double base_percentile) const {
+
+  std::shared_lock<std::shared_mutex> lock(baselines_mutex_);
+  auto key = make_key(entity_type, entity_id);
+  auto it = baselines_.find(key);
+  if (it == baselines_.end() || !it->second->is_established) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  const auto &baseline = *it->second;
+  lock.unlock();
+
+  // Start with base percentile threshold
+  double base_threshold = baseline.statistics.get_percentile(base_percentile);
+
+  // Apply manual override if active
+  if (baseline.manual_override_active) {
+    return baseline.manual_override_threshold;
+  }
+
+  // Get time-contextual adjustments
+  int context_value = 0;
+  TimeContext context = get_time_context(timestamp_ms, context_value);
+
+  auto contextual_baseline =
+      const_cast<DynamicLearningEngine *>(this)->get_contextual_baseline(
+          entity_type, entity_id, context, context_value);
+
+  if (contextual_baseline->is_established) {
+    double contextual_threshold =
+        contextual_baseline->statistics.get_percentile(base_percentile);
+
+    // Gradual adjustment between global and contextual threshold
+    double max_step = max_gradual_threshold_step_;
+    double adjustment = std::clamp(contextual_threshold - base_threshold,
+                                   -std::abs(base_threshold) * max_step,
+                                   std::abs(base_threshold) * max_step);
+    base_threshold += adjustment;
+  }
+
+  // Apply seasonal adjustments if pattern is established
+  if (baseline.seasonal_model.is_pattern_established()) {
+    double seasonal_factor =
+        baseline.seasonal_model.get_seasonal_factor(timestamp_ms);
+    base_threshold *= seasonal_factor;
+  }
+
+  // Apply confidence-based adjustments
+  base_threshold =
+      get_confidence_adjusted_threshold(baseline, base_threshold, timestamp_ms);
+
+  // Security-critical entities get more conservative thresholds
+  if (baseline.is_security_critical) {
+    base_threshold *= 0.9; // 10% more conservative
+  }
+
+  return base_threshold;
+}
+
+bool DynamicLearningEngine::is_threshold_adaptation_needed(
+    const LearningBaseline &baseline, uint64_t current_time_ms) const {
+
+  // Security-critical entities always need frequent adaptation
+  if (baseline.is_security_critical) {
+    return true;
+  }
+
+  // Only adapt if baseline is established and learning window has elapsed since
+  // establishment
+  if (baseline.is_established && baseline.established_time > 0) {
+    uint64_t learning_window_ms = config_.learning_window_hours * 3600 * 1000;
+    if (current_time_ms - baseline.established_time < learning_window_ms) {
+      return false;
+    }
+  } else {
+    // If not established, do not adapt
+    return false;
+  }
+
+  // Check if seasonal pattern confidence has changed significantly
+  if (baseline.seasonal_model.is_pattern_established()) {
+    double confidence =
+        baseline.seasonal_model.get_current_pattern().confidence_score;
+    if (confidence <
+        config_.confidence_threshold * 0.8) { // 20% drop in confidence
+      return true;
+    }
+  }
+
+  // Check if statistical properties have changed significantly
+  if (baseline.statistics.get_sample_count() >
+      config_.min_samples_for_learning) {
+    // If we have enough samples but low confidence, adaptation is needed
+    return baseline.statistics.get_sample_count() %
+               (config_.min_samples_for_learning * 2) ==
+           0;
+  }
+
+  return false;
+}
+
+void DynamicLearningEngine::trigger_threshold_adaptation(
+    const std::string &entity_type, const std::string &entity_id,
+    uint64_t timestamp_ms) {
+
+  auto baseline = get_baseline(entity_type, entity_id);
+  if (!baseline || !baseline->is_established) {
+    return;
+  }
+
+  // Get current threshold for comparison
+  double old_threshold = baseline->statistics.get_percentile(0.95);
+
+  // Force update of seasonal model
+  baseline->seasonal_model.update_pattern();
+
+  // Recalculate threshold with new patterns
+  double new_threshold =
+      calculate_adaptive_threshold(entity_type, entity_id, timestamp_ms, 0.95);
+
+  // Check if adaptation resulted in significant change
+  if (!std::isnan(old_threshold) && !std::isnan(new_threshold) &&
+      std::abs(new_threshold - old_threshold) >
+          0.01 * std::max(std::abs(old_threshold), 1.0)) {
+
+    // Log the adaptation
+    add_threshold_audit_entry(*baseline, old_threshold, new_threshold, 0.95,
+                              timestamp_ms, "Adaptive threshold update",
+                              "system");
+
+    // Invalidate cache to force recalculation
+    invalidate_threshold_cache(entity_type, entity_id);
+
+    LOG(LogLevel::INFO, LogComponent::ANALYSIS_STATS,
+        "Adaptive threshold update for ["
+            << entity_type << ":" << entity_id << "] "
+            << "old: " << old_threshold << ", new: " << new_threshold
+            << ", confidence: "
+            << baseline->seasonal_model.get_current_pattern().confidence_score);
+  }
+}
+
+double DynamicLearningEngine::get_confidence_adjusted_threshold(
+    const LearningBaseline &baseline, double base_threshold,
+    [[maybe_unused]] uint64_t timestamp_ms) const {
+
+  if (!baseline.seasonal_model.is_pattern_established()) {
+    return base_threshold;
+  }
+
+  double confidence =
+      baseline.seasonal_model.get_current_pattern().confidence_score;
+
+  // If confidence is high, use the threshold as-is
+  if (confidence >= config_.confidence_threshold) {
+    return base_threshold;
+  }
+
+  // If confidence is low, blend with a more conservative static threshold
+  double static_threshold = baseline.statistics.get_percentile(0.95);
+  double confidence_weight = confidence / config_.confidence_threshold;
+
+  // Linear interpolation between adaptive and static thresholds
+  double adjusted_threshold = confidence_weight * base_threshold +
+                              (1.0 - confidence_weight) * static_threshold;
+
+  return adjusted_threshold;
+}
+
+} // namespace learning
+
+// Add missing definition for get_contextual_baseline in
+// dynamic_learning_engine.cpp
+namespace learning {
 std::shared_ptr<LearningBaseline>
 DynamicLearningEngine::get_contextual_baseline(const std::string &entity_type,
                                                const std::string &entity_id,
@@ -815,7 +999,6 @@ DynamicLearningEngine::get_contextual_baseline(const std::string &entity_type,
   baseline->entity_id = entity_id;
   baseline->created_at = baseline->last_updated = 0;
   baseline->is_established = false;
-  // Use config-driven alpha for contextual baselines
   new (&baseline->statistics)
       RollingStatistics(config_.contextual_statistics_alpha, 1000);
   new (&baseline->seasonal_model)

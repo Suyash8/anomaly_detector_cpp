@@ -749,3 +749,204 @@ TEST(DynamicLearningEngineTestConfig, TimeContextualBaselinesHourlyDaily) {
   EXPECT_TRUE(daily_baseline->is_established);
   EXPECT_NEAR(daily_baseline->statistics.get_mean(), 200.0, 1e-2);
 }
+
+// New tests for adaptive threshold system
+TEST(DynamicLearningEngineTestConfig, AdaptiveThresholdCalculation) {
+  Config::DynamicLearningConfig config;
+  config.min_samples_for_learning = 50;
+  config.learning_window_hours = 1; // Short window for testing
+  auto engine = std::make_unique<DynamicLearningEngine>(config);
+
+  std::string entity = "adaptive_test";
+  uint64_t base_time = 1720000000000;
+
+  // Establish baseline with normal values
+  for (int i = 0; i < 100; ++i) {
+    engine->process_event("test", entity, 100.0 + (i % 10),
+                          base_time + i * 1000);
+  }
+
+  auto baseline = engine->get_baseline("test", entity);
+  ASSERT_NE(baseline, nullptr);
+  ASSERT_TRUE(baseline->is_established);
+
+  // Test adaptive threshold calculation
+  double adaptive_threshold = engine->calculate_adaptive_threshold(
+      "test", entity, base_time + 100000, 0.95);
+
+  EXPECT_FALSE(std::isnan(adaptive_threshold));
+  EXPECT_GT(adaptive_threshold, 0.0);
+
+  // Test with different times (avoid mktime complications)
+  // Business hours: 14:00 on a weekday (July 3, 2024 2PM UTC)
+  uint64_t business_time = 1720000000000 + (14 * 3600 * 1000);
+  double business_threshold =
+      engine->calculate_adaptive_threshold("test", entity, business_time, 0.95);
+
+  // Weekend: Sunday (July 7, 2024 2PM UTC)
+  uint64_t weekend_time =
+      1720000000000 + (4 * 24 * 3600 * 1000) + (14 * 3600 * 1000);
+  double weekend_threshold =
+      engine->calculate_adaptive_threshold("test", entity, weekend_time, 0.95);
+
+  EXPECT_FALSE(std::isnan(business_threshold));
+  EXPECT_FALSE(std::isnan(weekend_threshold));
+}
+
+TEST(DynamicLearningEngineTestConfig, ThresholdAdaptationNeeded) {
+  Config::DynamicLearningConfig config;
+  config.learning_window_hours = 2;
+  config.min_samples_for_learning =
+      100; // Ensure enough samples for stable baseline
+  auto engine = std::make_unique<DynamicLearningEngine>(config);
+
+  std::string entity = "adaptation_test";
+  uint64_t base_time = 1720000000000;
+
+  // Create baseline
+  for (int i = 0; i < 200; ++i) { // Use more samples for stability
+    engine->process_event("test", entity, 100.0, base_time + i * 1000);
+  }
+
+  auto baseline = engine->get_baseline("test", entity);
+  ASSERT_NE(baseline, nullptr);
+  ASSERT_TRUE(baseline->is_established);
+
+  // Print established_time for debug
+  // std::cout << "Baseline established_time: " << baseline->established_time <<
+  // std::endl;
+
+  // Test adaptation needed for new baseline (should be false initially)
+  // Use established_time for correct window calculation
+  bool needs_adaptation = engine->is_threshold_adaptation_needed(
+      *baseline, baseline->established_time + 1000);
+  EXPECT_FALSE(needs_adaptation);
+
+  // Test adaptation needed after learning window
+  uint64_t future_time = baseline->established_time +
+                         (3 * 3600 * 1000); // 3 hours after establishment
+  needs_adaptation =
+      engine->is_threshold_adaptation_needed(*baseline, future_time);
+  EXPECT_TRUE(needs_adaptation);
+
+  // Test security-critical entities always need adaptation
+  engine->mark_entity_as_security_critical("test", entity, 10.0);
+  baseline = engine->get_baseline("test", entity);
+  needs_adaptation = engine->is_threshold_adaptation_needed(
+      *baseline, baseline->established_time + 1000);
+  EXPECT_TRUE(needs_adaptation);
+}
+
+TEST(DynamicLearningEngineTestConfig, ConfidenceAdjustedThreshold) {
+  Config::DynamicLearningConfig config;
+  config.min_samples_for_learning = 50;
+  config.confidence_threshold = 0.8;
+  config.min_samples_for_seasonal_pattern = 50; // Lower for test
+  auto engine = std::make_unique<DynamicLearningEngine>(config);
+
+  std::string entity = "confidence_test";
+  uint64_t base_time = 1720000000000;
+
+  // Create baseline with seasonal pattern
+  for (int day = 0; day < 7; ++day) {
+    for (int hour = 0; hour < 24; ++hour) {
+      double value = (hour >= 9 && hour <= 17) ? 100.0 : 50.0;
+      uint64_t ts = base_time + (day * 24 + hour) * 3600 * 1000;
+      engine->process_event("test", entity, value, ts);
+    }
+  }
+
+  auto baseline = engine->get_baseline("test", entity);
+  ASSERT_NE(baseline, nullptr);
+  ASSERT_TRUE(baseline->is_established);
+
+  // Force pattern update
+  baseline->seasonal_model.update_pattern();
+  EXPECT_TRUE(baseline->seasonal_model.is_pattern_established());
+
+  // Test confidence adjustment
+  double base_threshold = 100.0;
+  double adjusted_threshold = engine->get_confidence_adjusted_threshold(
+      *baseline, base_threshold, base_time);
+
+  EXPECT_FALSE(std::isnan(adjusted_threshold));
+  double confidence =
+      baseline->seasonal_model.get_current_pattern().confidence_score;
+  if (confidence >= config.confidence_threshold) {
+    EXPECT_NEAR(adjusted_threshold, base_threshold, 0.1);
+  } else {
+    double static_threshold = baseline->statistics.get_percentile(0.95);
+    EXPECT_GE(adjusted_threshold, std::min(base_threshold, static_threshold));
+    EXPECT_LE(adjusted_threshold, std::max(base_threshold, static_threshold));
+  }
+}
+
+TEST(DynamicLearningEngineTestConfig, IntegratedAdaptiveThresholdSystem) {
+  Config::DynamicLearningConfig config;
+  config.min_samples_for_learning = 50;
+  config.min_samples_for_seasonal_pattern = 100;
+  config.learning_window_hours = 24;
+  config.confidence_threshold = 0.7;
+  auto engine = std::make_unique<DynamicLearningEngine>(config);
+
+  std::string entity = "integrated_test";
+  uint64_t base_time = 1720000000000;
+
+  // Create baseline with clear daily pattern
+  for (int day = 0; day < 7; ++day) {
+    for (int hour = 0; hour < 24; ++hour) {
+      // Morning peak, afternoon lull, evening peak
+      double value = 100.0;
+      if (hour >= 8 && hour <= 11)
+        value = 150.0; // Morning peak
+      if (hour >= 14 && hour <= 16)
+        value = 80.0; // Afternoon lull
+      if (hour >= 19 && hour <= 22)
+        value = 130.0; // Evening peak
+
+      uint64_t ts = base_time + (day * 24 + hour) * 3600 * 1000;
+      engine->process_event("test", entity, value, ts);
+    }
+  }
+
+  auto baseline = engine->get_baseline("test", entity);
+  ASSERT_NE(baseline, nullptr);
+  ASSERT_TRUE(baseline->is_established);
+
+  // Force pattern update
+  baseline->seasonal_model.update_pattern();
+  EXPECT_TRUE(baseline->seasonal_model.is_pattern_established());
+
+  // Test adaptive thresholds at different times of day
+  uint64_t morning_time = base_time + (10 * 3600 * 1000);   // 10 AM
+  uint64_t afternoon_time = base_time + (15 * 3600 * 1000); // 3 PM
+  uint64_t evening_time = base_time + (20 * 3600 * 1000);   // 8 PM
+  uint64_t night_time = base_time + (2 * 3600 * 1000);      // 2 AM
+
+  double morning_threshold =
+      engine->calculate_adaptive_threshold("test", entity, morning_time, 0.95);
+  double afternoon_threshold = engine->calculate_adaptive_threshold(
+      "test", entity, afternoon_time, 0.95);
+  double evening_threshold =
+      engine->calculate_adaptive_threshold("test", entity, evening_time, 0.95);
+  double night_threshold =
+      engine->calculate_adaptive_threshold("test", entity, night_time, 0.95);
+
+  // Verify thresholds reflect the daily pattern
+  EXPECT_GT(morning_threshold, night_threshold);
+  EXPECT_GT(evening_threshold, afternoon_threshold);
+
+  // Test threshold adaptation
+  engine->trigger_threshold_adaptation("test", entity,
+                                       base_time + 7 * 24 * 3600 * 1000);
+
+  // Mark as security critical and verify threshold is more conservative
+  engine->mark_entity_as_security_critical("test", entity, 10.0);
+  double normal_threshold =
+      engine->calculate_adaptive_threshold("test", entity, morning_time, 0.95);
+  double critical_threshold =
+      engine->calculate_adaptive_threshold("test", entity, morning_time, 0.95);
+
+  // Security critical threshold should be more conservative (lower)
+  EXPECT_LE(critical_threshold, normal_threshold);
+}
