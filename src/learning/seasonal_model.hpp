@@ -28,6 +28,7 @@ public:
     // Fourier analysis results
     FourierCoefficients hourly_fourier;
     FourierCoefficients daily_fourier;
+    FourierCoefficients weekly_fourier;
 
     double confidence_score;  // Overall pattern confidence [0.0, 1.0]
     uint64_t last_updated;    // Timestamp when pattern was last updated
@@ -36,6 +37,18 @@ public:
     // Dominant frequency components
     std::vector<int> dominant_hourly_frequencies;
     std::vector<int> dominant_daily_frequencies;
+    std::vector<int> dominant_weekly_frequencies;
+
+    // Pattern stability metrics
+    double
+        hourly_stability;   // Measure of pattern stability over time [0.0, 1.0]
+    double daily_stability; // Measure of pattern stability over time [0.0, 1.0]
+    double
+        weekly_stability; // Measure of pattern stability over time [0.0, 1.0]
+
+    // Time context confidence scores
+    std::vector<double> hourly_confidence; // Confidence per hour [0.0, 1.0]
+    std::vector<double> daily_confidence;  // Confidence per day [0.0, 1.0]
   };
 
   /**
@@ -68,6 +81,13 @@ public:
    * <1.0 = lower)
    */
   double get_seasonal_factor(uint64_t timestamp_ms) const;
+
+  /**
+   * Get the confidence score for a specific time context
+   * @param timestamp_ms Timestamp for which to get confidence
+   * @return Confidence score [0.0, 1.0] for the specific time context
+   */
+  double get_time_context_confidence(uint64_t timestamp_ms) const;
 
   /**
    * Get the current seasonal pattern

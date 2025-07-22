@@ -98,6 +98,17 @@ public:
                                       const std::string &entity_id,
                                       uint64_t timestamp_ms,
                                       double base_percentile = 0.95) const;
+                                      
+  // Time-based baseline methods
+  double calculate_time_based_threshold(const std::string &entity_type,
+                                       const std::string &entity_id,
+                                       uint64_t timestamp_ms,
+                                       double base_percentile = 0.95) const;
+                                       
+  // Gradual threshold adjustment methods (public for testing)
+  double apply_gradual_threshold_adjustment(double current_threshold,
+                                          double target_threshold,
+                                          double max_change_percent) const;
 
   bool is_threshold_adaptation_needed(const LearningBaseline &baseline,
                                       uint64_t current_time_ms) const;

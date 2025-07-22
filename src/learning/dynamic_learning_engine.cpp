@@ -820,21 +820,38 @@ double DynamicLearningEngine::calculate_adaptive_threshold(
   const auto &baseline = *it->second;
   lock.unlock();
 
-  // Start with base percentile threshold
-  double base_threshold = baseline.statistics.get_percentile(base_percentile);
-
   // Apply manual override if active
   if (baseline.manual_override_active) {
     return baseline.manual_override_threshold;
   }
 
+  // Use enhanced time-based threshold calculation if available
+  double time_based_threshold = calculate_time_based_threshold(
+      entity_type, entity_id, timestamp_ms, base_percentile);
+
+  if (!std::isnan(time_based_threshold)) {
+    // Apply confidence-based adjustments
+    time_based_threshold = get_confidence_adjusted_threshold(
+        baseline, time_based_threshold, timestamp_ms);
+
+    // Security-critical entities get more conservative thresholds
+    if (baseline.is_security_critical) {
+      time_based_threshold *= 0.9; // 10% more conservative
+    }
+
+    return time_based_threshold;
+  }
+
+  // Fall back to original implementation if time-based calculation failed
+  double base_threshold = baseline.statistics.get_percentile(base_percentile);
+
   // Get time-contextual adjustments
   int context_value = 0;
-  TimeContext context = get_time_context(timestamp_ms, context_value);
+  TimeContext time_context = get_time_context(timestamp_ms, context_value);
 
   auto contextual_baseline =
       const_cast<DynamicLearningEngine *>(this)->get_contextual_baseline(
-          entity_type, entity_id, context, context_value);
+          entity_type, entity_id, time_context, context_value);
 
   if (contextual_baseline->is_established) {
     double contextual_threshold =
@@ -924,9 +941,39 @@ void DynamicLearningEngine::trigger_threshold_adaptation(
   // Force update of seasonal model
   baseline->seasonal_model.update_pattern();
 
-  // Recalculate threshold with new patterns
-  double new_threshold =
-      calculate_adaptive_threshold(entity_type, entity_id, timestamp_ms, 0.95);
+  // Update time-contextual baselines
+  int hour = 0;
+  get_time_context(timestamp_ms, hour); // Just get the hour value
+  auto hourly_baseline = get_contextual_baseline(entity_type, entity_id,
+                                                 TimeContext::HOURLY, hour);
+
+  // Get day of week
+  time_t t = timestamp_ms / 1000;
+  struct tm tmval;
+  localtime_r(&t, &tmval);
+  int day = tmval.tm_wday;
+  auto daily_baseline =
+      get_contextual_baseline(entity_type, entity_id, TimeContext::DAILY, day);
+
+  // Recalculate threshold with new patterns and time context
+  double time_based_threshold = calculate_time_based_threshold(
+      entity_type, entity_id, timestamp_ms, 0.95);
+
+  double new_threshold = std::isnan(time_based_threshold)
+                             ? calculate_adaptive_threshold(
+                                   entity_type, entity_id, timestamp_ms, 0.95)
+                             : time_based_threshold;
+
+  // Apply gradual threshold adjustment to prevent sudden changes
+  if (!std::isnan(old_threshold) && !std::isnan(new_threshold)) {
+    double max_change_percent =
+        baseline->is_security_critical
+            ? config_.security_critical_max_change_percent / 100.0
+            : config_.gradual_threshold_step;
+
+    new_threshold = apply_gradual_threshold_adjustment(
+        old_threshold, new_threshold, max_change_percent);
+  }
 
   // Check if adaptation resulted in significant change
   if (!std::isnan(old_threshold) && !std::isnan(new_threshold) &&
@@ -941,34 +988,51 @@ void DynamicLearningEngine::trigger_threshold_adaptation(
     // Invalidate cache to force recalculation
     invalidate_threshold_cache(entity_type, entity_id);
 
+    // Get confidence information for logging
+    double seasonal_confidence =
+        baseline->seasonal_model.get_current_pattern().confidence_score;
+    double time_context_confidence =
+        baseline->seasonal_model.get_time_context_confidence(timestamp_ms);
+
     LOG(LogLevel::INFO, LogComponent::ANALYSIS_STATS,
         "Adaptive threshold update for ["
             << entity_type << ":" << entity_id << "] "
             << "old: " << old_threshold << ", new: " << new_threshold
-            << ", confidence: "
-            << baseline->seasonal_model.get_current_pattern().confidence_score);
+            << ", seasonal confidence: " << seasonal_confidence
+            << ", time context confidence: " << time_context_confidence);
   }
 }
 
 double DynamicLearningEngine::get_confidence_adjusted_threshold(
     const LearningBaseline &baseline, double base_threshold,
-    [[maybe_unused]] uint64_t timestamp_ms) const {
+    uint64_t timestamp_ms) const {
 
   if (!baseline.seasonal_model.is_pattern_established()) {
     return base_threshold;
   }
 
-  double confidence =
+  // Get both overall pattern confidence and time-specific confidence
+  double overall_confidence =
       baseline.seasonal_model.get_current_pattern().confidence_score;
+  double time_context_confidence =
+      baseline.seasonal_model.get_time_context_confidence(timestamp_ms);
+
+  // Combine confidences, giving more weight to time-specific confidence
+  double combined_confidence =
+      0.3 * overall_confidence + 0.7 * time_context_confidence;
 
   // If confidence is high, use the threshold as-is
-  if (confidence >= config_.confidence_threshold) {
+  if (combined_confidence >= config_.confidence_threshold) {
     return base_threshold;
   }
 
   // If confidence is low, blend with a more conservative static threshold
-  double static_threshold = baseline.statistics.get_percentile(0.95);
-  double confidence_weight = confidence / config_.confidence_threshold;
+  double static_threshold =
+      baseline.statistics.get_percentile(0.99); // More conservative percentile
+  double confidence_weight = combined_confidence / config_.confidence_threshold;
+
+  // Apply seasonal detection sensitivity from config
+  confidence_weight *= config_.seasonal_detection_sensitivity;
 
   // Linear interpolation between adaptive and static thresholds
   double adjusted_threshold = confidence_weight * base_threshold +
@@ -977,11 +1041,6 @@ double DynamicLearningEngine::get_confidence_adjusted_threshold(
   return adjusted_threshold;
 }
 
-} // namespace learning
-
-// Add missing definition for get_contextual_baseline in
-// dynamic_learning_engine.cpp
-namespace learning {
 std::shared_ptr<LearningBaseline>
 DynamicLearningEngine::get_contextual_baseline(const std::string &entity_type,
                                                const std::string &entity_id,
@@ -1005,5 +1064,103 @@ DynamicLearningEngine::get_contextual_baseline(const std::string &entity_type,
       SeasonalModel(config_.min_samples_for_seasonal_pattern);
   contextual_baselines_[key] = baseline;
   return baseline;
+}
+
+double DynamicLearningEngine::calculate_time_based_threshold(
+    const std::string &entity_type, const std::string &entity_id,
+    uint64_t timestamp_ms, double base_percentile) const {
+
+  std::shared_lock<std::shared_mutex> lock(baselines_mutex_);
+  auto key = make_key(entity_type, entity_id);
+  auto it = baselines_.find(key);
+  if (it == baselines_.end() || !it->second->is_established) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  const auto &baseline = *it->second;
+
+  // Get time context for the timestamp
+  int context_value = 0;
+  TimeContext time_context = get_time_context(timestamp_ms, context_value);
+
+  // Try to get contextual baseline
+  auto contextual_baseline =
+      const_cast<DynamicLearningEngine *>(this)->get_contextual_baseline(
+          entity_type, entity_id, time_context, context_value);
+
+  // Calculate base threshold from global baseline
+  double global_threshold = baseline.statistics.get_percentile(base_percentile);
+
+  // If contextual baseline is established, blend with global threshold
+  double contextual_threshold = global_threshold;
+  double confidence_weight = 0.0;
+
+  if (contextual_baseline && contextual_baseline->is_established) {
+    contextual_threshold =
+        contextual_baseline->statistics.get_percentile(base_percentile);
+
+    // Calculate confidence based on sample count
+    size_t contextual_samples =
+        contextual_baseline->statistics.get_sample_count();
+    size_t min_samples = config_.min_samples_for_contextual_baseline;
+    confidence_weight = std::min(1.0, static_cast<double>(contextual_samples) /
+                                          (min_samples * 2.0));
+  }
+
+  // Get seasonal confidence for this timestamp
+  double seasonal_confidence = 0.0;
+  if (baseline.seasonal_model.is_pattern_established()) {
+    seasonal_confidence =
+        baseline.seasonal_model.get_time_context_confidence(timestamp_ms);
+  }
+
+  // Combine confidence weights
+  double combined_confidence = std::max(confidence_weight, seasonal_confidence);
+
+  // Blend thresholds based on confidence
+  double blended_threshold = (1.0 - combined_confidence) * global_threshold +
+                             combined_confidence * contextual_threshold;
+
+  // Apply seasonal adjustment if pattern is established
+  if (baseline.seasonal_model.is_pattern_established()) {
+    double seasonal_factor =
+        baseline.seasonal_model.get_seasonal_factor(timestamp_ms);
+
+    // Apply seasonal factor with confidence-based weighting
+    double seasonal_adjustment =
+        seasonal_factor - 1.0; // Convert to adjustment factor
+    blended_threshold *= (1.0 + seasonal_confidence * seasonal_adjustment);
+  }
+
+  // Apply gradual adjustment to prevent sudden changes
+  return apply_gradual_threshold_adjustment(global_threshold, blended_threshold,
+                                            config_.gradual_threshold_step);
+}
+
+double DynamicLearningEngine::apply_gradual_threshold_adjustment(
+    double current_threshold, double target_threshold,
+    double max_change_percent) const {
+
+  if (std::isnan(current_threshold) || std::isnan(target_threshold)) {
+    return target_threshold; // Can't apply gradual adjustment with NaN values
+  }
+
+  if (current_threshold == 0.0) {
+    return target_threshold; // Avoid division by zero
+  }
+
+  // Calculate maximum allowed change
+  double max_change = std::abs(current_threshold) * max_change_percent;
+
+  // Calculate actual change
+  double change = target_threshold - current_threshold;
+
+  // Limit change to maximum allowed
+  if (std::abs(change) > max_change) {
+    change = (change > 0) ? max_change : -max_change;
+  }
+
+  // Apply limited change
+  return current_threshold + change;
 }
 } // namespace learning
