@@ -1,5 +1,5 @@
-#include "../src/analysis/prometheus_anomaly_detector.hpp"
-#include "../src/analysis/prometheus_client.hpp"
+#include "analysis/prometheus_anomaly_detector.hpp"
+#include "analysis/prometheus_client.hpp"
 
 #include <gtest/gtest.h>
 
@@ -44,4 +44,43 @@ TEST(PrometheusAnomalyDetector, ValidateRule) {
   EXPECT_TRUE(PrometheusAnomalyDetector::validate_rule(valid));
   EXPECT_FALSE(PrometheusAnomalyDetector::validate_rule(invalid_op));
   EXPECT_FALSE(PrometheusAnomalyDetector::validate_rule(empty_name));
+}
+
+TEST(PrometheusAnomalyDetector, TemplateSubstitution) {
+  PrometheusClientConfig cfg;
+  cfg.endpoint_url = "http://localhost:9090";
+  auto client = std::make_shared<PrometheusClient>(cfg);
+  PrometheusAnomalyDetector detector(client);
+
+  // Single variable
+  std::string templ = "sum(rate(http_requests_total{ip=\"{{ip}}\"}[5m]))";
+  std::map<std::string, std::string> vars = {{"ip", "1.2.3.4"}};
+  EXPECT_EQ(detector.substitute(templ, vars),
+            "sum(rate(http_requests_total{ip=\"1.2.3.4\"}[5m]))");
+
+  // Multiple variables
+  templ = "foo{ip=\"{{ip}}\",path=\"{{path}}\"}";
+  vars = {{"ip", "1.2.3.4"}, {"path", "/bar"}};
+  EXPECT_EQ(detector.substitute(templ, vars),
+            "foo{ip=\"1.2.3.4\",path=\"/bar\"}");
+
+  // Repeated variable
+  templ = "{{ip}}-{{ip}}";
+  vars = {{"ip", "X"}};
+  EXPECT_EQ(detector.substitute(templ, vars), "X-X");
+
+  // Missing variable (should leave placeholder)
+  templ = "foo{{missing}}bar";
+  vars = {{"ip", "1.2.3.4"}};
+  EXPECT_EQ(detector.substitute(templ, vars), "foo{{missing}}bar");
+
+  // Curly braces in value
+  templ = "foo{{ip}}bar";
+  vars = {{"ip", "{weird}"}};
+  EXPECT_EQ(detector.substitute(templ, vars), "foo{weird}bar");
+
+  // No variables
+  templ = "static_query";
+  vars = {};
+  EXPECT_EQ(detector.substitute(templ, vars), "static_query");
 }

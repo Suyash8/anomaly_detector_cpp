@@ -59,14 +59,14 @@ public:
   // Validate a rule (static)
   static bool validate_rule(const PromQLRule &rule);
 
+  // Expose substitute for testing
+  std::string substitute(const std::string &templ,
+                         const std::map<std::string, std::string> &vars) const;
+
 private:
   std::shared_ptr<PrometheusClient> client_;
   std::vector<PromQLRule> rules_;
   mutable std::mutex rules_mutex_;
-
-  // Helper: substitute variables in PromQL template
-  std::string substitute(const std::string &templ,
-                         const std::map<std::string, std::string> &vars) const;
 };
 
 } // namespace analysis
