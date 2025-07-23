@@ -1,4 +1,6 @@
-#pragma once
+#ifndef PROMETHEUS_ANOMALY_DETECTOR_HPP
+#define PROMETHEUS_ANOMALY_DETECTOR_HPP
+
 #include "prometheus_client.hpp"
 
 #include <map>
@@ -30,11 +32,17 @@ class PrometheusAnomalyDetector {
 public:
   PrometheusAnomalyDetector(std::shared_ptr<PrometheusClient> client);
 
-  // Add a rule (thread-safe)
-  void add_rule(const PromQLRule &rule);
+  // Add a rule (thread-safe, prevents duplicate names)
+  bool add_rule(const PromQLRule &rule);
 
   // Remove a rule by name
-  void remove_rule(const std::string &rule_name);
+  bool remove_rule(const std::string &rule_name);
+
+  // Update a rule by name (returns false if not found)
+  bool update_rule(const PromQLRule &rule);
+
+  // Get a rule by name
+  std::optional<PromQLRule> get_rule(const std::string &rule_name) const;
 
   // Evaluate all rules, substituting variables as needed
   std::vector<PrometheusAnomalyResult>
@@ -48,6 +56,9 @@ public:
   // List all rules
   std::vector<PromQLRule> list_rules() const;
 
+  // Validate a rule (static)
+  static bool validate_rule(const PromQLRule &rule);
+
 private:
   std::shared_ptr<PrometheusClient> client_;
   std::vector<PromQLRule> rules_;
@@ -59,3 +70,5 @@ private:
 };
 
 } // namespace analysis
+
+#endif // PROMETHEUS_ANOMALY_DETECTOR_HPP

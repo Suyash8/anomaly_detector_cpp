@@ -9,37 +9,60 @@ PrometheusAnomalyDetector::PrometheusAnomalyDetector(
     std::shared_ptr<PrometheusClient> client)
     : client_(std::move(client)) {}
 
-void PrometheusAnomalyDetector::add_rule(const PromQLRule &rule) {
+bool PrometheusAnomalyDetector::add_rule(const PromQLRule &rule) {
+  if (!validate_rule(rule))
+    return false;
   std::lock_guard<std::mutex> lock(rules_mutex_);
+  for (const auto &r : rules_) {
+    if (r.name == rule.name)
+      return false; // Duplicate
+  }
   rules_.push_back(rule);
+  return true;
 }
 
-void PrometheusAnomalyDetector::remove_rule(const std::string &rule_name) {
+bool PrometheusAnomalyDetector::remove_rule(const std::string &rule_name) {
   std::lock_guard<std::mutex> lock(rules_mutex_);
-  rules_.erase(
+  auto it =
       std::remove_if(rules_.begin(), rules_.end(),
-                     [&](const PromQLRule &r) { return r.name == rule_name; }),
-      rules_.end());
+                     [&](const PromQLRule &r) { return r.name == rule_name; });
+  if (it == rules_.end())
+    return false;
+  rules_.erase(it, rules_.end());
+  return true;
 }
 
-std::vector<PromQLRule> PrometheusAnomalyDetector::list_rules() const {
+bool PrometheusAnomalyDetector::update_rule(const PromQLRule &rule) {
+  if (!validate_rule(rule))
+    return false;
   std::lock_guard<std::mutex> lock(rules_mutex_);
-  return rules_;
-}
-
-std::string PrometheusAnomalyDetector::substitute(
-    const std::string &templ,
-    const std::map<std::string, std::string> &vars) const {
-  std::string result = templ;
-  for (const auto &kv : vars) {
-    std::string pat = "{{" + kv.first + "}}";
-    size_t pos = 0;
-    while ((pos = result.find(pat, pos)) != std::string::npos) {
-      result.replace(pos, pat.length(), kv.second);
-      pos += kv.second.length();
+  for (auto &r : rules_) {
+    if (r.name == rule.name) {
+      r = rule;
+      return true;
     }
   }
-  return result;
+  return false;
+}
+
+std::optional<PromQLRule>
+PrometheusAnomalyDetector::get_rule(const std::string &rule_name) const {
+  std::lock_guard<std::mutex> lock(rules_mutex_);
+  for (const auto &r : rules_) {
+    if (r.name == rule_name)
+      return r;
+  }
+  return std::nullopt;
+}
+
+bool PrometheusAnomalyDetector::validate_rule(const PromQLRule &rule) {
+  static const std::set<std::string> valid_ops = {
+      ">", "<", ">=", "<=", "==", "!="};
+  if (rule.name.empty() || rule.promql_template.empty())
+    return false;
+  if (valid_ops.find(rule.comparison) == valid_ops.end())
+    return false;
+  return true;
 }
 
 std::vector<PrometheusAnomalyResult> PrometheusAnomalyDetector::evaluate_all(
@@ -111,4 +134,24 @@ std::optional<PrometheusAnomalyResult> PrometheusAnomalyDetector::evaluate_rule(
     return PrometheusAnomalyResult{rule.name, value, false,
                                    "Invalid comparison operator"};
   return PrometheusAnomalyResult{rule.name, value, is_anomaly, "OK"};
+}
+
+std::vector<PromQLRule> PrometheusAnomalyDetector::list_rules() const {
+  std::lock_guard<std::mutex> lock(rules_mutex_);
+  return rules_;
+}
+
+std::string PrometheusAnomalyDetector::substitute(
+    const std::string &templ,
+    const std::map<std::string, std::string> &vars) const {
+  std::string result = templ;
+  for (const auto &kv : vars) {
+    std::string pat = "{{" + kv.first + "}}";
+    size_t pos = 0;
+    while ((pos = result.find(pat, pos)) != std::string::npos) {
+      result.replace(pos, pat.length(), kv.second);
+      pos += kv.second.length();
+    }
+  }
+  return result;
 }
