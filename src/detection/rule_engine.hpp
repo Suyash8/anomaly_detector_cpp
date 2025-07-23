@@ -2,6 +2,7 @@
 #define RULE_ENGINE_HPP
 
 #include "analysis/analyzed_event.hpp"
+#include "analysis/prometheus_anomaly_detector.hpp"
 #include "core/alert_manager.hpp"
 #include "core/config.hpp"
 #include "core/prometheus_metrics_exporter.hpp"
@@ -24,7 +25,10 @@ public:
   bool load_ip_allowlist(const std::string &filepath);
 
   void reconfigure(const Config::AppConfig &new_config);
-  void set_metrics_exporter(std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
+  void set_metrics_exporter(
+      std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
+  void set_tier4_anomaly_detector(
+      std::shared_ptr<analysis::PrometheusAnomalyDetector> detector);
 
 private:
   AlertManager &alert_mgr;
@@ -34,6 +38,7 @@ private:
   std::vector<Utils::CIDRBlock> cidr_allowlist_cache_;
   std::shared_ptr<ModelManager> model_manager_;
   std::shared_ptr<prometheus::PrometheusMetricsExporter> metrics_exporter_;
+  std::shared_ptr<analysis::PrometheusAnomalyDetector> tier4_detector_;
 
   std::unique_ptr<Utils::AhoCorasick> suspicious_path_matcher_;
   std::unique_ptr<Utils::AhoCorasick> suspicious_ua_matcher_;
@@ -60,10 +65,10 @@ private:
   void check_historical_comparison_rules(const AnalyzedEvent &event);
 
   void check_ml_rules(const AnalyzedEvent &event);
-  
+
   // Helper methods for metrics
-  void track_rule_evaluation(const std::string& rule_name);
-  void track_rule_hit(const std::string& rule_name);
+  void track_rule_evaluation(const std::string &rule_name);
+  void track_rule_hit(const std::string &rule_name);
   void register_rule_engine_metrics();
 };
 

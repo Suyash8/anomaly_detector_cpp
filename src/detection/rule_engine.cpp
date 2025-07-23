@@ -172,6 +172,25 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
     LOG(LogLevel::TRACE, LogComponent::RULES_EVAL,
         "Tier 3 rules are disabled.");
 
+  // --- Tier 4: PrometheusAnomalyDetector integration ---
+  if (tier4_detector_) {
+    std::map<std::string, std::string> context_vars;
+    context_vars["ip"] = event->raw_log.ip_address;
+    context_vars["path"] = event->raw_log.request_path;
+    context_vars["session"] = ""; // Add session if available
+    auto results = tier4_detector_->evaluate_all(context_vars);
+    for (const auto &res : results) {
+      if (res.is_anomaly) {
+        create_and_record_alert(*event,
+                                "Tier 4 anomaly: " + res.rule_name +
+                                    ", score=" + std::to_string(res.score),
+                                AlertTier::TIER4_PROMQL, AlertAction::ALERT,
+                                "PromQL anomaly detected", res.score,
+                                res.rule_name);
+      }
+    }
+  }
+
   LOG(LogLevel::TRACE, LogComponent::RULES_EVAL,
       "Exiting evaluate_rules for IP: " << event_ref.raw_log.ip_address);
 }
@@ -544,7 +563,7 @@ void RuleEngine::check_asset_ratio_rule(const AnalyzedEvent &event) {
     LOG(LogLevel::TRACE, LogComponent::RULES_T1_HEURISTIC,
         "Skipping asset_ratio check, not enough HTML requests ("
             << event.ip_html_requests_in_window << "/"
-            << cfg.min_html_requests_for_ratio_check << ").");
+            << cfg.min_assets_per_html_ratio << ").");
     return;
   }
 
@@ -940,4 +959,9 @@ void RuleEngine::track_rule_hit(const std::string &rule_name) {
 
   metrics_exporter_->set_gauge("ad_rule_hit_rate", hit_rate,
                                {{"tier", tier}, {"rule", rule_name}});
+}
+
+void RuleEngine::set_tier4_anomaly_detector(
+    std::shared_ptr<analysis::PrometheusAnomalyDetector> detector) {
+  tier4_detector_ = std::move(detector);
 }
