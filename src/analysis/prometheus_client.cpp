@@ -6,15 +6,19 @@
 
 PrometheusClient::PrometheusClient(const PrometheusClientConfig &config)
     : config_(config) {
-  // Initialize HTTP client pool
+  // Initialize HTTP client pool with configured size and timeout
   for (int i = 0; i < config_.connection_pool_size; ++i) {
     auto client =
         std::make_unique<httplib::Client>(config_.endpoint_url.c_str());
+    // Set connection and read timeout (in seconds and microseconds)
     client->set_connection_timeout(config_.timeout.count() / 1000,
                                    config_.timeout.count() % 1000 * 1000);
+    client->set_read_timeout(config_.timeout.count() / 1000,
+                             config_.timeout.count() % 1000 * 1000);
+    // Pooling: each thread can acquire/release a client safely
     client_pool_.push_back(std::move(client));
   }
-  // ...additional setup (TLS, auth, etc.)
+  // TLS/SSL setup can be added here if needed
 }
 
 PrometheusClient::~PrometheusClient() {
@@ -162,5 +166,8 @@ const char *PrometheusClient::PrometheusClientError::what() const noexcept {
   return message.c_str();
 }
 
-// Helper methods (acquire_client, release_client, setup_auth, etc.) to be
-// implemented in next milestones
+// Pooling notes:
+// - acquire_client() and release_client() use a mutex for thread safety
+// - Pool size is configurable via PrometheusClientConfig
+// - For high concurrency, consider round-robin or per-thread assignment
+// - Pool is static for now; can be extended for dynamic resizing
