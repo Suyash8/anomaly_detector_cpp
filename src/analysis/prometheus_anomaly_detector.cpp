@@ -99,7 +99,7 @@ std::optional<PrometheusAnomalyResult> PrometheusAnomalyDetector::evaluate_rule(
   try {
     response = client_->query(promql);
   } catch (const std::exception &e) {
-    return PrometheusAnomalyResult{rule.name, 0.0, false,
+    return PrometheusAnomalyResult{rule.name, 0.0, false, 0.0,
                                    std::string("Query error: ") + e.what()};
   }
   // Parse JSON and extract value
@@ -107,13 +107,14 @@ std::optional<PrometheusAnomalyResult> PrometheusAnomalyDetector::evaluate_rule(
   try {
     auto json = nlohmann::json::parse(response);
     if (json["status"] != "success")
-      return PrometheusAnomalyResult{rule.name, 0.0, false, "Prometheus error"};
+      return PrometheusAnomalyResult{rule.name, 0.0, false, 0.0,
+                                     "Prometheus error"};
     auto &result = json["data"]["result"];
     if (!result.is_array() || result.empty() || !result[0]["value"].is_array())
-      return PrometheusAnomalyResult{rule.name, 0.0, false, "No data"};
+      return PrometheusAnomalyResult{rule.name, 0.0, false, 0.0, "No data"};
     value = std::stod(result[0]["value"][1].get<std::string>());
   } catch (const std::exception &e) {
-    return PrometheusAnomalyResult{rule.name, 0.0, false,
+    return PrometheusAnomalyResult{rule.name, 0.0, false, 0.0,
                                    std::string("Parse error: ") + e.what()};
   }
   // Evaluate comparison
@@ -131,9 +132,11 @@ std::optional<PrometheusAnomalyResult> PrometheusAnomalyDetector::evaluate_rule(
   else if (rule.comparison == "!=")
     is_anomaly = value != rule.threshold;
   else
-    return PrometheusAnomalyResult{rule.name, value, false,
+    return PrometheusAnomalyResult{rule.name, value, false, 0.0,
                                    "Invalid comparison operator"};
-  return PrometheusAnomalyResult{rule.name, value, is_anomaly, "OK"};
+  // Simple scoring: absolute distance from threshold
+  double score = std::abs(value - rule.threshold);
+  return PrometheusAnomalyResult{rule.name, value, is_anomaly, score, "OK"};
 }
 
 std::vector<PromQLRule> PrometheusAnomalyDetector::list_rules() const {

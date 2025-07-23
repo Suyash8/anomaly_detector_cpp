@@ -25,6 +25,7 @@ struct PrometheusAnomalyResult {
   std::string rule_name;
   double value;
   bool is_anomaly;
+  double score; // Distance from threshold or other scoring logic
   std::string details;
 };
 
