@@ -2,6 +2,7 @@
 #define ANALYZED_EVENT_HPP
 
 #include "analysis/per_session_state.hpp"
+#include "analysis/prometheus_anomaly_detector.hpp"
 #include "analysis/session_features.hpp"
 #include "core/log_entry.hpp"
 
@@ -117,6 +118,11 @@ struct AnalyzedEvent {
         is_ua_cycling(false), found_suspicious_path_str(false),
         found_suspicious_ua_str(false), ip_html_requests_in_window(0),
         ip_asset_requests_in_window(0) {}
+
+  // ----------------------
+  // Prometheus Tier 4 anomalies
+  // ----------------------
+  std::vector<analysis::PrometheusAnomalyResult> prometheus_anomalies;
 };
 
 #endif // ANALYZED_EVENT_HPP

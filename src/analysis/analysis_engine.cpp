@@ -5,6 +5,7 @@
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
 #include "models/feature_manager.hpp"
+#include "prometheus_anomaly_detector.hpp"
 #include "utils/scoped_timer.hpp"
 #include "utils/ua_parser.hpp"
 #include "utils/utils.hpp"
@@ -782,6 +783,15 @@ void AnalysisEngine::reconfigure(const Config::AppConfig &new_config) {
       "AnalysisEngine has been reconfigured with new settings.");
 }
 
+namespace {
+std::shared_ptr<analysis::PrometheusAnomalyDetector> tier4_detector;
+}
+
+void AnalysisEngine::set_tier4_anomaly_detector(
+    std::shared_ptr<analysis::PrometheusAnomalyDetector> detector) {
+  tier4_detector = std::move(detector);
+}
+
 AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
   static Histogram *processing_timer =
       MetricsManager::instance().register_histogram(
@@ -1252,6 +1262,20 @@ AnalyzedEvent AnalysisEngine::process_and_analyze(const LogEntry &raw_log) {
     perform_advanced_ua_analysis(std::string(raw_log.user_agent),
                                  app_config.tier1, current_ip_state, event,
                                  current_event_ts, max_timestamp_seen_);
+  }
+
+  // --- Tier 4: Prometheus anomaly detection ---
+  if (tier4_detector) {
+    std::map<std::string, std::string> context_vars;
+    context_vars["ip"] = raw_log.ip_address;
+    context_vars["path"] = raw_log.request_path;
+    context_vars["session"] = build_session_key(raw_log);
+    auto results = tier4_detector->evaluate_all(context_vars);
+    for (const auto &res : results) {
+      if (res.is_anomaly) {
+        event.prometheus_anomalies.push_back(res);
+      }
+    }
   }
 
   // --- Feature extraction for ML ---

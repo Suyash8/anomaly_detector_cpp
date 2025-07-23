@@ -10,6 +10,7 @@
 #include "models/model_data_collector.hpp"
 #include "per_ip_state.hpp"
 #include "per_path_state.hpp"
+#include "prometheus_anomaly_detector.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -71,6 +72,8 @@ public:
       std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
   void export_analysis_metrics(const AnalyzedEvent &event);
   void export_state_metrics();
+  void set_tier4_anomaly_detector(
+      std::shared_ptr<analysis::PrometheusAnomalyDetector> detector);
 
 private:
   Config::AppConfig app_config;
