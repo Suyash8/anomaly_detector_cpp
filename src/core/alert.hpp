@@ -8,18 +8,25 @@
 #include <string>
 
 // Enum class for type-safe alert items
-enum class AlertTier { TIER1_HEURISTIC, TIER2_STATISTICAL, TIER3_ML };
+enum class AlertTier {
+  TIER1_HEURISTIC,
+  TIER2_STATISTICAL,
+  TIER3_ML,
+  TIER4_PROMQL
+};
 
 enum class AlertAction {
   NO_ACTION = 0,  // No action needed (eg, for allowlisted items)
   LOG = 1,        // Log the event for observation, no immediate threat
   CHALLENGE = 2,  // Issue a challenge (eg, CAPTCHA) for suspected bots
   RATE_LIMIT = 3, // Temporarily rate-limit the source IP
-  BLOCK = 4       // Block the source IP for a period
+  BLOCK = 4,      // Block the source IP for a period
+  ALERT = 5       // Explicit alert for Tier 4/PromQL
 };
 
 std::string alert_action_to_string(AlertAction action);
 std::string alert_tier_to_string_representation(AlertTier tier);
+std::string alert_tier_to_raw_string(AlertTier tier);
 
 struct Alert {
   std::shared_ptr<const AnalyzedEvent> event_context;

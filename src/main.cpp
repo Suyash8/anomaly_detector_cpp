@@ -1,4 +1,6 @@
 #include "analysis/analysis_engine.hpp"
+#include "analysis/prometheus_anomaly_detector.hpp"
+#include "analysis/prometheus_client.hpp"
 #include "core/alert_manager.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
@@ -337,6 +339,39 @@ int main(int argc, char *argv[]) {
         *alert_manager_instance, *current_config, model_manager);
     analysis_engines.push_back(std::move(analysis_engine));
     rule_engines.push_back(std::move(rule_engine));
+  }
+
+  // --- Tier 4 (Prometheus Anomaly Detection) Initialization ---
+  std::shared_ptr<analysis::PrometheusAnomalyDetector> tier4_detector;
+  if (current_config->tier4.enabled) {
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Initializing Tier 4 Prometheus anomaly detection...");
+
+    // Create Prometheus client config
+    PrometheusClientConfig client_config;
+    client_config.endpoint_url = current_config->tier4.prometheus_url;
+    client_config.timeout =
+        std::chrono::seconds(current_config->tier4.query_timeout_seconds);
+    client_config.bearer_token = current_config->tier4.auth_token;
+
+    // Create Prometheus client
+    auto prometheus_client = std::make_shared<PrometheusClient>(client_config);
+
+    // Create anomaly detector
+    tier4_detector = std::make_shared<analysis::PrometheusAnomalyDetector>(
+        prometheus_client);
+
+    // Set detector for all rule engines
+    for (auto &rule_engine : rule_engines) {
+      rule_engine->set_tier4_anomaly_detector(tier4_detector);
+    }
+
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Tier 4 Prometheus anomaly detection initialized with URL: "
+            << current_config->tier4.prometheus_url);
+  } else {
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Tier 4 Prometheus anomaly detection disabled in configuration");
   }
 
   // --- Prometheus Metrics Exporter Initialization ---

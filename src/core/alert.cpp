@@ -7,15 +7,17 @@
 std::string alert_action_to_string(AlertAction action) {
   switch (action) {
   case AlertAction::NO_ACTION:
-    return "NO_ACTION";
+    return "No Action";
   case AlertAction::LOG:
-    return "LOG";
+    return "Log";
   case AlertAction::CHALLENGE:
-    return "CHALLENGE";
+    return "Challenge";
   case AlertAction::RATE_LIMIT:
-    return "RATE_LIMIT";
+    return "Rate Limit";
   case AlertAction::BLOCK:
-    return "BLOCK";
+    return "Block";
+  case AlertAction::ALERT:
+    return "Alert";
   default:
     return "UNKNOWN_ACTION";
   }
@@ -24,11 +26,28 @@ std::string alert_action_to_string(AlertAction action) {
 std::string alert_tier_to_string_representation(AlertTier tier) {
   switch (tier) {
   case AlertTier::TIER1_HEURISTIC:
+    return "Tier 1 (Heuristic)";
+  case AlertTier::TIER2_STATISTICAL:
+    return "Tier 2 (Statistical)";
+  case AlertTier::TIER3_ML:
+    return "Tier 3 (ML)";
+  case AlertTier::TIER4_PROMQL:
+    return "Tier 4 (PromQL)";
+  default:
+    return "UNKNOWN_TIER";
+  }
+}
+
+std::string alert_tier_to_raw_string(AlertTier tier) {
+  switch (tier) {
+  case AlertTier::TIER1_HEURISTIC:
     return "TIER1_HEURISTIC";
   case AlertTier::TIER2_STATISTICAL:
     return "TIER2_STATISTICAL";
   case AlertTier::TIER3_ML:
     return "TIER3_ML";
+  case AlertTier::TIER4_PROMQL:
+    return "TIER4_PROMQL";
   default:
     return "UNKNOWN_TIER";
   }

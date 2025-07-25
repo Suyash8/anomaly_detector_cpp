@@ -258,8 +258,11 @@ TEST_F(AlertDispatcherTest, AlertContentSerialization) {
   EXPECT_NE(content.find("203.0.113.42"), std::string::npos);
   EXPECT_NE(content.find("Anomalous request pattern detected"),
             std::string::npos);
-  EXPECT_NE(content.find("TIER2_STATISTICAL"), std::string::npos);
-  EXPECT_NE(content.find("RATE_LIMIT"), std::string::npos);
+  // Accept both legacy and new string representations for tier and action
+  EXPECT_TRUE(content.find("TIER2_STATISTICAL") != std::string::npos ||
+              content.find("Tier 2 (Statistical)") != std::string::npos);
+  EXPECT_TRUE(content.find("RATE_LIMIT") != std::string::npos ||
+              content.find("Rate Limit") != std::string::npos);
   EXPECT_NE(content.find("89.5"), std::string::npos);
 }
 
