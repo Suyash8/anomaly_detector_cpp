@@ -15,6 +15,7 @@
 #include "utils/sliding_window.hpp"
 #include "utils/utils.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -173,21 +174,28 @@ void RuleEngine::evaluate_rules(const AnalyzedEvent &event_ref) {
         "Tier 3 rules are disabled.");
 
   // --- Tier 4: PrometheusAnomalyDetector integration ---
-  if (tier4_detector_) {
-    std::map<std::string, std::string> context_vars;
-    context_vars["ip"] = event->raw_log.ip_address;
-    context_vars["path"] = event->raw_log.request_path;
-    context_vars["session"] = ""; // Add session if available
-    auto results = tier4_detector_->evaluate_all(context_vars);
-    for (const auto &res : results) {
-      if (res.is_anomaly) {
-        create_and_record_alert(*event,
-                                "Tier 4 anomaly: " + res.rule_name +
-                                    ", score=" + std::to_string(res.score),
-                                AlertTier::TIER4_PROMQL, AlertAction::ALERT,
-                                "PromQL anomaly detected", res.score,
-                                res.rule_name);
-      }
+  if (app_config.tier4.enabled && tier4_detector_) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    evaluate_tier4_rules(*event);
+
+    // Track processing time
+    if (metrics_exporter_) {
+      auto end_time = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(
+          end_time - start_time);
+      std::map<std::string, std::string> labels{{"tier", "tier4"}};
+      metrics_exporter_->observe_histogram("ad_rule_processing_time_seconds",
+                                           duration.count(), labels);
+    }
+  } else if (app_config.tier4.enabled && !tier4_detector_) {
+    // Log warning if Tier 4 is enabled but detector is not available
+    static bool warning_logged = false;
+    if (!warning_logged) {
+      LOG(LogLevel::WARN, LogComponent::RULES_EVAL,
+          "Tier 4 is enabled in configuration but PrometheusAnomalyDetector "
+          "is not initialized. Skipping Tier 4 evaluation.");
+      warning_logged = true;
     }
   }
 
@@ -895,6 +903,26 @@ void RuleEngine::register_rule_engine_metrics() {
       "ad_alert_score_distribution", "Distribution of alert scores",
       {10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 95.0, 99.0},
       {"tier"});
+
+  // Register Tier 4 specific metrics
+  metrics_exporter_->register_counter(
+      "ad_tier4_prometheus_queries_total",
+      "Total number of Prometheus queries executed",
+      {"rule", "status"}); // status: success, error, timeout
+
+  metrics_exporter_->register_histogram(
+      "ad_tier4_prometheus_query_duration_seconds",
+      "Duration of Prometheus queries",
+      {0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0}, {"rule"});
+
+  metrics_exporter_->register_gauge("ad_tier4_prometheus_rules_active",
+                                    "Number of active Tier 4 Prometheus rules",
+                                    {});
+
+  metrics_exporter_->register_counter(
+      "ad_tier4_circuit_breaker_events_total",
+      "Total number of circuit breaker events for Tier 4",
+      {"event_type"}); // event_type: opened, closed, half_open
 }
 
 void RuleEngine::track_rule_evaluation(const std::string &rule_name) {
@@ -959,6 +987,81 @@ void RuleEngine::track_rule_hit(const std::string &rule_name) {
 
   metrics_exporter_->set_gauge("ad_rule_hit_rate", hit_rate,
                                {{"tier", tier}, {"rule", rule_name}});
+}
+
+void RuleEngine::evaluate_tier4_rules(const AnalyzedEvent &event) {
+  if (!tier4_detector_) {
+    return;
+  }
+
+  try {
+    // Prepare context variables for PromQL templates
+    std::map<std::string, std::string> context_vars;
+    context_vars["ip"] = event.raw_log.ip_address;
+    context_vars["path"] = event.raw_log.request_path;
+    context_vars["method"] = event.raw_log.request_method;
+    context_vars["status"] =
+        std::to_string(event.raw_log.http_status_code.value_or(0));
+
+    // Add session ID if available (implement based on your session tracking)
+    // context_vars["session"] = get_session_id(event);
+
+    // Track active rules
+    auto rule_list = tier4_detector_->list_rules();
+    if (metrics_exporter_) {
+      metrics_exporter_->set_gauge("ad_tier4_prometheus_rules_active",
+                                   static_cast<double>(rule_list.size()), {});
+    }
+
+    // Evaluate all Tier 4 rules
+    auto results = tier4_detector_->evaluate_all(context_vars);
+
+    for (const auto &res : results) {
+      // Track query metrics
+      if (metrics_exporter_) {
+        std::string status = res.details == "OK" ? "success" : "error";
+        std::map<std::string, std::string> query_labels{{"rule", res.rule_name},
+                                                        {"status", status}};
+        metrics_exporter_->increment_counter(
+            "ad_tier4_prometheus_queries_total", query_labels);
+      }
+
+      // Track rule evaluation
+      track_rule_evaluation("tier4_" + res.rule_name);
+
+      if (res.is_anomaly) {
+        // Track rule hit
+        track_rule_hit("tier4_" + res.rule_name);
+
+        // Create alert for anomaly
+        create_and_record_alert(event,
+                                "Tier 4 PromQL anomaly: " + res.rule_name +
+                                    " (value=" + std::to_string(res.value) +
+                                    ", score=" + std::to_string(res.score) +
+                                    ")",
+                                AlertTier::TIER4_PROMQL, AlertAction::ALERT,
+                                "PromQL rule triggered anomaly detection",
+                                res.score, res.rule_name);
+
+        LOG(LogLevel::INFO, LogComponent::RULES_EVAL,
+            "Tier 4 anomaly detected: rule="
+                << res.rule_name << ", IP=" << event.raw_log.ip_address
+                << ", value=" << res.value << ", score=" << res.score);
+      }
+    }
+
+  } catch (const std::exception &e) {
+    // Handle graceful degradation on Prometheus failures
+    LOG(LogLevel::WARN, LogComponent::RULES_EVAL,
+        "Tier 4 evaluation failed: " << e.what()
+                                     << ". Continuing without Tier 4.");
+
+    if (metrics_exporter_) {
+      std::map<std::string, std::string> labels{{"event_type", "error"}};
+      metrics_exporter_->increment_counter(
+          "ad_tier4_circuit_breaker_events_total", labels);
+    }
+  }
 }
 
 void RuleEngine::set_tier4_anomaly_detector(

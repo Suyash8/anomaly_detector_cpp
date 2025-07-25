@@ -65,6 +65,7 @@ private:
   void check_historical_comparison_rules(const AnalyzedEvent &event);
 
   void check_ml_rules(const AnalyzedEvent &event);
+  void evaluate_tier4_rules(const AnalyzedEvent &event);
 
   // Helper methods for metrics
   void track_rule_evaluation(const std::string &rule_name);
