@@ -68,6 +68,14 @@ AnalysisEngine::AnalysisEngine(const Config::AppConfig &cfg)
   LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
       "AnalysisEngine created.");
 
+  // Advanced threading optimizations available:
+  // - memory::threading::SPSCQueue for lock-free producer-consumer patterns
+  // - memory::threading::WorkStealingQueue for efficient work distribution
+  // - memory::threading::ThreadAffinityManager for CPU core assignment
+  // - memory::threading::DoubleBufferedState for non-blocking state updates
+  // - memory::threading::CircularBuffer for high-performance circular buffers
+  // These primitives can be used to optimize hot paths and reduce contention
+
   if (app_config.ml_data_collection_enabled) {
     data_collector_ = std::make_unique<ModelDataCollector>(
         app_config.ml_data_collection_path);

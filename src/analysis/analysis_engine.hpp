@@ -11,6 +11,7 @@
 #include "per_ip_state.hpp"
 #include "per_path_state.hpp"
 #include "prometheus_anomaly_detector.hpp"
+#include "utils/advanced_threading.hpp" // Advanced threading optimizations
 
 #include <cstdint>
 #include <memory>
