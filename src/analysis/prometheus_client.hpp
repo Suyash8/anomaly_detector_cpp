@@ -25,10 +25,10 @@ class PrometheusClient {
 public:
   // Construct with config
   explicit PrometheusClient(const PrometheusClientConfig &config);
-  ~PrometheusClient();
+  virtual ~PrometheusClient();
 
   // Instant query: returns result as JSON string or throws on error
-  std::string query(const std::string &promql);
+  virtual std::string query(const std::string &promql);
 
   // Range query: returns result as JSON string or throws on error
   std::string query_range(const std::string &promql,

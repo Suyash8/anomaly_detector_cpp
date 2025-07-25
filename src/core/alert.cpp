@@ -38,6 +38,21 @@ std::string alert_tier_to_string_representation(AlertTier tier) {
   }
 }
 
+std::string alert_tier_to_raw_string(AlertTier tier) {
+  switch (tier) {
+  case AlertTier::TIER1_HEURISTIC:
+    return "TIER1_HEURISTIC";
+  case AlertTier::TIER2_STATISTICAL:
+    return "TIER2_STATISTICAL";
+  case AlertTier::TIER3_ML:
+    return "TIER3_ML";
+  case AlertTier::TIER4_PROMQL:
+    return "TIER4_PROMQL";
+  default:
+    return "UNKNOWN_TIER";
+  }
+}
+
 Alert::Alert(std::shared_ptr<const AnalyzedEvent> event,
              std::string_view reason, AlertTier tier, AlertAction action,
              std::string_view action_str, double score, std::string_view key_id)

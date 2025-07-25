@@ -26,6 +26,7 @@ enum class AlertAction {
 
 std::string alert_action_to_string(AlertAction action);
 std::string alert_tier_to_string_representation(AlertTier tier);
+std::string alert_tier_to_raw_string(AlertTier tier);
 
 struct Alert {
   std::shared_ptr<const AnalyzedEvent> event_context;

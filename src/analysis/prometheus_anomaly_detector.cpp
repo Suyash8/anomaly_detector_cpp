@@ -1,7 +1,9 @@
 #include "prometheus_anomaly_detector.hpp"
 
+#include <cmath>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <set>
 
 using namespace analysis;
 
@@ -10,7 +12,8 @@ PrometheusAnomalyDetector::PrometheusAnomalyDetector(
     : client_(std::move(client)) {}
 
 bool PrometheusAnomalyDetector::add_rule(const PromQLRule &rule) {
-  if (!validate_rule(rule))
+  // Basic validation - only check for empty name and promql
+  if (rule.name.empty() || rule.promql_template.empty())
     return false;
   std::lock_guard<std::mutex> lock(rules_mutex_);
   for (const auto &r : rules_) {
@@ -33,7 +36,8 @@ bool PrometheusAnomalyDetector::remove_rule(const std::string &rule_name) {
 }
 
 bool PrometheusAnomalyDetector::update_rule(const PromQLRule &rule) {
-  if (!validate_rule(rule))
+  // Basic validation - only check for empty name and promql
+  if (rule.name.empty() || rule.promql_template.empty())
     return false;
   std::lock_guard<std::mutex> lock(rules_mutex_);
   for (auto &r : rules_) {
@@ -86,8 +90,9 @@ std::optional<PrometheusAnomalyResult> PrometheusAnomalyDetector::evaluate_rule(
     auto it =
         std::find_if(rules_.begin(), rules_.end(),
                      [&](const PromQLRule &r) { return r.name == rule_name; });
-    if (it == rules_.end())
+    if (it == rules_.end()) {
       return std::nullopt;
+    }
     rule = *it;
   }
   // Merge context_vars and rule.variables (context_vars take precedence)

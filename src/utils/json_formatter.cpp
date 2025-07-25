@@ -55,8 +55,7 @@ nlohmann::json JsonFormatter::alert_to_json_object(const Alert &alert_data) {
   // All string values are escaped for JSON safety
   j["timestamp_ms"] = alert_data.event_timestamp_ms;
   j["alert_reason"] = escape_json_value(alert_data.alert_reason);
-  j["detection_tier"] =
-      alert_tier_to_string_representation(alert_data.detection_tier);
+  j["detection_tier"] = alert_tier_to_raw_string(alert_data.detection_tier);
   j["suggested_action"] = escape_json_value(alert_data.suggested_action);
   j["action_code"] = alert_action_to_string(alert_data.action_code);
   j["anomaly_score"] = alert_data.normalized_score;
