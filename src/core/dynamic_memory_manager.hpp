@@ -67,7 +67,7 @@ private:
   PoolStats stats_;
 
   std::atomic<bool> adaptation_enabled_{true};
-  std::unique_ptr<std::thread> adaptation_thread_;
+  std::thread adaptation_thread_;
   std::atomic<bool> running_{false};
 
   void adaptation_loop();
@@ -538,6 +538,50 @@ template <typename T> void AutoTuningPool<T>::release(std::unique_ptr<T> obj) {
 
   // Pool is full, object will be destroyed
   stats_.active_objects--;
+}
+
+template <typename T> void AutoTuningPool<T>::stop_adaptation() {
+  adaptation_enabled_.store(false);
+  if (adaptation_thread_.joinable()) {
+    running_.store(false);
+    adaptation_thread_.join();
+  }
+}
+
+template <typename T> void AutoTuningPool<T>::start_adaptation() {
+  adaptation_enabled_.store(true);
+  running_.store(true);
+  adaptation_thread_ = std::thread(&AutoTuningPool<T>::adaptation_loop, this);
+}
+
+template <typename T> PoolStats AutoTuningPool<T>::get_stats() const {
+  std::lock_guard<std::mutex> lock(pool_mutex_);
+  return stats_;
+}
+
+template <typename T> double AutoTuningPool<T>::get_utilization() const {
+  std::lock_guard<std::mutex> lock(pool_mutex_);
+  if (stats_.current_size == 0)
+    return 0.0;
+  return static_cast<double>(stats_.active_objects) / stats_.current_size;
+}
+
+template <typename T> void AutoTuningPool<T>::grow_pool() {
+  size_t new_size =
+      std::min(stats_.current_size * config_.growth_factor, config_.max_size);
+  if (new_size > stats_.current_size) {
+    size_t additional = new_size - stats_.current_size;
+    pool_.reserve(new_size);
+    available_.reserve(new_size);
+
+    for (size_t i = 0; i < additional; ++i) {
+      pool_.emplace_back(std::make_unique<T>());
+      available_.push_back(true);
+    }
+
+    stats_.current_size = new_size;
+    stats_.growth_events++;
+  }
 }
 
 template <typename T>
