@@ -4,6 +4,7 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
+#include "core/memory_manager.hpp"
 #include "models/feature_manager.hpp"
 #include "prometheus_anomaly_detector.hpp"
 #include "utils/scoped_timer.hpp"
@@ -64,9 +65,13 @@ RequestType get_request_type(const std::string &raw_path,
 }
 
 AnalysisEngine::AnalysisEngine(const Config::AppConfig &cfg)
-    : app_config(cfg), feature_manager_() {
+    : app_config(cfg), feature_manager_(), last_cleanup_timestamp_(0) {
   LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
       "AnalysisEngine created.");
+
+  // Initialize memory management settings
+  memory_pressure_threshold_ =
+      cfg.memory_management.memory_pressure_threshold_mb * 1024 * 1024;
 
   // Advanced threading optimizations available:
   // - memory::threading::SPSCQueue for lock-free producer-consumer patterns
@@ -1946,5 +1951,135 @@ void AnalysisEngine::set_metrics_exporter(
 
     LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
         "Prometheus metrics registered for AnalysisEngine");
+  }
+}
+
+// =============================================================================
+// Memory Management Integration
+// =============================================================================
+
+void AnalysisEngine::set_memory_manager(
+    std::shared_ptr<memory::MemoryManager> memory_manager) {
+  memory_manager_ = memory_manager;
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "Memory manager integrated with AnalysisEngine");
+}
+
+bool AnalysisEngine::check_memory_pressure() const {
+  if (!memory_manager_) {
+    return false; // No memory manager, assume no pressure
+  }
+
+  return memory_manager_->is_memory_pressure();
+}
+
+bool AnalysisEngine::should_throttle_ingestion() const {
+  if (!memory_manager_) {
+    return false;
+  }
+
+  // Throttle if memory pressure level is 2 or higher (medium/high/critical)
+  return memory_manager_->get_memory_pressure_level() >= 2;
+}
+
+size_t AnalysisEngine::get_recommended_batch_size() const {
+  if (!memory_manager_) {
+    return 1000; // Default batch size
+  }
+
+  double memory_utilization = memory_manager_->get_memory_utilization();
+
+  if (memory_utilization < 0.5) {
+    return 1000; // High batch size when memory is abundant
+  } else if (memory_utilization < 0.8) {
+    return 500; // Medium batch size under moderate memory pressure
+  } else {
+    return 100; // Small batch size under high memory pressure
+  }
+}
+
+void AnalysisEngine::trigger_memory_cleanup() {
+  if (!memory_manager_) {
+    return;
+  }
+
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "Triggering memory cleanup in AnalysisEngine");
+
+  uint64_t current_time = get_max_timestamp_seen();
+  if (current_time == 0) {
+    current_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                       .count();
+  }
+
+  // Trigger state object eviction
+  evict_inactive_states(current_time);
+
+  // Request memory manager to perform cleanup
+  memory_manager_->trigger_compaction();
+
+  last_cleanup_timestamp_ = current_time;
+}
+
+void AnalysisEngine::evict_inactive_states(uint64_t current_timestamp_ms) {
+  std::lock_guard<std::mutex> lock(memory_stats_mutex_);
+
+  size_t ttl_ms = app_config.memory_management.state_object_ttl_seconds * 1000;
+  size_t initial_ip_count = ip_activity_trackers.size();
+  size_t initial_path_count = path_activity_trackers.size();
+  size_t initial_session_count = session_trackers.size();
+
+  // Evict inactive IP states
+  auto ip_it = ip_activity_trackers.begin();
+  while (ip_it != ip_activity_trackers.end()) {
+    if (current_timestamp_ms > ip_it->second.last_seen_timestamp_ms + ttl_ms) {
+      ip_it = ip_activity_trackers.erase(ip_it);
+    } else {
+      ++ip_it;
+    }
+  }
+
+  // Evict inactive path states
+  auto path_it = path_activity_trackers.begin();
+  while (path_it != path_activity_trackers.end()) {
+    if (current_timestamp_ms >
+        path_it->second.last_seen_timestamp_ms + ttl_ms) {
+      path_it = path_activity_trackers.erase(path_it);
+    } else {
+      ++path_it;
+    }
+  }
+
+  // Evict inactive session states
+  auto session_it = session_trackers.begin();
+  while (session_it != session_trackers.end()) {
+    if (current_timestamp_ms >
+        session_it->second.last_seen_timestamp_ms + ttl_ms) {
+      session_it = session_trackers.erase(session_it);
+    } else {
+      ++session_it;
+    }
+  }
+
+  size_t evicted_ip = initial_ip_count - ip_activity_trackers.size();
+  size_t evicted_path = initial_path_count - path_activity_trackers.size();
+  size_t evicted_session = initial_session_count - session_trackers.size();
+
+  if (evicted_ip > 0 || evicted_path > 0 || evicted_session > 0) {
+    LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+        "Evicted inactive states: " << evicted_ip << " IPs, " << evicted_path
+                                    << " paths, " << evicted_session
+                                    << " sessions");
+  }
+
+  // Export eviction metrics
+  if (metrics_exporter_) {
+    metrics_exporter_->set_gauge("ad_analysis_evicted_states_total", evicted_ip,
+                                 {{"type", "ip"}});
+    metrics_exporter_->set_gauge("ad_analysis_evicted_states_total",
+                                 evicted_path, {{"type", "path"}});
+    metrics_exporter_->set_gauge("ad_analysis_evicted_states_total",
+                                 evicted_session, {{"type", "session"}});
   }
 }
