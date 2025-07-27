@@ -18,7 +18,7 @@ class SystemIntegrationTest : public ::testing::Test {
 protected:
   void SetUp() override {
     // Setup test environment
-    metrics_exporter_ = std::make_unique<PrometheusMetricsExporter>();
+    metrics_exporter_ = std::make_unique<core::PrometheusMetricsExporter>();
     validator_ = std::make_unique<PerformanceValidator>();
     hardening_ = std::make_unique<ProductionHardening>(metrics_exporter_.get());
     debugger_ = std::make_unique<MemoryDebugger>();
@@ -27,7 +27,7 @@ protected:
 
   void TearDown() override { hardening_->stop_monitoring(); }
 
-  std::unique_ptr<PrometheusMetricsExporter> metrics_exporter_;
+  std::unique_ptr<core::PrometheusMetricsExporter> metrics_exporter_;
   std::unique_ptr<PerformanceValidator> validator_;
   std::unique_ptr<ProductionHardening> hardening_;
   std::unique_ptr<MemoryDebugger> debugger_;

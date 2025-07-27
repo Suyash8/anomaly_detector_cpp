@@ -116,8 +116,8 @@ public:
   void reset_stats();
 
 private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
+  mutable std::mutex stats_mutex_;
+  CompressionStats stats_;
 };
 
 /**
