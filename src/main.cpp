@@ -18,6 +18,8 @@
 #include "io/web/web_server.hpp"
 #include "learning/dynamic_learning_engine.hpp"
 #include "models/model_manager.hpp"
+#include "utils/error_recovery_manager.hpp"
+#include "utils/graceful_degradation_manager.hpp"
 #include "utils/thread_safe_queue.hpp"
 
 #include <algorithm>
@@ -54,6 +56,11 @@ std::atomic<bool> g_resume_requested = false;
 std::shared_ptr<memory::MemoryManager> g_memory_manager;
 std::shared_ptr<learning::DynamicLearningEngine> g_learning_engine;
 std::shared_ptr<resource::ResourcePoolManager> g_resource_pool_manager;
+
+// Global error handling and recovery components
+std::shared_ptr<error_recovery::ErrorRecoveryManager> g_error_recovery_manager;
+std::shared_ptr<graceful_degradation::GracefulDegradationManager>
+    g_degradation_manager;
 
 // A simple, safe signal handler function
 void signal_handler(int signum) {
@@ -258,6 +265,102 @@ void keyboard_listener_thread() {
 
 enum class ServiceState { RUNNING, PAUSED };
 
+// Configure error recovery for system components
+void configure_error_recovery(const Config::AppConfig &config) {
+  if (!g_error_recovery_manager || !g_degradation_manager) {
+    return;
+  }
+
+  // Configure error recovery for MongoDB operations
+  error_recovery::RecoveryConfig mongo_config;
+  mongo_config.strategy = error_recovery::RecoveryStrategy::CIRCUIT_BREAK;
+  mongo_config.max_retries = 3;
+  mongo_config.base_delay = std::chrono::milliseconds(500);
+  mongo_config.circuit_config.failure_threshold = 5;
+  mongo_config.circuit_config.timeout = std::chrono::milliseconds(30000);
+  g_error_recovery_manager->register_component("mongodb", mongo_config);
+
+  // Configure error recovery for log processing
+  error_recovery::RecoveryConfig log_processing_config;
+  log_processing_config.strategy = error_recovery::RecoveryStrategy::RETRY;
+  log_processing_config.max_retries = 2;
+  log_processing_config.base_delay = std::chrono::milliseconds(100);
+  g_error_recovery_manager->register_component("log_processing",
+                                               log_processing_config);
+
+  // Configure error recovery for analysis engine
+  error_recovery::RecoveryConfig analysis_config;
+  analysis_config.strategy = error_recovery::RecoveryStrategy::FALLBACK;
+  analysis_config.max_retries = 1;
+  analysis_config.fallback_func = []() -> bool {
+    // Simple fallback: just log that analysis was skipped
+    LOG(LogLevel::WARN, LogComponent::ANALYSIS_LIFECYCLE,
+        "Analysis fallback activated - skipping detailed analysis");
+    return true;
+  };
+  g_error_recovery_manager->register_component("analysis_engine",
+                                               analysis_config);
+
+  // Configure graceful degradation services
+  graceful_degradation::ServiceConfig threat_intel_service;
+  threat_intel_service.priority = graceful_degradation::Priority::MEDIUM;
+  threat_intel_service.auto_recovery = true;
+  threat_intel_service.degradation_callback =
+      [](graceful_degradation::DegradationMode mode) {
+        switch (mode) {
+        case graceful_degradation::DegradationMode::REDUCED:
+          LOG(LogLevel::WARN, LogComponent::IO_THREATINTEL,
+              "Threat intel service degraded to reduced mode");
+          break;
+        case graceful_degradation::DegradationMode::MINIMAL:
+          LOG(LogLevel::WARN, LogComponent::IO_THREATINTEL,
+              "Threat intel service degraded to minimal mode");
+          break;
+        case graceful_degradation::DegradationMode::DISABLED:
+          LOG(LogLevel::ERROR, LogComponent::IO_THREATINTEL,
+              "Threat intel service disabled due to resource pressure");
+          break;
+        default:
+          LOG(LogLevel::INFO, LogComponent::IO_THREATINTEL,
+              "Threat intel service operating normally");
+          break;
+        }
+      };
+  g_degradation_manager->register_service("threat_intel", threat_intel_service);
+
+  graceful_degradation::ServiceConfig ml_service;
+  ml_service.priority = graceful_degradation::Priority::LOW;
+  ml_service.auto_recovery = true;
+  ml_service.degradation_callback =
+      [](graceful_degradation::DegradationMode mode) {
+        switch (mode) {
+        case graceful_degradation::DegradationMode::REDUCED:
+          LOG(LogLevel::WARN, LogComponent::ML_LIFECYCLE,
+              "ML services degraded - reduced model complexity");
+          break;
+        case graceful_degradation::DegradationMode::DISABLED:
+          LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+              "ML services disabled due to resource pressure");
+          break;
+        default:
+          LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+              "ML services operating normally");
+          break;
+        }
+      };
+  g_degradation_manager->register_service("ml_services", ml_service);
+
+  // Set degradation thresholds based on config
+  graceful_degradation::DegradationThresholds thresholds;
+  thresholds.cpu_threshold_medium = 75.0;
+  thresholds.cpu_threshold_high = 90.0;
+  thresholds.memory_threshold_medium = 80.0;
+  thresholds.memory_threshold_high = 95.0;
+  thresholds.queue_threshold_medium = 2000;
+  thresholds.queue_threshold_high = 10000;
+  g_degradation_manager->set_degradation_thresholds(thresholds);
+}
+
 // Component initialization and dependency injection
 struct ComponentManager {
   std::shared_ptr<memory::MemoryManager> memory_manager;
@@ -337,6 +440,27 @@ struct ComponentManager {
     g_learning_engine = learning_engine;
     g_resource_pool_manager = resource_pool_manager;
 
+    // Initialize Error Recovery Manager
+    g_error_recovery_manager =
+        std::make_shared<error_recovery::ErrorRecoveryManager>();
+    if (!g_error_recovery_manager) {
+      LOG(LogLevel::FATAL, LogComponent::CORE,
+          "Failed to initialize ErrorRecoveryManager");
+      return false;
+    }
+
+    // Initialize Graceful Degradation Manager
+    g_degradation_manager =
+        std::make_shared<graceful_degradation::GracefulDegradationManager>();
+    if (!g_degradation_manager) {
+      LOG(LogLevel::FATAL, LogComponent::CORE,
+          "Failed to initialize GracefulDegradationManager");
+      return false;
+    }
+
+    // Configure error recovery for core components
+    configure_error_recovery(config);
+
     LOG(LogLevel::INFO, LogComponent::CORE,
         "All core components initialized successfully");
     return true;
@@ -385,6 +509,25 @@ struct ComponentManager {
     g_memory_manager.reset();
     g_learning_engine.reset();
     g_resource_pool_manager.reset();
+
+    // Clear error recovery components
+    if (g_error_recovery_manager) {
+      auto stats = g_error_recovery_manager->get_all_stats();
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "Error recovery final stats - Total errors handled: "
+              << g_error_recovery_manager->get_total_errors());
+      g_error_recovery_manager.reset();
+    }
+
+    if (g_degradation_manager) {
+      auto degraded_services = g_degradation_manager->get_degraded_services();
+      if (!degraded_services.empty()) {
+        LOG(LogLevel::WARN, LogComponent::CORE,
+            "Services still degraded at shutdown: "
+                << degraded_services.size());
+      }
+      g_degradation_manager.reset();
+    }
 
     LOG(LogLevel::INFO, LogComponent::CORE, "Core component shutdown complete");
   }
@@ -703,7 +846,7 @@ int main(int argc, char *argv[]) {
     }
     LOG(LogLevel::INFO, LogComponent::CORE,
         "Prometheus metrics exporter set for all worker components");
-  }  // --- Launch Worker Threads ---
+  } // --- Launch Worker Threads ---
   for (unsigned int i = 0; i < num_workers; ++i) {
     worker_threads.emplace_back(worker_thread, i, std::ref(*worker_queues[i]),
                                 std::ref(*analysis_engines[i]),
