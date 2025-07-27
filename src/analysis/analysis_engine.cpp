@@ -4,6 +4,7 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
+#include "core/memory_manager.hpp"
 #include "models/feature_manager.hpp"
 #include "prometheus_anomaly_detector.hpp"
 #include "utils/scoped_timer.hpp"
@@ -64,9 +65,21 @@ RequestType get_request_type(const std::string &raw_path,
 }
 
 AnalysisEngine::AnalysisEngine(const Config::AppConfig &cfg)
-    : app_config(cfg), feature_manager_() {
+    : app_config(cfg), feature_manager_(), last_cleanup_timestamp_(0) {
   LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
       "AnalysisEngine created.");
+
+  // Initialize memory management settings
+  memory_pressure_threshold_ =
+      cfg.memory_management.memory_pressure_threshold_mb * 1024 * 1024;
+
+  // Advanced threading optimizations available:
+  // - memory::threading::SPSCQueue for lock-free producer-consumer patterns
+  // - memory::threading::WorkStealingQueue for efficient work distribution
+  // - memory::threading::ThreadAffinityManager for CPU core assignment
+  // - memory::threading::DoubleBufferedState for non-blocking state updates
+  // - memory::threading::CircularBuffer for high-performance circular buffers
+  // These primitives can be used to optimize hot paths and reduce contention
 
   if (app_config.ml_data_collection_enabled) {
     data_collector_ = std::make_unique<ModelDataCollector>(
@@ -1596,47 +1609,6 @@ void AnalysisEngine::set_metrics_exporter(
     metrics_exporter_->register_gauge("ad_analysis_session_states_total",
                                       "Total number of session states");
 
-    // Register window element metrics
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_req_window_elements_total",
-        "Total number of elements in IP request windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_failed_login_window_elements_total",
-        "Total number of elements in IP failed login windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_html_req_window_elements_total",
-        "Total number of elements in IP HTML request windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_asset_req_window_elements_total",
-        "Total number of elements in IP asset request windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_ua_window_elements_total",
-        "Total number of elements in IP user agent windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_paths_seen_elements_total",
-        "Total number of paths seen by all IPs");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_historical_ua_elements_total",
-        "Total number of historical user agents for all IPs");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_session_req_window_elements_total",
-        "Total number of elements in session request windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_session_unique_paths_total",
-        "Total number of unique paths across all sessions");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_session_unique_user_agents_total",
-        "Total number of unique user agents across all sessions");
-
     // Register memory metrics
     metrics_exporter_->register_gauge("ad_analysis_ip_state_memory_bytes",
                                       "Memory usage in bytes for an IP state",
@@ -1689,32 +1661,6 @@ void AnalysisEngine::set_metrics_exporter(
     metrics_exporter_->register_gauge("ad_analysis_ip_error_percentage",
                                       "Error percentage for an IP", {"ip"});
   }
-
-  if (!metrics_exporter_) {
-    return;
-  }
-
-  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
-      "Registering metrics for AnalysisEngine");
-
-  // Register counters
-  metrics_exporter_->register_counter(
-      "ad_analysis_logs_processed_total",
-      "Total number of logs processed by the analysis engine",
-      {"ip", "path", "status_code"});
-
-  // Register gauges for state counts
-  metrics_exporter_->register_gauge(
-      "ad_analysis_ip_states_total",
-      "Total number of IP state objects in memory");
-
-  metrics_exporter_->register_gauge(
-      "ad_analysis_path_states_total",
-      "Total number of path state objects in memory");
-
-  metrics_exporter_->register_gauge(
-      "ad_analysis_session_states_total",
-      "Total number of session state objects in memory");
 
   // Register gauges for window element counts
   metrics_exporter_->register_gauge(
@@ -1871,72 +1817,141 @@ void AnalysisEngine::set_metrics_exporter(
 
   LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
       "Metrics registration complete");
+}
 
-  if (metrics_exporter_) {
-    // Register all the metrics we'll be using
+void AnalysisEngine::set_metrics_exporter_only(
+    std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter) {
+  metrics_exporter_ = exporter;
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "Metrics exporter set without registering metrics for AnalysisEngine");
+}
 
-    // Processing metrics
-    metrics_exporter_->register_histogram(
-        "ad_analysis_processing_duration_seconds",
-        "Time spent processing each log entry in the analysis engine",
-        {0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
-        {"component"});
+// =============================================================================
+// Memory Management Integration
+// =============================================================================
 
-    metrics_exporter_->register_counter(
-        "ad_analysis_logs_processed_total",
-        "Total number of log entries processed by the analysis engine",
-        {"ip", "path", "status_code"});
+void AnalysisEngine::set_memory_manager(
+    std::shared_ptr<memory::MemoryManager> memory_manager) {
+  memory_manager_ = memory_manager;
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "Memory manager integrated with AnalysisEngine");
+}
 
-    // State object count metrics
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_states_total",
-        "Current number of IP state objects in memory");
+bool AnalysisEngine::check_memory_pressure() const {
+  if (!memory_manager_) {
+    return false; // No memory manager, assume no pressure
+  }
 
-    metrics_exporter_->register_gauge(
-        "ad_analysis_path_states_total",
-        "Current number of path state objects in memory");
+  return memory_manager_->is_memory_pressure();
+}
 
-    metrics_exporter_->register_gauge(
-        "ad_analysis_session_states_total",
-        "Current number of session state objects in memory");
+bool AnalysisEngine::should_throttle_ingestion() const {
+  if (!memory_manager_) {
+    return false;
+  }
 
-    // Memory usage metrics
-    metrics_exporter_->register_gauge("ad_analysis_memory_usage_bytes",
-                                      "Memory usage by component",
-                                      {"component", "type"});
+  // Throttle if memory pressure level is 2 or higher (medium/high/critical)
+  return memory_manager_->get_memory_pressure_level() >= 2;
+}
 
-    // Per-IP metrics with labels
-    metrics_exporter_->register_gauge("ad_analysis_ip_request_rate",
-                                      "Current request rate for IP addresses",
-                                      {"ip"});
+size_t AnalysisEngine::get_recommended_batch_size() const {
+  if (!memory_manager_) {
+    return 1000; // Default batch size
+  }
 
-    metrics_exporter_->register_gauge("ad_analysis_ip_error_rate",
-                                      "Current error rate for IP addresses",
-                                      {"ip"});
+  double memory_utilization = memory_manager_->get_memory_utilization();
 
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_failed_login_rate",
-        "Current failed login rate for IP addresses", {"ip"});
+  if (memory_utilization < 0.5) {
+    return 1000; // High batch size when memory is abundant
+  } else if (memory_utilization < 0.8) {
+    return 500; // Medium batch size under moderate memory pressure
+  } else {
+    return 100; // Small batch size under high memory pressure
+  }
+}
 
-    // Per-path metrics with labels
-    metrics_exporter_->register_gauge("ad_analysis_path_request_rate",
-                                      "Current request rate for paths",
-                                      {"path"});
+void AnalysisEngine::trigger_memory_cleanup() {
+  if (!memory_manager_) {
+    return;
+  }
 
-    metrics_exporter_->register_gauge("ad_analysis_path_error_rate",
-                                      "Current error rate for paths", {"path"});
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "Triggering memory cleanup in AnalysisEngine");
 
-    // Sliding window element counts
-    metrics_exporter_->register_gauge("ad_analysis_sliding_window_elements",
-                                      "Number of elements in sliding windows",
-                                      {"window_type", "entity_type"});
+  uint64_t current_time = get_max_timestamp_seen();
+  if (current_time == 0) {
+    current_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                       .count();
+  }
 
-    // Anomaly detection metrics
-    metrics_exporter_->register_counter("ad_analysis_anomalies_detected_total",
-                                        "Total number of anomalies detected",
-                                        {"anomaly_type", "ip", "path"});
+  // Trigger state object eviction
+  evict_inactive_states(current_time);
 
+  // Request memory manager to perform cleanup
+  memory_manager_->trigger_compaction();
+
+  last_cleanup_timestamp_ = current_time;
+}
+
+void AnalysisEngine::evict_inactive_states(uint64_t current_timestamp_ms) {
+  std::lock_guard<std::mutex> lock(memory_stats_mutex_);
+
+  size_t ttl_ms = app_config.memory_management.state_object_ttl_seconds * 1000;
+  size_t initial_ip_count = ip_activity_trackers.size();
+  size_t initial_path_count = path_activity_trackers.size();
+  size_t initial_session_count = session_trackers.size();
+
+  // Evict inactive IP states
+  auto ip_it = ip_activity_trackers.begin();
+  while (ip_it != ip_activity_trackers.end()) {
+    if (current_timestamp_ms > ip_it->second.last_seen_timestamp_ms + ttl_ms) {
+      ip_it = ip_activity_trackers.erase(ip_it);
+    } else {
+      ++ip_it;
+    }
+  }
+
+  // Evict inactive path states
+  auto path_it = path_activity_trackers.begin();
+  while (path_it != path_activity_trackers.end()) {
+    if (current_timestamp_ms >
+        path_it->second.last_seen_timestamp_ms + ttl_ms) {
+      path_it = path_activity_trackers.erase(path_it);
+    } else {
+      ++path_it;
+    }
+  }
+
+  // Evict inactive session states
+  auto session_it = session_trackers.begin();
+  while (session_it != session_trackers.end()) {
+    if (current_timestamp_ms >
+        session_it->second.last_seen_timestamp_ms + ttl_ms) {
+      session_it = session_trackers.erase(session_it);
+    } else {
+      ++session_it;
+    }
+  }
+
+  size_t evicted_ip = initial_ip_count - ip_activity_trackers.size();
+  size_t evicted_path = initial_path_count - path_activity_trackers.size();
+  size_t evicted_session = initial_session_count - session_trackers.size();
+
+  if (evicted_ip > 0 || evicted_path > 0 || evicted_session > 0) {
     LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
-        "Prometheus metrics registered for AnalysisEngine");
+        "Evicted inactive states: " << evicted_ip << " IPs, " << evicted_path
+                                    << " paths, " << evicted_session
+                                    << " sessions");
+  }
+
+  // Export eviction metrics
+  if (metrics_exporter_) {
+    metrics_exporter_->set_gauge("ad_analysis_evicted_states_total", evicted_ip,
+                                 {{"type", "ip"}});
+    metrics_exporter_->set_gauge("ad_analysis_evicted_states_total",
+                                 evicted_path, {{"type", "path"}});
+    metrics_exporter_->set_gauge("ad_analysis_evicted_states_total",
+                                 evicted_session, {{"type", "session"}});
   }
 }

@@ -5,17 +5,24 @@
 #include "analyzed_event.hpp"
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
+#include "core/memory_manager.hpp"
 #include "core/prometheus_metrics_exporter.hpp"
 #include "models/feature_manager.hpp"
 #include "models/model_data_collector.hpp"
 #include "per_ip_state.hpp"
 #include "per_path_state.hpp"
 #include "prometheus_anomaly_detector.hpp"
+#include "utils/advanced_threading.hpp" // Advanced threading optimizations
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
+
+// Forward declarations
+namespace memory {
+class MemoryManager;
+}
 
 struct TopIpInfo {
   std::string ip;
@@ -67,8 +74,21 @@ public:
                                              const std::string &metric_name);
   EngineStateMetrics get_internal_state_metrics() const;
 
+  // Memory management integration
+  void
+  set_memory_manager(std::shared_ptr<memory::MemoryManager> memory_manager);
+  bool check_memory_pressure() const;
+  void trigger_memory_cleanup();
+  void evict_inactive_states(uint64_t current_timestamp_ms);
+
+  // Backpressure mechanism
+  bool should_throttle_ingestion() const;
+  size_t get_recommended_batch_size() const;
+
   // Prometheus metrics integration
   void set_metrics_exporter(
+      std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
+  void set_metrics_exporter_only(
       std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
   void export_analysis_metrics(const AnalyzedEvent &event);
   void export_state_metrics();
@@ -83,9 +103,15 @@ private:
 
   std::unique_ptr<ModelDataCollector> data_collector_;
   std::shared_ptr<prometheus::PrometheusMetricsExporter> metrics_exporter_;
+  std::shared_ptr<memory::MemoryManager> memory_manager_;
 
   FeatureManager feature_manager_;
   uint64_t max_timestamp_seen_ = 0;
+
+  // Memory management state
+  mutable std::mutex memory_stats_mutex_;
+  uint64_t last_cleanup_timestamp_ = 0;
+  size_t memory_pressure_threshold_ = 0; // Will be set from config
 
   std::string build_session_key(const LogEntry &raw_log) const;
 

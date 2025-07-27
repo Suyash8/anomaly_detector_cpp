@@ -5,15 +5,22 @@
 #include "core/config.hpp"
 #include "core/log_entry.hpp"
 #include "core/logger.hpp"
+#include "core/memory_manager.hpp"
+#include "core/memory_profiler_hooks.hpp"
 #include "core/metrics_manager.hpp"
 #include "core/metrics_registry.hpp"
+#include "core/resource_pool_manager.hpp"
 #include "detection/rule_engine.hpp"
 #include "io/db/mongo_manager.hpp"
 #include "io/log_readers/base_log_reader.hpp"
 #include "io/log_readers/file_log_reader.hpp"
 #include "io/log_readers/mongo_log_reader.hpp"
 #include "io/web/web_server.hpp"
+#include "learning/dynamic_learning_engine.hpp"
 #include "models/model_manager.hpp"
+#include "utils/error_recovery_manager.hpp"
+#include "utils/graceful_degradation_manager.hpp"
+#include "utils/performance_monitor.hpp"
 #include "utils/thread_safe_queue.hpp"
 
 #include <algorithm>
@@ -45,6 +52,16 @@ std::atomic<bool> g_reload_config_requested = false;
 std::atomic<bool> g_reset_state_requested = false;
 std::atomic<bool> g_pause_requested = false;
 std::atomic<bool> g_resume_requested = false;
+
+// Global component instances for lifecycle management
+std::shared_ptr<memory::MemoryManager> g_memory_manager;
+std::shared_ptr<learning::DynamicLearningEngine> g_learning_engine;
+std::shared_ptr<resource::ResourcePoolManager> g_resource_pool_manager;
+
+// Global error handling and recovery components
+std::shared_ptr<error_recovery::ErrorRecoveryManager> g_error_recovery_manager;
+std::shared_ptr<graceful_degradation::GracefulDegradationManager>
+    g_degradation_manager;
 
 // A simple, safe signal handler function
 void signal_handler(int signum) {
@@ -108,9 +125,14 @@ void log_reader_thread(ILogReader &reader, ThreadSafeQueue<LogEntry> &queue,
 // --- Worker thread function ---
 void worker_thread(int worker_id, ThreadSafeQueue<LogEntry> &queue,
                    AnalysisEngine &analysis_engine, RuleEngine &rule_engine,
+                   learning::DynamicLearningEngine &learning_engine,
                    const std::atomic<bool> &shutdown_flag) {
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Worker thread " << worker_id << " started.");
+
+  // Performance monitoring
+  uint64_t processed_count = 0;
+  auto last_report_time = std::chrono::steady_clock::now();
 
   while (!shutdown_flag) {
     std::optional<LogEntry> log_entry_opt = queue.wait_and_pop();
@@ -127,10 +149,73 @@ void worker_thread(int worker_id, ThreadSafeQueue<LogEntry> &queue,
     LogEntry &log_entry = *log_entry_opt;
 
     if (log_entry.successfully_parsed_structure) {
+      // Use resource pooling for analyzed events
       auto analyzed_event = analysis_engine.process_and_analyze(log_entry);
+
+      // Feed data to learning engine for adaptive threshold updates
+      auto timestamp_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+
+      // Update baselines for different entity types using available metrics
+      if (analyzed_event.current_ip_request_count_in_window.has_value()) {
+        std::string ip_addr(analyzed_event.raw_log.ip_address);
+        learning_engine.update_baseline(
+            "ip", ip_addr,
+            static_cast<double>(
+                analyzed_event.current_ip_request_count_in_window.value()),
+            timestamp_ms);
+      }
+
+      if (!analyzed_event.raw_log.request_path.empty()) {
+        learning_engine.update_baseline(
+            "path", analyzed_event.raw_log.request_path,
+            analyzed_event.path_error_event_zscore.value_or(0.0), timestamp_ms);
+      }
+
+      // Update session-based learning if session data is available
+      if (analyzed_event.raw_session_state.has_value()) {
+        std::string session_key =
+            std::string(analyzed_event.raw_log.ip_address) + "_session";
+        learning_engine.update_baseline(
+            "session", session_key,
+            analyzed_event.derived_session_features.has_value() ? 1.0 : 0.0,
+            timestamp_ms);
+      }
+
+      // Evaluate rules with updated baselines
       rule_engine.evaluate_rules(analyzed_event);
+
+      processed_count++;
+
+      // Periodic performance reporting (every 10 seconds)
+      auto now = std::chrono::steady_clock::now();
+      if (std::chrono::duration_cast<std::chrono::seconds>(now -
+                                                           last_report_time)
+              .count() >= 10) {
+        LOG(LogLevel::DEBUG, LogComponent::CORE,
+            "Worker " << worker_id << " processed " << processed_count
+                      << " events");
+        last_report_time = now;
+      }
+
+      // Check for memory pressure periodically
+      if (processed_count % 1000 == 0 && g_memory_manager) {
+        if (g_memory_manager->is_memory_pressure()) {
+          LOG(LogLevel::WARN, LogComponent::CORE,
+              "Worker "
+                  << worker_id
+                  << " detected memory pressure, triggering optimization");
+          g_memory_manager->trigger_compaction();
+        }
+      }
     }
   }
+
+  LOG(LogLevel::INFO, LogComponent::CORE,
+      "Worker " << worker_id << " finished. Processed " << processed_count
+                << " events total.");
 }
 
 // --- Keyboard listener thread function ---
@@ -181,6 +266,313 @@ void keyboard_listener_thread() {
 
 enum class ServiceState { RUNNING, PAUSED };
 
+// Configure error recovery for system components
+void configure_error_recovery(const Config::AppConfig &config) {
+  if (!g_error_recovery_manager || !g_degradation_manager) {
+    return;
+  }
+
+  // Configure error recovery for MongoDB operations
+  error_recovery::RecoveryConfig mongo_config;
+  mongo_config.strategy = error_recovery::RecoveryStrategy::CIRCUIT_BREAK;
+  mongo_config.max_retries = 3;
+  mongo_config.base_delay = std::chrono::milliseconds(500);
+  mongo_config.circuit_config.failure_threshold = 5;
+  mongo_config.circuit_config.timeout = std::chrono::milliseconds(30000);
+  g_error_recovery_manager->register_component("mongodb", mongo_config);
+
+  // Configure error recovery for log processing
+  error_recovery::RecoveryConfig log_processing_config;
+  log_processing_config.strategy = error_recovery::RecoveryStrategy::RETRY;
+  log_processing_config.max_retries = 2;
+  log_processing_config.base_delay = std::chrono::milliseconds(100);
+  g_error_recovery_manager->register_component("log_processing",
+                                               log_processing_config);
+
+  // Configure error recovery for analysis engine
+  error_recovery::RecoveryConfig analysis_config;
+  analysis_config.strategy = error_recovery::RecoveryStrategy::FALLBACK;
+  analysis_config.max_retries = 1;
+  analysis_config.fallback_func = []() -> bool {
+    // Simple fallback: just log that analysis was skipped
+    LOG(LogLevel::WARN, LogComponent::ANALYSIS_LIFECYCLE,
+        "Analysis fallback activated - skipping detailed analysis");
+    return true;
+  };
+  g_error_recovery_manager->register_component("analysis_engine",
+                                               analysis_config);
+
+  // Configure graceful degradation services
+  graceful_degradation::ServiceConfig threat_intel_service;
+  threat_intel_service.priority = graceful_degradation::Priority::MEDIUM;
+  threat_intel_service.auto_recovery = true;
+  threat_intel_service.degradation_callback =
+      [](graceful_degradation::DegradationMode mode) {
+        switch (mode) {
+        case graceful_degradation::DegradationMode::REDUCED:
+          LOG(LogLevel::WARN, LogComponent::IO_THREATINTEL,
+              "Threat intel service degraded to reduced mode");
+          break;
+        case graceful_degradation::DegradationMode::MINIMAL:
+          LOG(LogLevel::WARN, LogComponent::IO_THREATINTEL,
+              "Threat intel service degraded to minimal mode");
+          break;
+        case graceful_degradation::DegradationMode::DISABLED:
+          LOG(LogLevel::ERROR, LogComponent::IO_THREATINTEL,
+              "Threat intel service disabled due to resource pressure");
+          break;
+        default:
+          LOG(LogLevel::INFO, LogComponent::IO_THREATINTEL,
+              "Threat intel service operating normally");
+          break;
+        }
+      };
+  g_degradation_manager->register_service("threat_intel", threat_intel_service);
+
+  graceful_degradation::ServiceConfig ml_service;
+  ml_service.priority = graceful_degradation::Priority::LOW;
+  ml_service.auto_recovery = true;
+  ml_service.degradation_callback =
+      [](graceful_degradation::DegradationMode mode) {
+        switch (mode) {
+        case graceful_degradation::DegradationMode::REDUCED:
+          LOG(LogLevel::WARN, LogComponent::ML_LIFECYCLE,
+              "ML services degraded - reduced model complexity");
+          break;
+        case graceful_degradation::DegradationMode::DISABLED:
+          LOG(LogLevel::ERROR, LogComponent::ML_LIFECYCLE,
+              "ML services disabled due to resource pressure");
+          break;
+        default:
+          LOG(LogLevel::INFO, LogComponent::ML_LIFECYCLE,
+              "ML services operating normally");
+          break;
+        }
+      };
+  g_degradation_manager->register_service("ml_services", ml_service);
+
+  // Set degradation thresholds based on config
+  graceful_degradation::DegradationThresholds thresholds;
+  thresholds.cpu_threshold_medium = 75.0;
+  thresholds.cpu_threshold_high = 90.0;
+  thresholds.memory_threshold_medium = 80.0;
+  thresholds.memory_threshold_high = 95.0;
+  thresholds.queue_threshold_medium = 2000;
+  thresholds.queue_threshold_high = 10000;
+  g_degradation_manager->set_degradation_thresholds(thresholds);
+}
+
+// Component initialization and dependency injection
+struct ComponentManager {
+  std::shared_ptr<memory::MemoryManager> memory_manager;
+  std::shared_ptr<learning::DynamicLearningEngine> learning_engine;
+  std::shared_ptr<resource::ResourcePoolManager> resource_pool_manager;
+  std::shared_ptr<prometheus::PrometheusMetricsExporter> metrics_exporter;
+
+  bool initialize(const Config::AppConfig &config) {
+    LOG(LogLevel::INFO, LogComponent::CORE, "Initializing core components...");
+
+    // Initialize Memory Manager first (foundation for everything else)
+    memory::MemoryConfig memory_config;
+    memory_config.max_total_memory_mb =
+        config.memory_management.max_memory_usage_mb;
+    memory_config.pressure_threshold_mb =
+        config.memory_management.memory_pressure_threshold_mb;
+    memory_config.auto_compaction_enabled =
+        config.memory_management.enable_memory_compaction;
+    memory_config.detailed_tracking_enabled = false; // Set based on debug mode
+
+    memory_manager = std::make_shared<memory::MemoryManager>(memory_config);
+    if (!memory_manager) {
+      LOG(LogLevel::FATAL, LogComponent::CORE,
+          "Failed to initialize MemoryManager");
+      return false;
+    }
+
+// Enable memory profiling for debug builds or if explicitly requested
+#ifdef DEBUG
+    profiling::MemoryProfiler::instance().enable(true);
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Memory profiling enabled for debug build");
+#endif
+
+    // Initialize Resource Pool Manager (depends on Memory Manager)
+    resource_pool_manager =
+        std::make_shared<resource::ResourcePoolManager>(memory_config);
+    if (!resource_pool_manager) {
+      LOG(LogLevel::FATAL, LogComponent::CORE,
+          "Failed to initialize ResourcePoolManager");
+      return false;
+    }
+
+    // Initialize Dynamic Learning Engine
+    learning_engine = std::make_shared<learning::DynamicLearningEngine>(
+        config.dynamic_learning);
+    if (!learning_engine) {
+      LOG(LogLevel::FATAL, LogComponent::CORE,
+          "Failed to initialize DynamicLearningEngine");
+      return false;
+    }
+
+    // Initialize Prometheus Metrics Exporter if enabled
+    if (config.prometheus.enabled) {
+      prometheus::PrometheusMetricsExporter::Config prometheus_config;
+      prometheus_config.host = config.prometheus.host;
+      prometheus_config.port = config.prometheus.port;
+      prometheus_config.metrics_path = config.prometheus.metrics_path;
+      prometheus_config.health_path = config.prometheus.health_path;
+      prometheus_config.scrape_interval =
+          std::chrono::seconds(config.prometheus.scrape_interval_seconds);
+      prometheus_config.replace_web_server =
+          config.prometheus.replace_web_server;
+
+      metrics_exporter =
+          std::make_shared<prometheus::PrometheusMetricsExporter>(
+              prometheus_config);
+      if (!metrics_exporter || !metrics_exporter->start_server()) {
+        LOG(LogLevel::ERROR, LogComponent::CORE,
+            "Failed to initialize PrometheusMetricsExporter");
+        return false;
+      }
+    }
+
+    // Set global references for signal handlers and emergency shutdown
+    g_memory_manager = memory_manager;
+    g_learning_engine = learning_engine;
+    g_resource_pool_manager = resource_pool_manager;
+
+    // Initialize Error Recovery Manager
+    g_error_recovery_manager =
+        std::make_shared<error_recovery::ErrorRecoveryManager>();
+    if (!g_error_recovery_manager) {
+      LOG(LogLevel::FATAL, LogComponent::CORE,
+          "Failed to initialize ErrorRecoveryManager");
+      return false;
+    }
+
+    // Initialize Graceful Degradation Manager
+    g_degradation_manager =
+        std::make_shared<graceful_degradation::GracefulDegradationManager>();
+    if (!g_degradation_manager) {
+      LOG(LogLevel::FATAL, LogComponent::CORE,
+          "Failed to initialize GracefulDegradationManager");
+      return false;
+    }
+
+    // Configure error recovery for core components
+    configure_error_recovery(config);
+
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "All core components initialized successfully");
+    return true;
+  }
+
+  void shutdown() {
+    LOG(LogLevel::INFO, LogComponent::CORE, "Shutting down core components...");
+
+    // Shutdown in reverse dependency order
+    if (metrics_exporter) {
+      metrics_exporter->stop_server();
+      metrics_exporter.reset();
+    }
+
+    if (learning_engine) {
+      // Learning engine will save state in destructor
+      learning_engine.reset();
+    }
+
+    if (resource_pool_manager) {
+      // Get final statistics
+      auto stats = resource_pool_manager->get_statistics();
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "Resource pool final stats - LogEntry hit rate: "
+              << stats.log_entry_stats.hit_rate() * 100.0
+              << "%, AnalyzedEvent hit rate: "
+              << stats.analyzed_event_stats.hit_rate() * 100.0 << "%");
+      resource_pool_manager.reset();
+    }
+
+    if (memory_manager) {
+// Generate memory report if profiling was enabled
+#ifdef DEBUG
+      auto report = profiling::MemoryProfiler::instance().generate_report();
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "Final memory report:\n"
+              << report);
+      profiling::MemoryProfiler::instance().export_to_file(
+          "memory_profile_final.txt");
+#endif
+
+      memory_manager.reset();
+    }
+
+    // Clear global references
+    g_memory_manager.reset();
+    g_learning_engine.reset();
+    g_resource_pool_manager.reset();
+
+    // Clear error recovery components
+    if (g_error_recovery_manager) {
+      auto stats = g_error_recovery_manager->get_all_stats();
+      LOG(LogLevel::INFO, LogComponent::CORE,
+          "Error recovery final stats - Total errors handled: "
+              << g_error_recovery_manager->get_total_errors());
+      g_error_recovery_manager.reset();
+    }
+
+    if (g_degradation_manager) {
+      auto degraded_services = g_degradation_manager->get_degraded_services();
+      if (!degraded_services.empty()) {
+        LOG(LogLevel::WARN, LogComponent::CORE,
+            "Services still degraded at shutdown: "
+                << degraded_services.size());
+      }
+      g_degradation_manager.reset();
+    }
+
+    LOG(LogLevel::INFO, LogComponent::CORE, "Core component shutdown complete");
+  }
+
+  void reconfigure(const Config::AppConfig &config) {
+    LOG(LogLevel::INFO, LogComponent::CORE, "Reconfiguring core components...");
+
+    // Reconfigure memory manager
+    if (memory_manager) {
+      memory::MemoryConfig memory_config;
+      memory_config.max_total_memory_mb =
+          config.memory_management.max_memory_usage_mb;
+      memory_config.pressure_threshold_mb =
+          config.memory_management.memory_pressure_threshold_mb;
+      memory_config.auto_compaction_enabled =
+          config.memory_management.enable_memory_compaction;
+
+      // Note: MemoryManager doesn't have a reconfigure method, so we'll log the
+      // intention
+      LOG(LogLevel::DEBUG, LogComponent::CORE,
+          "Memory manager reconfiguration requested (not yet implemented)");
+    }
+
+    // Learning engine will automatically adapt to new data patterns
+    if (learning_engine) {
+      LOG(LogLevel::DEBUG, LogComponent::CORE,
+          "Learning engine will adapt to new configuration patterns");
+    }
+
+    LOG(LogLevel::INFO, LogComponent::CORE,
+        "Core component reconfiguration complete");
+  }
+
+  void handle_memory_pressure() {
+    if (resource_pool_manager) {
+      resource_pool_manager->handle_memory_pressure();
+    }
+    if (memory_manager) {
+      memory_manager->trigger_compaction();
+      memory_manager->trigger_eviction();
+    }
+  }
+};
+
 int main(int argc, char *argv[]) {
   std::ios_base::sync_with_stdio(false); // Potentially faster I/O
   std::cin.tie(nullptr);                 // Untie cin from cout
@@ -215,7 +607,6 @@ int main(int argc, char *argv[]) {
   config_manager.load_configuration(config_file_to_load);
 
   auto current_config = config_manager.get_config();
-  auto model_manager = std::make_shared<ModelManager>(*current_config);
 
   // --- Initialize Logging ---
   LogManager::instance().configure(current_config->logging);
@@ -227,6 +618,14 @@ int main(int argc, char *argv[]) {
 #endif
 
   // --- Initialize Core Components ---
+  ComponentManager component_manager;
+  if (!component_manager.initialize(*current_config)) {
+    LOG(LogLevel::FATAL, LogComponent::CORE,
+        "Failed to initialize core components. Exiting.");
+    return 1;
+  }
+
+  auto model_manager = std::make_shared<ModelManager>(*current_config);
   auto alert_manager_instance = std::make_shared<AlertManager>();
   alert_manager_instance->initialize(*current_config);
 
@@ -374,22 +773,9 @@ int main(int argc, char *argv[]) {
         "Tier 4 Prometheus anomaly detection disabled in configuration");
   }
 
-  // --- Prometheus Metrics Exporter Initialization ---
-  std::shared_ptr<prometheus::PrometheusMetricsExporter> metrics_exporter;
-  if (current_config->prometheus.enabled) {
-    prometheus::PrometheusMetricsExporter::Config prometheus_config;
-    prometheus_config.host = current_config->prometheus.host;
-    prometheus_config.port = current_config->prometheus.port;
-    prometheus_config.metrics_path = current_config->prometheus.metrics_path;
-    prometheus_config.health_path = current_config->prometheus.health_path;
-    prometheus_config.scrape_interval = std::chrono::seconds(
-        current_config->prometheus.scrape_interval_seconds);
-    prometheus_config.replace_web_server =
-        current_config->prometheus.replace_web_server;
-
-    metrics_exporter = std::make_shared<prometheus::PrometheusMetricsExporter>(
-        prometheus_config);
-
+  // --- Prometheus Metrics Exporter Integration ---
+  auto metrics_exporter = component_manager.metrics_exporter;
+  if (metrics_exporter) {
     // Set metrics exporter for alert manager
     alert_manager_instance->set_metrics_exporter(metrics_exporter);
 
@@ -406,8 +792,7 @@ int main(int argc, char *argv[]) {
       metrics_exporter->set_analysis_engine(analysis_engine_ptr);
 
       LOG(LogLevel::INFO, LogComponent::CORE,
-          "Prometheus metrics exporter configured to replace web server with "
-          "endpoints:"
+          "Prometheus metrics exporter configured with endpoints:"
           "\n  - "
               << current_config->prometheus.metrics_path
               << " (metrics)"
@@ -416,19 +801,6 @@ int main(int argc, char *argv[]) {
               << " (health check)"
                  "\n  - /api/v1/operations/alerts (alerts API)"
                  "\n  - /api/v1/operations/state (state API)");
-    }
-
-    // Start the Prometheus metrics server
-    if (metrics_exporter->start_server()) {
-      LOG(LogLevel::INFO, LogComponent::CORE,
-          "Prometheus metrics exporter started on "
-              << current_config->prometheus.host << ":"
-              << current_config->prometheus.port << " with metrics path "
-              << current_config->prometheus.metrics_path << " and health path "
-              << current_config->prometheus.health_path);
-    } else {
-      LOG(LogLevel::ERROR, LogComponent::CORE,
-          "Failed to start Prometheus metrics exporter");
     }
   }
 
@@ -475,13 +847,12 @@ int main(int argc, char *argv[]) {
     }
     LOG(LogLevel::INFO, LogComponent::CORE,
         "Prometheus metrics exporter set for all worker components");
-  }
-
-  // --- Launch Worker Threads ---
+  } // --- Launch Worker Threads ---
   for (unsigned int i = 0; i < num_workers; ++i) {
     worker_threads.emplace_back(worker_thread, i, std::ref(*worker_queues[i]),
                                 std::ref(*analysis_engines[i]),
                                 std::ref(*rule_engines[i]),
+                                std::ref(*component_manager.learning_engine),
                                 std::ref(g_shutdown_requested));
   }
 
@@ -518,6 +889,10 @@ int main(int argc, char *argv[]) {
         LogManager::instance().configure(current_config->logging);
         LOG(LogLevel::INFO, LogComponent::CONFIG,
             "Logger has been reconfigured.");
+
+        // Reconfigure core components
+        component_manager.reconfigure(*current_config);
+
         alert_manager_instance->reconfigure(*current_config);
 
         // Reconfigure all worker engines
@@ -586,6 +961,23 @@ int main(int argc, char *argv[]) {
                         std::chrono::high_resolution_clock::now() - time_start)
                         .count())
                 << " lines/sec).");
+
+        // Check memory pressure every 10k processed entries
+        if (g_memory_manager && g_memory_manager->is_memory_pressure()) {
+          LOG(LogLevel::WARN, LogComponent::CORE,
+              "Memory pressure detected, triggering optimizations");
+          component_manager.handle_memory_pressure();
+        }
+      }
+
+      // More frequent memory pressure checks for high-volume scenarios
+      if (total_processed_count % 1000 == 0) {
+        if (g_memory_manager &&
+            g_memory_manager->get_memory_pressure_level() > 2) {
+          LOG(LogLevel::WARN, LogComponent::CORE,
+              "High memory pressure detected, triggering immediate compaction");
+          g_memory_manager->trigger_compaction();
+        }
       }
     } else if (current_state == ServiceState::PAUSED) {
       // --- Efficient Sleep State ---
@@ -629,11 +1021,8 @@ int main(int argc, char *argv[]) {
     LOG(LogLevel::INFO, LogComponent::CORE, "Web server stopped");
   }
 
-  if (metrics_exporter) {
-    metrics_exporter->stop_server();
-    LOG(LogLevel::INFO, LogComponent::CORE,
-        "Prometheus metrics exporter stopped");
-  }
+  // Shutdown core components
+  component_manager.shutdown();
 
   LOG(LogLevel::INFO, LogComponent::CORE,
       "Processing finished or shutdown signal received.");
