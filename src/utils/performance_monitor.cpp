@@ -12,10 +12,36 @@ namespace AnomalyDetector {
 
 // Thread-local storage for profiler call stack
 thread_local std::vector<std::string> PerformanceProfiler::call_stack_;
-thread_local std::vector<std::chrono::high_resolution_clock::time_point> PerformanceProfiler::timing_stack_;
+thread_local std::vector<std::chrono::high_resolution_clock::time_point>
+    PerformanceProfiler::timing_stack_;
 
 // PerformanceMetrics implementation
-PerformanceMetrics::PerformanceMetrics(const PerformanceMetrics& other) {
+PerformanceMetrics::PerformanceMetrics(const PerformanceMetrics &other) {
+  // Copy atomic values
+  total_processing_time_ns = other.total_processing_time_ns.load();
+  avg_processing_time_ns = other.avg_processing_time_ns.load();
+  min_processing_time_ns = other.min_processing_time_ns.load();
+  max_processing_time_ns = other.max_processing_time_ns.load();
+  requests_per_second = other.requests_per_second.load();
+  total_requests = other.total_requests.load();
+  completed_requests = other.completed_requests.load();
+  failed_requests = other.failed_requests.load();
+  cpu_usage_percent = other.cpu_usage_percent.load();
+  memory_usage_bytes = other.memory_usage_bytes.load();
+  queue_depth = other.queue_depth.load();
+  active_threads = other.active_threads.load();
+
+  // Copy latency data
+  std::lock_guard<std::mutex> lock(other.latency_mutex);
+  latency_samples = other.latency_samples;
+  p50_latency_ns = other.p50_latency_ns;
+  p95_latency_ns = other.p95_latency_ns;
+  p99_latency_ns = other.p99_latency_ns;
+}
+
+PerformanceMetrics &
+PerformanceMetrics::operator=(const PerformanceMetrics &other) {
+  if (this != &other) {
     // Copy atomic values
     total_processing_time_ns = other.total_processing_time_ns.load();
     avg_processing_time_ns = other.avg_processing_time_ns.load();
@@ -29,40 +55,16 @@ PerformanceMetrics::PerformanceMetrics(const PerformanceMetrics& other) {
     memory_usage_bytes = other.memory_usage_bytes.load();
     queue_depth = other.queue_depth.load();
     active_threads = other.active_threads.load();
-    
+
     // Copy latency data
-    std::lock_guard<std::mutex> lock(other.latency_mutex);
+    std::lock_guard<std::mutex> lock1(latency_mutex);
+    std::lock_guard<std::mutex> lock2(other.latency_mutex);
     latency_samples = other.latency_samples;
     p50_latency_ns = other.p50_latency_ns;
     p95_latency_ns = other.p95_latency_ns;
     p99_latency_ns = other.p99_latency_ns;
-}
-
-PerformanceMetrics& PerformanceMetrics::operator=(const PerformanceMetrics& other) {
-    if (this != &other) {
-        // Copy atomic values
-        total_processing_time_ns = other.total_processing_time_ns.load();
-        avg_processing_time_ns = other.avg_processing_time_ns.load();
-        min_processing_time_ns = other.min_processing_time_ns.load();
-        max_processing_time_ns = other.max_processing_time_ns.load();
-        requests_per_second = other.requests_per_second.load();
-        total_requests = other.total_requests.load();
-        completed_requests = other.completed_requests.load();
-        failed_requests = other.failed_requests.load();
-        cpu_usage_percent = other.cpu_usage_percent.load();
-        memory_usage_bytes = other.memory_usage_bytes.load();
-        queue_depth = other.queue_depth.load();
-        active_threads = other.active_threads.load();
-        
-        // Copy latency data
-        std::lock_guard<std::mutex> lock1(latency_mutex);
-        std::lock_guard<std::mutex> lock2(other.latency_mutex);
-        latency_samples = other.latency_samples;
-        p50_latency_ns = other.p50_latency_ns;
-        p95_latency_ns = other.p95_latency_ns;
-        p99_latency_ns = other.p99_latency_ns;
-    }
-    return *this;
+  }
+  return *this;
 }
 
 void PerformanceMetrics::update_latency_percentiles() {

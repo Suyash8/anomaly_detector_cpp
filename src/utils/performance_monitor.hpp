@@ -21,40 +21,40 @@ class PerformanceProfiler;
 
 // Performance metrics structure
 struct PerformanceMetrics {
-    // Timing metrics
-    std::atomic<uint64_t> total_processing_time_ns{0};
-    std::atomic<uint64_t> avg_processing_time_ns{0};
-    std::atomic<uint64_t> min_processing_time_ns{UINT64_MAX};
-    std::atomic<uint64_t> max_processing_time_ns{0};
-    
-    // Throughput metrics
-    std::atomic<uint64_t> requests_per_second{0};
-    std::atomic<uint64_t> total_requests{0};
-    std::atomic<uint64_t> completed_requests{0};
-    std::atomic<uint64_t> failed_requests{0};
-    
-    // Resource metrics
-    std::atomic<double> cpu_usage_percent{0.0};
-    std::atomic<uint64_t> memory_usage_bytes{0};
-    std::atomic<uint64_t> queue_depth{0};
-    std::atomic<uint64_t> active_threads{0};
-    
-    // Latency percentiles (protected by mutex)
-    mutable std::mutex latency_mutex;
-    std::vector<uint64_t> latency_samples;
-    double p50_latency_ns = 0.0;
-    double p95_latency_ns = 0.0;
-    double p99_latency_ns = 0.0;
-    
-    // Copy constructor and assignment operator
-    PerformanceMetrics() = default;
-    PerformanceMetrics(const PerformanceMetrics& other);
-    PerformanceMetrics& operator=(const PerformanceMetrics& other);
-    
-    void update_latency_percentiles();
-    void add_latency_sample(uint64_t latency_ns);
-    void reset();
-};// Performance thresholds for load shedding
+  // Timing metrics
+  std::atomic<uint64_t> total_processing_time_ns{0};
+  std::atomic<uint64_t> avg_processing_time_ns{0};
+  std::atomic<uint64_t> min_processing_time_ns{UINT64_MAX};
+  std::atomic<uint64_t> max_processing_time_ns{0};
+
+  // Throughput metrics
+  std::atomic<uint64_t> requests_per_second{0};
+  std::atomic<uint64_t> total_requests{0};
+  std::atomic<uint64_t> completed_requests{0};
+  std::atomic<uint64_t> failed_requests{0};
+
+  // Resource metrics
+  std::atomic<double> cpu_usage_percent{0.0};
+  std::atomic<uint64_t> memory_usage_bytes{0};
+  std::atomic<uint64_t> queue_depth{0};
+  std::atomic<uint64_t> active_threads{0};
+
+  // Latency percentiles (protected by mutex)
+  mutable std::mutex latency_mutex;
+  std::vector<uint64_t> latency_samples;
+  double p50_latency_ns = 0.0;
+  double p95_latency_ns = 0.0;
+  double p99_latency_ns = 0.0;
+
+  // Copy constructor and assignment operator
+  PerformanceMetrics() = default;
+  PerformanceMetrics(const PerformanceMetrics &other);
+  PerformanceMetrics &operator=(const PerformanceMetrics &other);
+
+  void update_latency_percentiles();
+  void add_latency_sample(uint64_t latency_ns);
+  void reset();
+}; // Performance thresholds for load shedding
 struct PerformanceThresholds {
   double max_cpu_usage_percent = 80.0;
   uint64_t max_memory_usage_bytes = 1024 * 1024 * 1024; // 1GB

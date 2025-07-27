@@ -347,6 +347,83 @@ struct MemoryManagementConfig {
   uint32_t state_object_ttl_seconds = 3600;
 };
 
+struct PerformanceMonitoringConfig {
+  bool enabled = true;
+  bool enable_profiling = false;
+  bool enable_load_shedding = true;
+
+  // Metrics collection settings
+  uint32_t metrics_collection_interval_ms = 1000;
+  uint32_t max_latency_samples_per_component = 10000;
+
+  // Performance thresholds for load shedding
+  double max_cpu_usage_percent = 80.0;
+  uint64_t max_memory_usage_bytes = 1073741824; // 1GB
+  uint64_t max_queue_depth = 10000;
+  uint64_t max_avg_latency_ms = 1000;
+  double max_error_rate_percent = 5.0;
+
+  // Load shedding configuration
+  double moderate_load_shed_percentage = 10.0;
+  double high_load_shed_percentage = 25.0;
+  double critical_load_shed_percentage = 50.0;
+
+  // Monitoring loop settings
+  uint32_t monitoring_loop_interval_seconds = 5;
+
+  // Profiling settings
+  bool enable_function_profiling = false;
+  uint32_t max_profile_samples_per_function = 1000;
+  uint32_t profile_report_interval_seconds = 300; // 5 minutes
+
+  // Performance reporting
+  bool enable_performance_reports = true;
+  std::string performance_report_path = "data/performance_report.csv";
+  uint32_t performance_report_interval_seconds = 60;
+};
+
+struct ErrorHandlingConfig {
+  bool enabled = true;
+
+  // Circuit breaker configuration
+  bool enable_circuit_breaker = true;
+  uint32_t circuit_breaker_failure_threshold = 5;
+  uint32_t circuit_breaker_timeout_ms = 5000;
+  uint32_t circuit_breaker_recovery_timeout_ms = 30000;
+
+  // Error recovery settings
+  bool enable_error_recovery = true;
+  uint32_t max_retry_attempts = 3;
+  uint32_t initial_retry_delay_ms = 100;
+  uint32_t max_retry_delay_ms = 5000;
+  double retry_backoff_multiplier = 2.0;
+
+  // Graceful degradation settings
+  bool enable_graceful_degradation = true;
+  double cpu_threshold_for_degradation = 85.0;
+  uint64_t memory_threshold_for_degradation_mb = 900;
+  uint64_t queue_depth_threshold_for_degradation = 15000;
+  double error_rate_threshold_for_degradation = 10.0;
+
+  // Component-specific recovery strategies
+  std::string default_recovery_strategy =
+      "RETRY"; // RETRY, CIRCUIT_BREAK, FALLBACK, FAIL_FAST
+  std::string prometheus_recovery_strategy = "CIRCUIT_BREAK";
+  std::string database_recovery_strategy = "RETRY";
+  std::string file_io_recovery_strategy = "FALLBACK";
+  std::string network_recovery_strategy = "CIRCUIT_BREAK";
+
+  // Error rate limiting
+  bool enable_error_rate_limiting = true;
+  uint32_t max_errors_per_minute = 100;
+  uint32_t error_burst_limit = 10;
+
+  // Recovery monitoring
+  uint32_t recovery_statistics_interval_seconds = 60;
+  bool log_recovery_attempts = true;
+  std::string recovery_log_level = "INFO";
+};
+
 struct AppConfig {
   std::string log_source_type = "mongodb";
   std::string log_input_path = "data/sample_log.txt";
@@ -381,6 +458,8 @@ struct AppConfig {
   DynamicLearningConfig dynamic_learning;
   Tier4Config tier4;
   MemoryManagementConfig memory_management;
+  PerformanceMonitoringConfig performance_monitoring;
+  ErrorHandlingConfig error_handling;
 
   bool ml_data_collection_enabled = false;
   std::string ml_data_collection_path = "data/training_features.csv";
@@ -399,6 +478,11 @@ bool validate_tier4_config(const Tier4Config &config,
                            std::vector<std::string> &errors);
 bool validate_memory_management_config(const MemoryManagementConfig &config,
                                        std::vector<std::string> &errors);
+bool validate_performance_monitoring_config(
+    const PerformanceMonitoringConfig &config,
+    std::vector<std::string> &errors);
+bool validate_error_handling_config(const ErrorHandlingConfig &config,
+                                    std::vector<std::string> &errors);
 bool validate_app_config(const AppConfig &config,
                          std::vector<std::string> &errors);
 
