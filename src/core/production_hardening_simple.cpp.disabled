@@ -1,0 +1,78 @@
+#include "production_hardening.hpp"
+
+namespace core {
+
+// ProductionHardening - Minimal stubs
+ProductionHardening::ProductionHardening(
+    prometheus::PrometheusMetricsExporter *) {}
+ProductionHardening::~ProductionHardening() = default;
+
+void ProductionHardening::register_alert_callback(
+    std::function<void(const MemoryAlert &)>) {}
+void ProductionHardening::register_auto_response(
+    MemoryAlert::Type, std::function<bool(const MemoryAlert &)>) {}
+void ProductionHardening::start_monitoring() {}
+void ProductionHardening::stop_monitoring() {}
+void ProductionHardening::update_memory_metrics(const MemoryMetrics &) {}
+ProductionHardening::MonitoringStats
+ProductionHardening::get_monitoring_stats() const {
+  return {};
+}
+
+void ProductionHardening::trigger_garbage_collection() {}
+void ProductionHardening::trigger_memory_compaction() {}
+void ProductionHardening::trigger_cache_cleanup() {}
+void ProductionHardening::enable_memory_pressure_mode() {}
+void ProductionHardening::disable_memory_pressure_mode() {}
+
+// MemoryDebugger - Minimal stubs
+MemoryDebugger::MemoryDebugger() = default;
+MemoryDebugger::~MemoryDebugger() = default;
+
+void MemoryDebugger::track_allocation(void *, size_t, const std::string &,
+                                      const std::string &) {}
+void MemoryDebugger::track_deallocation(void *) {}
+MemoryDebugger::HeapAnalysis MemoryDebugger::analyze_heap() const { return {}; }
+std::vector<MemoryDebugger::PotentialLeak>
+MemoryDebugger::find_potential_leaks(std::chrono::seconds) const {
+  return {};
+}
+std::vector<MemoryDebugger::AllocationPattern>
+MemoryDebugger::detect_allocation_patterns() const {
+  return {};
+}
+
+// GrafanaDashboardGenerator - Minimal stubs
+GrafanaDashboardGenerator::GrafanaDashboardGenerator() = default;
+GrafanaDashboardGenerator::~GrafanaDashboardGenerator() = default;
+
+std::string GrafanaDashboardGenerator::generate_memory_optimization_dashboard(
+    const DashboardConfig &) const {
+  return "{}"; // Empty JSON
+}
+
+std::string GrafanaDashboardGenerator::generate_prometheus_alert_rules() const {
+  return ""; // Empty string
+}
+
+// ABTestingFramework - Minimal stubs
+ABTestingFramework::ABTestingFramework() = default;
+ABTestingFramework::~ABTestingFramework() = default;
+
+void ABTestingFramework::start_test(const TestConfig &) {}
+void ABTestingFramework::stop_test(const std::string &) {}
+bool ABTestingFramework::is_test_active(const std::string &) const {
+  return false;
+}
+ABTestingFramework::TestVariant
+ABTestingFramework::assign_variant(const std::string &, const std::string &) {
+  return TestVariant::CONTROL;
+}
+void ABTestingFramework::record_metric(const std::string &, TestVariant,
+                                       const std::string &, double) {}
+std::vector<ABTestingFramework::CompletedTest>
+ABTestingFramework::get_completed_tests() const {
+  return {};
+}
+
+} // namespace core

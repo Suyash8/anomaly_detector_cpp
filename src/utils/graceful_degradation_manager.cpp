@@ -3,14 +3,15 @@
 namespace graceful_degradation {
 
 GracefulDegradationManager::GracefulDegradationManager() {
-    last_evaluation_ = std::chrono::system_clock::now();
-    
-    // Initialize with default metrics
-    ResourceMetrics default_metrics;
-    default_metrics.timestamp = std::chrono::system_clock::now();
-    std::lock_guard<std::mutex> lock(metrics_mutex_);
-    current_metrics_ = default_metrics;
-}void GracefulDegradationManager::register_service(
+  last_evaluation_ = std::chrono::system_clock::now();
+
+  // Initialize with default metrics
+  ResourceMetrics default_metrics;
+  default_metrics.timestamp = std::chrono::system_clock::now();
+  std::lock_guard<std::mutex> lock(metrics_mutex_);
+  current_metrics_ = default_metrics;
+}
+void GracefulDegradationManager::register_service(
     const std::string &service_name, const ServiceConfig &config) {
   std::lock_guard<std::mutex> lock(services_mutex_);
 
@@ -68,12 +69,13 @@ void GracefulDegradationManager::request_recovery(
 }
 
 void GracefulDegradationManager::evaluate_degradation_needs() {
-    std::lock_guard<std::mutex> lock(services_mutex_);
-    ResourceMetrics metrics;
-    {
-        std::lock_guard<std::mutex> metrics_lock(metrics_mutex_);
-        metrics = current_metrics_;
-    }  for (auto &[service_name, service] : services_) {
+  std::lock_guard<std::mutex> lock(services_mutex_);
+  ResourceMetrics metrics;
+  {
+    std::lock_guard<std::mutex> metrics_lock(metrics_mutex_);
+    metrics = current_metrics_;
+  }
+  for (auto &[service_name, service] : services_) {
     DegradationMode required_mode =
         calculate_required_mode(metrics, service.config.priority);
 
@@ -145,9 +147,10 @@ size_t GracefulDegradationManager::get_total_degraded_services() const {
 }
 
 ResourceMetrics GracefulDegradationManager::get_current_metrics() const {
-    std::lock_guard<std::mutex> lock(metrics_mutex_);
-    return current_metrics_;
-}void GracefulDegradationManager::degrade_by_priority(
+  std::lock_guard<std::mutex> lock(metrics_mutex_);
+  return current_metrics_;
+}
+void GracefulDegradationManager::degrade_by_priority(
     Priority min_priority_to_degrade) {
   std::lock_guard<std::mutex> lock(services_mutex_);
 

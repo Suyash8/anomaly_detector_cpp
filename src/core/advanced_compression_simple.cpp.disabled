@@ -1,0 +1,199 @@
+#include "advanced_compression.hpp"
+#include <algorithm>
+#include <cstring>
+
+namespace core {
+
+// =============================================================================
+// CompressionEngine - Simple stub implementation
+// =============================================================================
+
+CompressionEngine::CompressionEngine() = default;
+CompressionEngine::~CompressionEngine() = default;
+
+std::vector<uint8_t>
+CompressionEngine::compress(const void *data, size_t size,
+                            CompressionAlgorithm /*algorithm*/,
+                            CompressionLevel /*level*/) {
+  // Simple stub - just copy data
+  const uint8_t *bytes = static_cast<const uint8_t *>(data);
+  return std::vector<uint8_t>(bytes, bytes + size);
+}
+
+std::vector<uint8_t>
+CompressionEngine::decompress(const void *compressed_data,
+                              size_t compressed_size,
+                              CompressionAlgorithm /*algorithm*/) {
+  // Simple stub - just copy data
+  const uint8_t *bytes = static_cast<const uint8_t *>(compressed_data);
+  return std::vector<uint8_t>(bytes, bytes + compressed_size);
+}
+
+std::pair<std::vector<uint8_t>, CompressionMetadata>
+CompressionEngine::compress_with_metadata(const void *data, size_t size,
+                                          CompressionAlgorithm algorithm,
+                                          CompressionLevel level) {
+  auto compressed = compress(data, size, algorithm, level);
+  CompressionMetadata metadata;
+  metadata.algorithm = algorithm;
+  metadata.level = level;
+  metadata.original_size = size;
+  metadata.compressed_size = compressed.size();
+  metadata.checksum = 0; // stub
+  return {std::move(compressed), metadata};
+}
+
+CompressionResult
+CompressionEngine::compress_with_validation(const void *data, size_t size,
+                                            CompressionAlgorithm algorithm,
+                                            CompressionLevel level) {
+  CompressionResult result;
+  result.success = true;
+  result.compressed_data = compress(data, size, algorithm, level);
+  result.metadata.algorithm = algorithm;
+  result.metadata.level = level;
+  result.metadata.original_size = size;
+  result.metadata.compressed_size = result.compressed_data.size();
+  result.metadata.checksum = 0; // stub
+  return result;
+}
+
+CompressionResult CompressionEngine::decompress_with_validation(
+    const void *compressed_data, size_t compressed_size,
+    const CompressionMetadata &metadata) {
+  CompressionResult result;
+  result.success = true;
+  result.compressed_data =
+      decompress(compressed_data, compressed_size, metadata.algorithm);
+  result.metadata = metadata;
+  return result;
+}
+
+CompressionStats CompressionEngine::get_stats() const {
+  return CompressionStats{}; // Empty stub
+}
+
+void CompressionEngine::reset_stats() {
+  // Stub
+}
+
+bool CompressionEngine::validate_compression(
+    const void * /*original*/, size_t /*original_size*/,
+    const void * /*compressed*/, size_t /*compressed_size*/,
+    CompressionAlgorithm /*algorithm*/) {
+  return true; // Always valid in stub
+}
+
+// =============================================================================
+// BackgroundCompressor - Simple stub implementation
+// =============================================================================
+
+BackgroundCompressor::BackgroundCompressor(CompressionEngine *engine)
+    : compression_engine_(engine) {}
+
+BackgroundCompressor::~BackgroundCompressor() { stop(); }
+
+void BackgroundCompressor::configure(const Config & /*config*/) {
+  // Stub
+}
+
+uint64_t BackgroundCompressor::register_data(
+    const std::string & /*identifier*/,
+    std::shared_ptr<std::vector<uint8_t>> data) {
+  std::lock_guard<std::mutex> lock(entries_mutex_);
+  uint64_t handle = next_handle_++;
+  auto entry = std::make_unique<DataEntry>();
+  entry->original_data = data;
+  entry->last_accessed = std::chrono::steady_clock::now();
+  entry->is_compressed = false;
+  data_entries_[handle] = std::move(entry);
+  return handle;
+}
+
+void BackgroundCompressor::mark_accessed(uint64_t handle) {
+  std::lock_guard<std::mutex> lock(entries_mutex_);
+  auto it = data_entries_.find(handle);
+  if (it != data_entries_.end()) {
+    it->second->last_accessed = std::chrono::steady_clock::now();
+  }
+}
+
+void BackgroundCompressor::unregister_data(uint64_t handle) {
+  std::lock_guard<std::mutex> lock(entries_mutex_);
+  data_entries_.erase(handle);
+}
+
+std::shared_ptr<std::vector<uint8_t>>
+BackgroundCompressor::get_data(uint64_t handle) {
+  std::lock_guard<std::mutex> lock(entries_mutex_);
+  auto it = data_entries_.find(handle);
+  if (it != data_entries_.end()) {
+    return it->second->original_data;
+  }
+  return nullptr;
+}
+
+void BackgroundCompressor::force_compress(uint64_t /*handle*/) {
+  // Stub
+}
+
+void BackgroundCompressor::start() { running_ = true; }
+
+void BackgroundCompressor::stop() { running_ = false; }
+
+BackgroundCompressor::BackgroundStats BackgroundCompressor::get_stats() const {
+  return BackgroundStats{}; // Empty stub
+}
+
+void BackgroundCompressor::background_worker() {
+  // Stub
+}
+
+void BackgroundCompressor::scan_and_compress() {
+  // Stub
+}
+
+void BackgroundCompressor::compress_entry(DataEntry & /*entry*/) {
+  // Stub
+}
+
+// =============================================================================
+// CompressedMemoryStore - Simple stub implementation
+// =============================================================================
+
+CompressedMemoryStore::CompressedMemoryStore(CompressionEngine * /*engine*/) {}
+
+CompressedMemoryStore::~CompressedMemoryStore() = default;
+
+uint64_t CompressedMemoryStore::store(const std::string & /*key*/,
+                                      const std::vector<uint8_t> & /*data*/,
+                                      bool /*force_compression*/) {
+  return 0; // Stub
+}
+
+std::vector<uint8_t> CompressedMemoryStore::retrieve(uint64_t /*handle*/) {
+  return {}; // Empty stub
+}
+
+std::vector<uint8_t>
+CompressedMemoryStore::retrieve(const std::string & /*key*/) {
+  return {}; // Empty stub
+}
+
+bool CompressedMemoryStore::exists(uint64_t /*handle*/) const {
+  return false; // Stub
+}
+
+bool CompressedMemoryStore::exists(const std::string & /*key*/) const {
+  return false; // Stub
+}
+
+void CompressedMemoryStore::remove(uint64_t /*handle*/) {
+  // Stub
+}
+
+void CompressedMemoryStore::remove(const std::string & /*key*/) {
+  // Stub
+}
+
+} // namespace core

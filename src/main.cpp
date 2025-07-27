@@ -20,6 +20,7 @@
 #include "models/model_manager.hpp"
 #include "utils/error_recovery_manager.hpp"
 #include "utils/graceful_degradation_manager.hpp"
+#include "utils/performance_monitor.hpp"
 #include "utils/thread_safe_queue.hpp"
 
 #include <algorithm>
