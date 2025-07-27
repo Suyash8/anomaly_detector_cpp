@@ -1,0 +1,191 @@
+# Anomaly Detector Alert Rules
+# These alerts are designed to monitor critical system health and performance issues
+
+groups:
+  - name: anomaly_detector_critical
+    interval: 30s
+    rules:
+      - alert: AnomalyDetectorDown
+        expr: up{job="anomaly-detector"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Anomaly Detector service is down"
+          description: "The Anomaly Detector service has been down for more than 1 minute on instance {{ $labels.instance }}"
+          runbook_url: "https://docs.company.com/runbooks/anomaly-detector-down"
+
+      - alert: HighCriticalAlertRate
+        expr: sum(rate(anomaly_detector_alerts_generated_total{severity="critical"}[5m])) > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: detection
+        annotations:
+          summary: "High rate of critical alerts detected"
+          description: "Critical alerts are being generated at a rate of {{ $value | humanize }} per second for the last 5 minutes"
+          runbook_url: "https://docs.company.com/runbooks/high-alert-rate"
+
+      - alert: ProcessingLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(anomaly_detector_log_processing_duration_ms_bucket[5m])) by (le)) > 1000
+        for: 5m
+        labels:
+          severity: critical
+          component: performance
+        annotations:
+          summary: "Processing latency is critically high"
+          description: "95th percentile processing latency is {{ $value | humanize }}ms, exceeding the 1000ms threshold"
+          runbook_url: "https://docs.company.com/runbooks/high-latency"
+
+      - alert: MemoryUsageCritical
+        expr: (anomaly_detector_memory_allocated_bytes / anomaly_detector_memory_pool_size_bytes) * 100 > 95
+        for: 3m
+        labels:
+          severity: critical
+          component: memory
+        annotations:
+          summary: "Memory usage critically high"
+          description: "Memory usage is at {{ $value | humanize }}% of allocated pool on instance {{ $labels.instance }}"
+          runbook_url: "https://docs.company.com/runbooks/memory-critical"
+
+  - name: anomaly_detector_warning
+    interval: 60s
+    rules:
+      - alert: ProcessingThroughputLow
+        expr: sum(rate(anomaly_detector_logs_processed_total[5m])) < 100
+        for: 10m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "Log processing throughput is low"
+          description: "Current processing rate is {{ $value | humanize }} logs/sec, below expected threshold of 100 logs/sec"
+          runbook_url: "https://docs.company.com/runbooks/low-throughput"
+
+      - alert: ErrorRateHigh
+        expr: (sum(rate(anomaly_detector_processing_errors_total[5m])) / sum(rate(anomaly_detector_logs_processed_total[5m]))) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: processing
+        annotations:
+          summary: "Processing error rate is high"
+          description: "Error rate is {{ $value | humanize }}%, exceeding the 5% threshold"
+          runbook_url: "https://docs.company.com/runbooks/high-error-rate"
+
+      - alert: QueueDepthHigh
+        expr: anomaly_detector_input_queue_size > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: queuing
+        annotations:
+          summary: "Input queue depth is high"
+          description: "Input queue has {{ $value }} items, indicating potential processing bottleneck"
+          runbook_url: "https://docs.company.com/runbooks/queue-backlog"
+
+      - alert: CPUUsageHigh
+        expr: anomaly_detector_cpu_usage_percent > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "CPU usage is high"
+          description: "CPU usage is {{ $value | humanize }}% on instance {{ $labels.instance }}"
+          runbook_url: "https://docs.company.com/runbooks/high-cpu"
+
+      - alert: AlertDeliveryFailureHigh
+        expr: (sum(rate(anomaly_detector_alerts_delivery_failed_total[5m])) / sum(rate(anomaly_detector_alerts_delivered_total[5m]))) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: alerting
+        annotations:
+          summary: "Alert delivery failure rate is high"
+          description: "Alert delivery failure rate is {{ $value | humanize }}%, exceeding the 10% threshold"
+          runbook_url: "https://docs.company.com/runbooks/alert-delivery-failures"
+
+      - alert: DynamicLearningStagnant
+        expr: rate(anomaly_detector_learning_baseline_updates_total[1h]) < 0.1
+        for: 30m
+        labels:
+          severity: warning
+          component: learning
+        annotations:
+          summary: "Dynamic learning engine appears stagnant"
+          description: "Learning baseline updates are occurring at {{ $value | humanize }} per hour, below expected rate"
+          runbook_url: "https://docs.company.com/runbooks/learning-stagnant"
+
+  - name: anomaly_detector_informational
+    interval: 300s
+    rules:
+      - alert: HighVolumeAttackSource
+        expr: count by (source_ip) (rate(anomaly_detector_alerts_generated_total[1h]) > 1) > 50
+        for: 15m
+        labels:
+          severity: info
+          component: security
+        annotations:
+          summary: "High volume attack source detected"
+          description: "Source IP {{ $labels.source_ip }} has generated more than 50 alerts in the last hour"
+          runbook_url: "https://docs.company.com/runbooks/attack-source-analysis"
+
+      - alert: NewAttackPattern
+        expr: increase(anomaly_detector_learning_threshold_changes_total[1h]) > 10
+        for: 5m
+        labels:
+          severity: info
+          component: learning
+        annotations:
+          summary: "New attack patterns detected"
+          description: "Dynamic learning has adjusted thresholds {{ $value }} times in the last hour, indicating new patterns"
+          runbook_url: "https://docs.company.com/runbooks/new-patterns"
+
+      - alert: ConfigurationReloaded
+        expr: increase(anomaly_detector_config_reloads_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: info
+          component: configuration
+        annotations:
+          summary: "Configuration has been reloaded"
+          description: "Configuration was reloaded {{ $value }} times in the last 5 minutes on instance {{ $labels.instance }}"
+          runbook_url: "https://docs.company.com/runbooks/config-reload"
+
+  - name: anomaly_detector_capacity
+    interval: 300s
+    rules:
+      - alert: CapacityPlanningWarning
+        expr: predict_linear(anomaly_detector_logs_processed_total[1h], 24*3600) > 10000000
+        for: 0s
+        labels:
+          severity: info
+          component: capacity
+        annotations:
+          summary: "High processing volume predicted"
+          description: "Based on current trends, processing volume may reach {{ $value | humanize }} logs in 24 hours"
+          runbook_url: "https://docs.company.com/runbooks/capacity-planning"
+
+      - alert: ThreadPoolUtilizationHigh
+        expr: (anomaly_detector_active_threads / anomaly_detector_thread_pool_size) * 100 > 90
+        for: 15m
+        labels:
+          severity: warning
+          component: threading
+        annotations:
+          summary: "Thread pool utilization is high"
+          description: "Thread pool utilization is {{ $value | humanize }}%, consider increasing pool size"
+          runbook_url: "https://docs.company.com/runbooks/thread-pool-tuning"
+
+      - alert: DiskSpaceWarning
+        expr: anomaly_detector_disk_usage_percent > 85
+        for: 10m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Disk space usage is high"
+          description: "Disk usage is {{ $value | humanize }}% on instance {{ $labels.instance }}"
+          runbook_url: "https://docs.company.com/runbooks/disk-cleanup"

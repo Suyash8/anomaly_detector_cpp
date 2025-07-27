@@ -286,6 +286,248 @@ bool validate_memory_management_config(const MemoryManagementConfig &config,
   return valid;
 }
 
+bool validate_performance_monitoring_config(
+    const PerformanceMonitoringConfig &config,
+    std::vector<std::string> &errors) {
+  bool valid = true;
+
+  if (config.metrics_collection_interval_ms < 100 ||
+      config.metrics_collection_interval_ms > 60000) {
+    errors.push_back("Performance monitoring metrics collection interval must "
+                     "be between 100 and 60000 ms");
+    valid = false;
+  }
+
+  if (config.max_latency_samples_per_component < 100 ||
+      config.max_latency_samples_per_component > 100000) {
+    errors.push_back("Performance monitoring max latency samples per component "
+                     "must be between 100 and 100000");
+    valid = false;
+  }
+
+  if (config.max_cpu_usage_percent < 10.0 ||
+      config.max_cpu_usage_percent > 100.0) {
+    errors.push_back("Performance monitoring max CPU usage percent must be "
+                     "between 10.0 and 100.0");
+    valid = false;
+  }
+
+  if (config.max_memory_usage_bytes < 104857600 ||
+      config.max_memory_usage_bytes > 17179869184) { // 100MB to 16GB
+    errors.push_back("Performance monitoring max memory usage must be between "
+                     "100MB and 16GB");
+    valid = false;
+  }
+
+  if (config.max_queue_depth < 100 || config.max_queue_depth > 1000000) {
+    errors.push_back("Performance monitoring max queue depth must be between "
+                     "100 and 1000000");
+    valid = false;
+  }
+
+  if (config.max_avg_latency_ms < 10 || config.max_avg_latency_ms > 60000) {
+    errors.push_back("Performance monitoring max average latency must be "
+                     "between 10 and 60000 ms");
+    valid = false;
+  }
+
+  if (config.max_error_rate_percent < 0.1 ||
+      config.max_error_rate_percent > 50.0) {
+    errors.push_back("Performance monitoring max error rate percent must be "
+                     "between 0.1 and 50.0");
+    valid = false;
+  }
+
+  if (config.moderate_load_shed_percentage < 1.0 ||
+      config.moderate_load_shed_percentage > 50.0) {
+    errors.push_back("Performance monitoring moderate load shed percentage "
+                     "must be between 1.0 and 50.0");
+    valid = false;
+  }
+
+  if (config.high_load_shed_percentage < 5.0 ||
+      config.high_load_shed_percentage > 75.0) {
+    errors.push_back("Performance monitoring high load shed percentage must be "
+                     "between 5.0 and 75.0");
+    valid = false;
+  }
+
+  if (config.critical_load_shed_percentage < 10.0 ||
+      config.critical_load_shed_percentage > 95.0) {
+    errors.push_back("Performance monitoring critical load shed percentage "
+                     "must be between 10.0 and 95.0");
+    valid = false;
+  }
+
+  if (config.monitoring_loop_interval_seconds < 1 ||
+      config.monitoring_loop_interval_seconds > 300) {
+    errors.push_back("Performance monitoring loop interval must be between 1 "
+                     "and 300 seconds");
+    valid = false;
+  }
+
+  if (config.max_profile_samples_per_function < 100 ||
+      config.max_profile_samples_per_function > 10000) {
+    errors.push_back("Performance monitoring max profile samples per function "
+                     "must be between 100 and 10000");
+    valid = false;
+  }
+
+  if (config.profile_report_interval_seconds < 30 ||
+      config.profile_report_interval_seconds > 3600) {
+    errors.push_back("Performance monitoring profile report interval must be "
+                     "between 30 and 3600 seconds");
+    valid = false;
+  }
+
+  if (config.performance_report_interval_seconds < 10 ||
+      config.performance_report_interval_seconds > 3600) {
+    errors.push_back("Performance monitoring performance report interval must "
+                     "be between 10 and 3600 seconds");
+    valid = false;
+  }
+
+  return valid;
+}
+
+bool validate_error_handling_config(const ErrorHandlingConfig &config,
+                                    std::vector<std::string> &errors) {
+  bool valid = true;
+
+  if (config.circuit_breaker_failure_threshold < 1 ||
+      config.circuit_breaker_failure_threshold > 100) {
+    errors.push_back("Error handling circuit breaker failure threshold must be "
+                     "between 1 and 100");
+    valid = false;
+  }
+
+  if (config.circuit_breaker_timeout_ms < 100 ||
+      config.circuit_breaker_timeout_ms > 300000) {
+    errors.push_back("Error handling circuit breaker timeout must be between "
+                     "100 and 300000 ms");
+    valid = false;
+  }
+
+  if (config.circuit_breaker_recovery_timeout_ms < 1000 ||
+      config.circuit_breaker_recovery_timeout_ms > 600000) {
+    errors.push_back("Error handling circuit breaker recovery timeout must be "
+                     "between 1000 and 600000 ms");
+    valid = false;
+  }
+
+  if (config.max_retry_attempts < 0 || config.max_retry_attempts > 10) {
+    errors.push_back(
+        "Error handling max retry attempts must be between 0 and 10");
+    valid = false;
+  }
+
+  if (config.initial_retry_delay_ms < 1 ||
+      config.initial_retry_delay_ms > 60000) {
+    errors.push_back(
+        "Error handling initial retry delay must be between 1 and 60000 ms");
+    valid = false;
+  }
+
+  if (config.max_retry_delay_ms < 1000 || config.max_retry_delay_ms > 300000) {
+    errors.push_back(
+        "Error handling max retry delay must be between 1000 and 300000 ms");
+    valid = false;
+  }
+
+  if (config.retry_backoff_multiplier < 1.1 ||
+      config.retry_backoff_multiplier > 10.0) {
+    errors.push_back(
+        "Error handling retry backoff multiplier must be between 1.1 and 10.0");
+    valid = false;
+  }
+
+  if (config.cpu_threshold_for_degradation < 50.0 ||
+      config.cpu_threshold_for_degradation > 100.0) {
+    errors.push_back("Error handling CPU threshold for degradation must be "
+                     "between 50.0 and 100.0");
+    valid = false;
+  }
+
+  if (config.memory_threshold_for_degradation_mb < 100 ||
+      config.memory_threshold_for_degradation_mb > 32768) {
+    errors.push_back("Error handling memory threshold for degradation must be "
+                     "between 100 and 32768 MB");
+    valid = false;
+  }
+
+  if (config.queue_depth_threshold_for_degradation < 1000 ||
+      config.queue_depth_threshold_for_degradation > 1000000) {
+    errors.push_back("Error handling queue depth threshold for degradation "
+                     "must be between 1000 and 1000000");
+    valid = false;
+  }
+
+  if (config.error_rate_threshold_for_degradation < 1.0 ||
+      config.error_rate_threshold_for_degradation > 100.0) {
+    errors.push_back("Error handling error rate threshold for degradation must "
+                     "be between 1.0 and 100.0");
+    valid = false;
+  }
+
+  // Validate recovery strategy values
+  std::vector<std::string> valid_strategies = {"RETRY", "CIRCUIT_BREAK",
+                                               "FALLBACK", "FAIL_FAST"};
+  auto validate_strategy = [&](const std::string &strategy,
+                               const std::string &context) {
+    if (std::find(valid_strategies.begin(), valid_strategies.end(), strategy) ==
+        valid_strategies.end()) {
+      errors.push_back("Error handling " + context +
+                       " recovery strategy must be one of: RETRY, "
+                       "CIRCUIT_BREAK, FALLBACK, FAIL_FAST");
+      return false;
+    }
+    return true;
+  };
+
+  if (!validate_strategy(config.default_recovery_strategy, "default"))
+    valid = false;
+  if (!validate_strategy(config.prometheus_recovery_strategy, "prometheus"))
+    valid = false;
+  if (!validate_strategy(config.database_recovery_strategy, "database"))
+    valid = false;
+  if (!validate_strategy(config.file_io_recovery_strategy, "file I/O"))
+    valid = false;
+  if (!validate_strategy(config.network_recovery_strategy, "network"))
+    valid = false;
+
+  if (config.max_errors_per_minute < 1 ||
+      config.max_errors_per_minute > 10000) {
+    errors.push_back(
+        "Error handling max errors per minute must be between 1 and 10000");
+    valid = false;
+  }
+
+  if (config.error_burst_limit < 1 || config.error_burst_limit > 1000) {
+    errors.push_back(
+        "Error handling error burst limit must be between 1 and 1000");
+    valid = false;
+  }
+
+  if (config.recovery_statistics_interval_seconds < 10 ||
+      config.recovery_statistics_interval_seconds > 3600) {
+    errors.push_back("Error handling recovery statistics interval must be "
+                     "between 10 and 3600 seconds");
+    valid = false;
+  }
+
+  // Validate log level
+  std::vector<std::string> valid_log_levels = {"DEBUG", "INFO", "WARN",
+                                               "ERROR"};
+  if (std::find(valid_log_levels.begin(), valid_log_levels.end(),
+                config.recovery_log_level) == valid_log_levels.end()) {
+    errors.push_back("Error handling recovery log level must be one of: DEBUG, "
+                     "INFO, WARN, ERROR");
+    valid = false;
+  }
+
+  return valid;
+}
+
 bool validate_app_config(const AppConfig &config,
                          std::vector<std::string> &errors) {
   bool valid = true;
@@ -304,6 +546,15 @@ bool validate_app_config(const AppConfig &config,
   }
 
   if (!validate_memory_management_config(config.memory_management, errors)) {
+    valid = false;
+  }
+
+  if (!validate_performance_monitoring_config(config.performance_monitoring,
+                                              errors)) {
+    valid = false;
+  }
+
+  if (!validate_error_handling_config(config.error_handling, errors)) {
     valid = false;
   }
 
@@ -817,6 +1068,167 @@ bool parse_config_into(const std::string &filepath, AppConfig &config) {
           config.memory_management.state_object_ttl_seconds =
               Utils::string_to_number<uint32_t>(value).value_or(
                   config.memory_management.state_object_ttl_seconds);
+      } else if (current_section == "PerformanceMonitoring") {
+        if (key == "enabled")
+          config.performance_monitoring.enabled = string_to_bool(value);
+        else if (key == "enable_profiling")
+          config.performance_monitoring.enable_profiling =
+              string_to_bool(value);
+        else if (key == "enable_load_shedding")
+          config.performance_monitoring.enable_load_shedding =
+              string_to_bool(value);
+        else if (key == "metrics_collection_interval_ms")
+          config.performance_monitoring.metrics_collection_interval_ms =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.performance_monitoring.metrics_collection_interval_ms);
+        else if (key == "max_latency_samples_per_component")
+          config.performance_monitoring.max_latency_samples_per_component =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.performance_monitoring
+                      .max_latency_samples_per_component);
+        else if (key == "max_cpu_usage_percent")
+          config.performance_monitoring.max_cpu_usage_percent =
+              Utils::string_to_number<double>(value).value_or(
+                  config.performance_monitoring.max_cpu_usage_percent);
+        else if (key == "max_memory_usage_bytes")
+          config.performance_monitoring.max_memory_usage_bytes =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.performance_monitoring.max_memory_usage_bytes);
+        else if (key == "max_queue_depth")
+          config.performance_monitoring.max_queue_depth =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.performance_monitoring.max_queue_depth);
+        else if (key == "max_avg_latency_ms")
+          config.performance_monitoring.max_avg_latency_ms =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.performance_monitoring.max_avg_latency_ms);
+        else if (key == "max_error_rate_percent")
+          config.performance_monitoring.max_error_rate_percent =
+              Utils::string_to_number<double>(value).value_or(
+                  config.performance_monitoring.max_error_rate_percent);
+        else if (key == "moderate_load_shed_percentage")
+          config.performance_monitoring.moderate_load_shed_percentage =
+              Utils::string_to_number<double>(value).value_or(
+                  config.performance_monitoring.moderate_load_shed_percentage);
+        else if (key == "high_load_shed_percentage")
+          config.performance_monitoring.high_load_shed_percentage =
+              Utils::string_to_number<double>(value).value_or(
+                  config.performance_monitoring.high_load_shed_percentage);
+        else if (key == "critical_load_shed_percentage")
+          config.performance_monitoring.critical_load_shed_percentage =
+              Utils::string_to_number<double>(value).value_or(
+                  config.performance_monitoring.critical_load_shed_percentage);
+        else if (key == "monitoring_loop_interval_seconds")
+          config.performance_monitoring.monitoring_loop_interval_seconds =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.performance_monitoring
+                      .monitoring_loop_interval_seconds);
+        else if (key == "enable_function_profiling")
+          config.performance_monitoring.enable_function_profiling =
+              string_to_bool(value);
+        else if (key == "max_profile_samples_per_function")
+          config.performance_monitoring.max_profile_samples_per_function =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.performance_monitoring
+                      .max_profile_samples_per_function);
+        else if (key == "profile_report_interval_seconds")
+          config.performance_monitoring.profile_report_interval_seconds =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.performance_monitoring
+                      .profile_report_interval_seconds);
+        else if (key == "enable_performance_reports")
+          config.performance_monitoring.enable_performance_reports =
+              string_to_bool(value);
+        else if (key == "performance_report_path")
+          config.performance_monitoring.performance_report_path = value;
+        else if (key == "performance_report_interval_seconds")
+          config.performance_monitoring.performance_report_interval_seconds =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.performance_monitoring
+                      .performance_report_interval_seconds);
+      } else if (current_section == "ErrorHandling") {
+        if (key == "enabled")
+          config.error_handling.enabled = string_to_bool(value);
+        else if (key == "enable_circuit_breaker")
+          config.error_handling.enable_circuit_breaker = string_to_bool(value);
+        else if (key == "circuit_breaker_failure_threshold")
+          config.error_handling.circuit_breaker_failure_threshold =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.circuit_breaker_failure_threshold);
+        else if (key == "circuit_breaker_timeout_ms")
+          config.error_handling.circuit_breaker_timeout_ms =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.circuit_breaker_timeout_ms);
+        else if (key == "circuit_breaker_recovery_timeout_ms")
+          config.error_handling.circuit_breaker_recovery_timeout_ms =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.circuit_breaker_recovery_timeout_ms);
+        else if (key == "enable_error_recovery")
+          config.error_handling.enable_error_recovery = string_to_bool(value);
+        else if (key == "max_retry_attempts")
+          config.error_handling.max_retry_attempts =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.max_retry_attempts);
+        else if (key == "initial_retry_delay_ms")
+          config.error_handling.initial_retry_delay_ms =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.initial_retry_delay_ms);
+        else if (key == "max_retry_delay_ms")
+          config.error_handling.max_retry_delay_ms =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.max_retry_delay_ms);
+        else if (key == "retry_backoff_multiplier")
+          config.error_handling.retry_backoff_multiplier =
+              Utils::string_to_number<double>(value).value_or(
+                  config.error_handling.retry_backoff_multiplier);
+        else if (key == "enable_graceful_degradation")
+          config.error_handling.enable_graceful_degradation =
+              string_to_bool(value);
+        else if (key == "cpu_threshold_for_degradation")
+          config.error_handling.cpu_threshold_for_degradation =
+              Utils::string_to_number<double>(value).value_or(
+                  config.error_handling.cpu_threshold_for_degradation);
+        else if (key == "memory_threshold_for_degradation_mb")
+          config.error_handling.memory_threshold_for_degradation_mb =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.error_handling.memory_threshold_for_degradation_mb);
+        else if (key == "queue_depth_threshold_for_degradation")
+          config.error_handling.queue_depth_threshold_for_degradation =
+              Utils::string_to_number<uint64_t>(value).value_or(
+                  config.error_handling.queue_depth_threshold_for_degradation);
+        else if (key == "error_rate_threshold_for_degradation")
+          config.error_handling.error_rate_threshold_for_degradation =
+              Utils::string_to_number<double>(value).value_or(
+                  config.error_handling.error_rate_threshold_for_degradation);
+        else if (key == "default_recovery_strategy")
+          config.error_handling.default_recovery_strategy = value;
+        else if (key == "prometheus_recovery_strategy")
+          config.error_handling.prometheus_recovery_strategy = value;
+        else if (key == "database_recovery_strategy")
+          config.error_handling.database_recovery_strategy = value;
+        else if (key == "file_io_recovery_strategy")
+          config.error_handling.file_io_recovery_strategy = value;
+        else if (key == "network_recovery_strategy")
+          config.error_handling.network_recovery_strategy = value;
+        else if (key == "enable_error_rate_limiting")
+          config.error_handling.enable_error_rate_limiting =
+              string_to_bool(value);
+        else if (key == "max_errors_per_minute")
+          config.error_handling.max_errors_per_minute =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.max_errors_per_minute);
+        else if (key == "error_burst_limit")
+          config.error_handling.error_burst_limit =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.error_burst_limit);
+        else if (key == "recovery_statistics_interval_seconds")
+          config.error_handling.recovery_statistics_interval_seconds =
+              Utils::string_to_number<uint32_t>(value).value_or(
+                  config.error_handling.recovery_statistics_interval_seconds);
+        else if (key == "log_recovery_attempts")
+          config.error_handling.log_recovery_attempts = string_to_bool(value);
+        else if (key == "recovery_log_level")
+          config.error_handling.recovery_log_level = value;
       }
     } catch (const std::invalid_argument &e) {
       std::cerr << "Warning (Config Line " << line_num

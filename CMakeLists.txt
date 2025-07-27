@@ -36,6 +36,10 @@ file(GLOB_RECURSE CORE_SOURCES
     "src/learning/*.cpp"
 )
 
+# --- Exclude problematic files for now ---
+# Remove config_migration.cpp until compilation issues are resolved
+list(REMOVE_ITEM CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/core/config_migration.cpp")
+
 # --- Define the Core Logic Library ---
 # This creates a static library named 'ad_core' containing all our application logic.
 add_library(ad_core STATIC ${CORE_SOURCES})
@@ -132,6 +136,9 @@ add_dependencies(anomaly_detector ui_build_target)
 # which is not part of the main application logic. It can be built with
 # `cmake --build build --target log_generator`.
 add_executable(log_generator log_generator.cpp)
+
+# Create the configuration migration tool
+add_executable(config_migrator src/tools/config_migrator.cpp)
 
 
 # ==============================================================================
