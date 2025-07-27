@@ -88,6 +88,8 @@ public:
   // Prometheus metrics integration
   void set_metrics_exporter(
       std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
+  void set_metrics_exporter_only(
+      std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
   void export_analysis_metrics(const AnalyzedEvent &event);
   void export_state_metrics();
   void set_tier4_anomaly_detector(

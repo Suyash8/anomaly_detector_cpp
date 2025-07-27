@@ -27,6 +27,8 @@ public:
   void reconfigure(const Config::AppConfig &new_config);
   void set_metrics_exporter(
       std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
+  void set_metrics_exporter_only(
+      std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter);
   void set_tier4_anomaly_detector(
       std::shared_ptr<analysis::PrometheusAnomalyDetector> detector);
 

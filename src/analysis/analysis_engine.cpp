@@ -1609,47 +1609,6 @@ void AnalysisEngine::set_metrics_exporter(
     metrics_exporter_->register_gauge("ad_analysis_session_states_total",
                                       "Total number of session states");
 
-    // Register window element metrics
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_req_window_elements_total",
-        "Total number of elements in IP request windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_failed_login_window_elements_total",
-        "Total number of elements in IP failed login windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_html_req_window_elements_total",
-        "Total number of elements in IP HTML request windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_asset_req_window_elements_total",
-        "Total number of elements in IP asset request windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_ua_window_elements_total",
-        "Total number of elements in IP user agent windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_paths_seen_elements_total",
-        "Total number of paths seen by all IPs");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_historical_ua_elements_total",
-        "Total number of historical user agents for all IPs");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_session_req_window_elements_total",
-        "Total number of elements in session request windows");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_session_unique_paths_total",
-        "Total number of unique paths across all sessions");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_session_unique_user_agents_total",
-        "Total number of unique user agents across all sessions");
-
     // Register memory metrics
     metrics_exporter_->register_gauge("ad_analysis_ip_state_memory_bytes",
                                       "Memory usage in bytes for an IP state",
@@ -1702,32 +1661,6 @@ void AnalysisEngine::set_metrics_exporter(
     metrics_exporter_->register_gauge("ad_analysis_ip_error_percentage",
                                       "Error percentage for an IP", {"ip"});
   }
-
-  if (!metrics_exporter_) {
-    return;
-  }
-
-  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
-      "Registering metrics for AnalysisEngine");
-
-  // Register counters
-  metrics_exporter_->register_counter(
-      "ad_analysis_logs_processed_total",
-      "Total number of logs processed by the analysis engine",
-      {"ip", "path", "status_code"});
-
-  // Register gauges for state counts
-  metrics_exporter_->register_gauge(
-      "ad_analysis_ip_states_total",
-      "Total number of IP state objects in memory");
-
-  metrics_exporter_->register_gauge(
-      "ad_analysis_path_states_total",
-      "Total number of path state objects in memory");
-
-  metrics_exporter_->register_gauge(
-      "ad_analysis_session_states_total",
-      "Total number of session state objects in memory");
 
   // Register gauges for window element counts
   metrics_exporter_->register_gauge(
@@ -1884,74 +1817,13 @@ void AnalysisEngine::set_metrics_exporter(
 
   LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
       "Metrics registration complete");
+}
 
-  if (metrics_exporter_) {
-    // Register all the metrics we'll be using
-
-    // Processing metrics
-    metrics_exporter_->register_histogram(
-        "ad_analysis_processing_duration_seconds",
-        "Time spent processing each log entry in the analysis engine",
-        {0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
-        {"component"});
-
-    metrics_exporter_->register_counter(
-        "ad_analysis_logs_processed_total",
-        "Total number of log entries processed by the analysis engine",
-        {"ip", "path", "status_code"});
-
-    // State object count metrics
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_states_total",
-        "Current number of IP state objects in memory");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_path_states_total",
-        "Current number of path state objects in memory");
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_session_states_total",
-        "Current number of session state objects in memory");
-
-    // Memory usage metrics
-    metrics_exporter_->register_gauge("ad_analysis_memory_usage_bytes",
-                                      "Memory usage by component",
-                                      {"component", "type"});
-
-    // Per-IP metrics with labels
-    metrics_exporter_->register_gauge("ad_analysis_ip_request_rate",
-                                      "Current request rate for IP addresses",
-                                      {"ip"});
-
-    metrics_exporter_->register_gauge("ad_analysis_ip_error_rate",
-                                      "Current error rate for IP addresses",
-                                      {"ip"});
-
-    metrics_exporter_->register_gauge(
-        "ad_analysis_ip_failed_login_rate",
-        "Current failed login rate for IP addresses", {"ip"});
-
-    // Per-path metrics with labels
-    metrics_exporter_->register_gauge("ad_analysis_path_request_rate",
-                                      "Current request rate for paths",
-                                      {"path"});
-
-    metrics_exporter_->register_gauge("ad_analysis_path_error_rate",
-                                      "Current error rate for paths", {"path"});
-
-    // Sliding window element counts
-    metrics_exporter_->register_gauge("ad_analysis_sliding_window_elements",
-                                      "Number of elements in sliding windows",
-                                      {"window_type", "entity_type"});
-
-    // Anomaly detection metrics
-    metrics_exporter_->register_counter("ad_analysis_anomalies_detected_total",
-                                        "Total number of anomalies detected",
-                                        {"anomaly_type", "ip", "path"});
-
-    LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
-        "Prometheus metrics registered for AnalysisEngine");
-  }
+void AnalysisEngine::set_metrics_exporter_only(
+    std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter) {
+  metrics_exporter_ = exporter;
+  LOG(LogLevel::INFO, LogComponent::ANALYSIS_LIFECYCLE,
+      "Metrics exporter set without registering metrics for AnalysisEngine");
 }
 
 // =============================================================================

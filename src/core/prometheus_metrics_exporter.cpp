@@ -29,8 +29,8 @@ void PrometheusMetricsExporter::register_counter(
   std::unique_lock<std::shared_mutex> lock(metrics_mutex_);
 
   if (counters_.find(name) != counters_.end()) {
-    throw std::invalid_argument("Counter with name '" + name +
-                                "' already exists");
+    // Metric already exists, skip registration silently
+    return;
   }
 
   auto counter = std::make_unique<CounterMetric>();
@@ -50,8 +50,8 @@ void PrometheusMetricsExporter::register_gauge(
   std::unique_lock<std::shared_mutex> lock(metrics_mutex_);
 
   if (gauges_.find(name) != gauges_.end()) {
-    throw std::invalid_argument("Gauge with name '" + name +
-                                "' already exists");
+    // Metric already exists, skip registration silently
+    return;
   }
 
   auto gauge = std::make_unique<GaugeMetric>();
@@ -72,8 +72,8 @@ void PrometheusMetricsExporter::register_histogram(
   std::unique_lock<std::shared_mutex> lock(metrics_mutex_);
 
   if (histograms_.find(name) != histograms_.end()) {
-    throw std::invalid_argument("Histogram with name '" + name +
-                                "' already exists");
+    // Metric already exists, skip registration silently
+    return;
   }
 
   auto histogram = std::make_unique<HistogramMetric>();

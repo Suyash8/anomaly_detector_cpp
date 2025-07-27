@@ -865,6 +865,11 @@ void RuleEngine::set_metrics_exporter(
   }
 }
 
+void RuleEngine::set_metrics_exporter_only(
+    std::shared_ptr<prometheus::PrometheusMetricsExporter> exporter) {
+  metrics_exporter_ = exporter;
+}
+
 void RuleEngine::register_rule_engine_metrics() {
   if (!metrics_exporter_)
     return;
