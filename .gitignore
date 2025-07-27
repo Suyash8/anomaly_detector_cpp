@@ -49,3 +49,4 @@ alerts_output.json
 config.ini
 .kiro/
 .agent-os/
+MILESTONE_*.md
